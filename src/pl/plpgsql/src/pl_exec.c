@@ -4714,7 +4714,7 @@ exec_assign_value(PLpgSQL_execstate *estate,
 
 				/*
 				 * Evaluate the subscripts, switch into left-to-right order.
-				 * Like the expression built by ExecInitArrayRef(), complain
+				 * Like the expression built by ExecInitSubscriptingRef(), complain
 				 * if any subscript is null.
 				 */
 				for (i = 0; i < nsubscripts; i++)
@@ -6471,9 +6471,9 @@ exec_simple_check_node(Node *node)
 		case T_Param:
 			return TRUE;
 
-		case T_ArrayRef:
+		case T_SubscriptingRef:
 			{
-				ArrayRef   *expr = (ArrayRef *) node;
+				SubscriptingRef   *expr = (SubscriptingRef *) node;
 
 				if (!exec_simple_check_node((Node *) expr->refupperindexpr))
 					return FALSE;
