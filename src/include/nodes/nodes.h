@@ -558,10 +558,6 @@ extern PGDLLIMPORT Node *newNodeMacroHolder;
 #define NodeSetTag(nodeptr,t)	(((Node*)(nodeptr))->type = (t))
 
 #define IsA(nodeptr,_type_)		(nodeTag(nodeptr) == T_##_type_)
-#define IsOneOf(nodeptr,_type_a_,_type_b_)									\
-(																			\
-	nodeTag(nodeptr) == T_##_type_a_ || nodeTag(nodeptr) == T_##_type_b_	\
-)																			\
 
 /*
  * castNode(type, ptr) casts ptr to "type *", and if assertions are enabled,
