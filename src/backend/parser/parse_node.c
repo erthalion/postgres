@@ -370,7 +370,7 @@ transformContainerSubscripts(ParseState *pstate,
 				subexpr = NULL;
 			}
 			lowerIndexpr = lappend(lowerIndexpr, subexpr);
-			indexprSlice = lappend(indexprSlice, ai->is_slice);
+			indexprSlice = lappend(indexprSlice, ai);
 		}
 		subexpr = transformExpr(pstate, ai->uidx, pstate->p_expr_kind);
 		upperIndexpr = lappend(upperIndexpr, subexpr);
