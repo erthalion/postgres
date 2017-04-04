@@ -876,7 +876,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	analyzeProcedure = baseType->typanalyze;
 
 	/* Subscripting function */
-	subscriptingProcedure = baseType->typsbsparse;
+	subscriptingProcedure = baseType->typsubsparse;
 
 	/* Inherited default value */
 	datum = SysCacheGetAttr(TYPEOID, typeTup,
@@ -1193,7 +1193,7 @@ DefineEnum(CreateEnumStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* type's collation */
-				   InvalidOid);	/* typsbsparse - none */
+				   InvalidOid);	/* typsubsparse - none */
 
 	/* Enter the enum's values into pg_enum */
 	EnumValuesCreate(enumTypeAddr.objectId, stmt->vals);
@@ -1523,7 +1523,7 @@ DefineRange(CreateRangeStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* type's collation (ranges never have one) */
-				   InvalidOid);	/* typsbsparse - none */
+				   InvalidOid);	/* typsubsparse - none */
 	Assert(typoid == address.objectId);
 
 	/* Create the entry in pg_range */
@@ -2290,7 +2290,7 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 							 false,		/* a domain isn't an implicit array */
 							 typTup->typbasetype,
 							 typTup->typcollation,
-							 typTup->typsbsparse,
+							 typTup->typsubsparse,
 							 defaultExpr,
 							 true);		/* Rebuild is true */
 

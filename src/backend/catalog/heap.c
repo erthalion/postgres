@@ -979,7 +979,7 @@ AddNewRelationType(const char *typeName,
 				   0,			/* array dimensions for typBaseType */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* rowtypes never have a collation */
-				   InvalidOid);	/* typsbsparse - none */
+				   InvalidOid);	/* typsubsparse - none */
 }
 
 /* --------------------------------

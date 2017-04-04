@@ -276,7 +276,7 @@ transformArrayType(Oid *containerType, int32 *containerTypmod)
  *
  * For both cases, this function contains only general subscripting logic while
  * type-specific logic (e.g. type verifications and coersion) is placend in
- * separate procedure indicated by typsbsparse. There is only one exception
+ * separate procedure indicated by typsubsparse. There is only one exception
  * for now about domain-over-container, if the source container is of a
  * domain-over-container type, the result is of the base container type or its
  * element type; essentially, we must fold a domain to its base type before
@@ -312,9 +312,9 @@ transformContainerSubscripts(ParseState *pstate,
 	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
-	RegProcedure		typsbsparse = get_typsbsparse(containerType);
+	RegProcedure		typsubsparse = get_typsubsparse(containerType);
 
-	if (!OidIsValid(typsbsparse))
+	if (!OidIsValid(typsubsparse))
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("cannot subscript type %s because it does not support subscripting",
@@ -392,7 +392,7 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	return (Node *) OidFunctionCall3(typsbsparse,
+	return (Node *) OidFunctionCall3(typsubsparse,
 									 BoolGetDatum(assignFrom != NULL),
 									 PointerGetDatum(sbsref),
 									 PointerGetDatum(pstate));

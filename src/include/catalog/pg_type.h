@@ -200,10 +200,10 @@ CATALOG(pg_type,1247) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71) BKI_SCHEMA_MACRO
 	Oid			typcollation;
 
 	/*
-	 * Type specific subscripting logic. If typsbsparse is none, it means
+	 * Type specific subscripting logic. If typsubsparse is none, it means
 	 * that this type doesn't support subscripting.
 	 */
-	regproc		typsbsparse;
+	regproc		typsubsparse;
 
 #ifdef CATALOG_VARLEN			/* variable-length fields start here */
 
@@ -270,7 +270,7 @@ typedef FormData_pg_type *Form_pg_type;
 #define Anum_pg_type_typtypmod			25
 #define Anum_pg_type_typndims			26
 #define Anum_pg_type_typcollation		27
-#define Anum_pg_type_typsbsparse		28
+#define Anum_pg_type_typsubsparse		28
 #define Anum_pg_type_typdefaultbin		29
 #define Anum_pg_type_typdefault			30
 #define Anum_pg_type_typacl				31
