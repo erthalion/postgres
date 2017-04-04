@@ -309,6 +309,7 @@ transformContainerSubscripts(ParseState *pstate,
 	bool				isSlice = false;
 	List			   *upperIndexpr = NIL;
 	List			   *lowerIndexpr = NIL;
+	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
 	RegProcedure		typsbsparse = get_typsbsparse(containerType);
@@ -368,7 +369,8 @@ transformContainerSubscripts(ParseState *pstate,
 				/* Slice with omitted lower bound, put NULL into the list */
 				subexpr = NULL;
 			}
-			lowerIndexpr = lappend(lowerIndexpr, list_make2(subexpr, ai));
+			lowerIndexpr = lappend(lowerIndexpr, subexpr);
+			indexprSlice = lappend(indexprSlice, ai->is_slice);
 		}
 		subexpr = transformExpr(pstate, ai->uidx, pstate->p_expr_kind);
 		upperIndexpr = lappend(upperIndexpr, subexpr);
@@ -387,6 +389,7 @@ transformContainerSubscripts(ParseState *pstate,
 	/* refcollid will be set by parse_collate.c */
 	sbsref->refupperindexpr = upperIndexpr;
 	sbsref->reflowerindexpr = lowerIndexpr;
+	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
 	return (Node *) OidFunctionCall3(typsbsparse,

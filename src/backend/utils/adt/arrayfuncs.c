@@ -6650,16 +6650,17 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 	Node				*new_from;
 	Oid					element_type_id;
 	Node				*subexpr;
+	bool				index_slice;
 	List				*upperIndexpr = NIL;
 	List				*lowerIndexpr = NIL;
-	ListCell			*l;
+	ListCell			*u, *l, *s;
 
 	element_type_id = transformArrayType(&array_type, &array_typ_mode);
 	sbsref->refelemtype = element_type_id;
 
-	foreach(l, sbsref->refupperindexpr)
+	foreach(u, sbsref->refupperindexpr)
 	{
-		subexpr = (Node *) lfirst(l);
+		subexpr = (Node *) lfirst(u);
 
 		if (subexpr == NULL)
 		{
@@ -6684,13 +6685,12 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 
 	sbsref->refupperindexpr = upperIndexpr;
 
-	foreach(l, sbsref->reflowerindexpr)
+	forboth(l, sbsref->reflowerindexpr, s, sbsref->refindexprslice)
 	{
-		List *expr_ai = (List *) lfirst(l);
-		A_Indices *ai = (A_Indices *) lfirst(list_tail(expr_ai));
+		subexpr = (Node *) lfirst(l);
+		index_slice = (bool) lfirst(s);
 
-		subexpr = (Node *) lfirst(list_head(expr_ai));
-		if (subexpr == NULL && !ai->is_slice)
+		if (subexpr == NULL && !index_slice)
 		{
 			/* Make a constant 1 */
 			subexpr = (Node *) makeConst(INT4OID,

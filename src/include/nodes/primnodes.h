@@ -407,6 +407,8 @@ typedef struct SubscriptingRef
 									 * indexes */
 	List	   *reflowerindexpr;	/* expressions that evaluate to lower container
 									 * indexes, or NIL for single container element */
+	List	   *refindexprslice;	/* whether or not related indexpr from
+									 * reflowerindexpr is a slice */
 	Expr	   *refexpr;			/* the expression that evaluates to a container
 									 * value */
 
