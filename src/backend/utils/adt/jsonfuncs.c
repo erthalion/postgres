@@ -4894,8 +4894,6 @@ jsonb_subscript_parse(PG_FUNCTION_ARGS)
 	{
 		Node *subexpr = (Node *) lfirst(l);
 
-		Assert(subexpr != NULL);
-
 		if (subexpr == NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
