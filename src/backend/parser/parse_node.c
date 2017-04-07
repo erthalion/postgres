@@ -320,14 +320,7 @@ transformContainerSubscripts(ParseState *pstate,
 				 errmsg("cannot subscript type %s because it does not support subscripting",
 						format_type_be(containerType))));
 
-	/*
-	 * Caller may or may not have bothered to determine elementType.  Note
-	 * that if the caller did do so, containerType/containerTypMod must be as modified
-	 * by transformArrayType, ie, smash domain to base type.
-	 */
-	if (!OidIsValid(elementType))
-		elementType = transformArrayType(&containerType, &containerTypMod);
-
+	/* Caller may or may not have bothered to determine elementType. */
 	if (!OidIsValid(elementType))
 		elementType = containerType;
 

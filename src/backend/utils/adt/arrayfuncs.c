@@ -94,7 +94,6 @@ typedef struct ArrayIteratorData
 
 static bool array_isspace(char ch);
 static int	ArrayCount(const char *str, int *dim, char typdelim);
-bool isAssignmentIndirectionExpr(ExprState *exprstate);
 static void ReadArrayStr(char *arrayStr, const char *origStr,
 			 int nitems, int ndim, int *dim,
 			 FmgrInfo *inputproc, Oid typioparam, int32 typmod,
@@ -6654,6 +6653,11 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 	List				*lowerIndexpr = NIL;
 	ListCell			*u, *l, *s;
 
+	/*
+	 * Caller may or may not have bothered to determine elementType.  Note
+	 * that if the caller did do so, containerType/containerTypMod must be as modified
+	 * by transformArrayType, ie, smash domain to base type.
+	 */
 	element_type_id = transformArrayType(&array_type, &array_typ_mode);
 	sbsref->refelemtype = element_type_id;
 
@@ -6706,7 +6710,6 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 			lowerIndexpr = lappend(lowerIndexpr, subexpr);
 			continue;
 		}
-
 
 		subexpr = coerce_to_target_type(pstate,
 										subexpr, exprType(subexpr),
