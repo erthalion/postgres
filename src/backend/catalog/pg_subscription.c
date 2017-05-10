@@ -82,8 +82,10 @@ GetSubscription(Oid subid, bool missing_ok)
 							tup,
 							Anum_pg_subscription_subslotname,
 							&isnull);
-	Assert(!isnull);
-	sub->slotname = pstrdup(NameStr(*DatumGetName(datum)));
+	if (!isnull)
+		sub->slotname = pstrdup(NameStr(*DatumGetName(datum)));
+	else
+		sub->slotname = NULL;
 
 	/* Get synccommit */
 	datum = SysCacheGetAttr(SUBSCRIPTIONOID,
@@ -147,7 +149,8 @@ FreeSubscription(Subscription *sub)
 {
 	pfree(sub->name);
 	pfree(sub->conninfo);
-	pfree(sub->slotname);
+	if (sub->slotname)
+		pfree(sub->slotname);
 	list_free_deep(sub->publications);
 	pfree(sub);
 }
@@ -403,7 +406,7 @@ RemoveSubscriptionRel(Oid subid, Oid relid)
 /*
  * Get all relations for subscription.
  *
- * Returned list is palloced in current memory context.
+ * Returned list is palloc'ed in current memory context.
  */
 List *
 GetSubscriptionRelations(Oid subid)
@@ -450,7 +453,7 @@ GetSubscriptionRelations(Oid subid)
 /*
  * Get all relations for subscription that are not in a ready state.
  *
- * Returned list is palloced in current memory context.
+ * Returned list is palloc'ed in current memory context.
  */
 List *
 GetSubscriptionNotReadyRelations(Oid subid)

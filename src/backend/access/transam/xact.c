@@ -559,7 +559,7 @@ AssignTransactionId(TransactionState s)
 		XactTopTransactionId = s->transactionId;
 
 	if (isSubXact)
-		SubTransSetParent(s->transactionId, s->parent->transactionId, false);
+		SubTransSetParent(s->transactionId, s->parent->transactionId);
 
 	/*
 	 * If it's a top-level transaction, the predicate locking system needs to
@@ -2138,7 +2138,7 @@ CommitTransaction(void)
 	AtEOXact_HashTables(true);
 	AtEOXact_PgStat(true);
 	AtEOXact_Snapshot(true, false);
-	AtCommit_ApplyLauncher();
+	AtEOXact_ApplyLauncher(true);
 	pgstat_report_xact_timestamp(0);
 
 	CurrentResourceOwner = NULL;
@@ -2612,6 +2612,7 @@ AbortTransaction(void)
 		AtEOXact_ComboCid();
 		AtEOXact_HashTables(false);
 		AtEOXact_PgStat(false);
+		AtEOXact_ApplyLauncher(false);
 		pgstat_report_xact_timestamp(0);
 	}
 

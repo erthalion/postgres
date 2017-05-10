@@ -101,8 +101,8 @@ typedef struct SlotErrCallbackArg
 	int			attnum;
 } SlotErrCallbackArg;
 
-static MemoryContext	ApplyContext = NULL;
-MemoryContext			ApplyCacheContext = NULL;
+static MemoryContext	ApplyMessageContext = NULL;
+MemoryContext			ApplyContext = NULL;
 
 WalReceiverConn	   *wrconn = NULL;
 
@@ -145,15 +145,16 @@ should_apply_changes_for_rel(LogicalRepRelMapEntry *rel)
 /*
  * Make sure that we started local transaction.
  *
- * Also switches to ApplyContext as necessary.
+ * Also switches to ApplyMessageContext as necessary.
  */
 static bool
 ensure_transaction(void)
 {
 	if (IsTransactionState())
 	{
-		if (CurrentMemoryContext != ApplyContext)
-			MemoryContextSwitchTo(ApplyContext);
+		if (CurrentMemoryContext != ApplyMessageContext)
+			MemoryContextSwitchTo(ApplyMessageContext);
+
 		return false;
 	}
 
@@ -162,7 +163,7 @@ ensure_transaction(void)
 	if (!MySubscriptionValid)
 		reread_subscription();
 
-	MemoryContextSwitchTo(ApplyContext);
+	MemoryContextSwitchTo(ApplyMessageContext);
 	return true;
 }
 
@@ -351,7 +352,7 @@ slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 }
 
 /*
- * Modify slot with user data provided as C strigs.
+ * Modify slot with user data provided as C strings.
  * This is somewhat similar to heap_modify_tuple but also calls the type
  * input function on the user data as the input is the text representation
  * of the types.
@@ -453,6 +454,7 @@ apply_handle_commit(StringInfo s)
 		replorigin_session_origin_timestamp = commit_data.committime;
 
 		CommitTransactionCommand();
+		pgstat_report_stat(false);
 
 		store_flush_position(commit_data.end_lsn);
 	}
@@ -462,7 +464,6 @@ apply_handle_commit(StringInfo s)
 	/* Process any tables that are being synchronized in parallel. */
 	process_syncing_tables(commit_data.end_lsn);
 
-	pgstat_report_stat(false);
 	pgstat_report_activity(STATE_IDLE, NULL);
 }
 
@@ -961,7 +962,7 @@ store_flush_position(XLogRecPtr remote_lsn)
 	FlushPosition *flushpos;
 
 	/* Need to do this in permanent context */
-	MemoryContextSwitchTo(ApplyCacheContext);
+	MemoryContextSwitchTo(ApplyContext);
 
 	/* Track commit lsn  */
 	flushpos = (FlushPosition *) palloc(sizeof(FlushPosition));
@@ -969,7 +970,7 @@ store_flush_position(XLogRecPtr remote_lsn)
 	flushpos->remote_end = remote_lsn;
 
 	dlist_push_tail(&lsn_mapping, &flushpos->node);
-	MemoryContextSwitchTo(ApplyContext);
+	MemoryContextSwitchTo(ApplyMessageContext);
 }
 
 
@@ -993,12 +994,13 @@ UpdateWorkerStats(XLogRecPtr last_lsn, TimestampTz send_time, bool reply)
 static void
 LogicalRepApplyLoop(XLogRecPtr last_received)
 {
-	/* Init the ApplyContext which we use for easier cleanup. */
-	ApplyContext = AllocSetContextCreate(TopMemoryContext,
-										 "ApplyContext",
-										 ALLOCSET_DEFAULT_MINSIZE,
-										 ALLOCSET_DEFAULT_INITSIZE,
-										 ALLOCSET_DEFAULT_MAXSIZE);
+	/*
+	 * Init the ApplyMessageContext which we clean up after each
+	 * replication protocol message.
+	 */
+	ApplyMessageContext = AllocSetContextCreate(ApplyContext,
+										 "ApplyMessageContext",
+										 ALLOCSET_DEFAULT_SIZES);
 
 	/* mark as idle, before starting to loop */
 	pgstat_report_activity(STATE_IDLE, NULL);
@@ -1013,7 +1015,7 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		TimestampTz last_recv_timestamp = GetCurrentTimestamp();
 		bool		ping_sent = false;
 
-		MemoryContextSwitchTo(ApplyContext);
+		MemoryContextSwitchTo(ApplyMessageContext);
 
 		len = walrcv_receive(wrconn, &buf, &fd);
 
@@ -1045,7 +1047,7 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 					ping_sent = false;
 
 					/* Ensure we are reading the data into our memory context. */
-					MemoryContextSwitchTo(ApplyContext);
+					MemoryContextSwitchTo(ApplyMessageContext);
 
 					s.data = buf;
 					s.len = len;
@@ -1091,6 +1093,8 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 						UpdateWorkerStats(last_received, timestamp, true);
 					}
 					/* other message types are purposefully ignored */
+
+					MemoryContextReset(ApplyMessageContext);
 				}
 
 				len = walrcv_receive(wrconn, &buf, &fd);
@@ -1115,7 +1119,7 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		}
 
 		/* Cleanup the memory. */
-		MemoryContextResetAndDeleteChildren(ApplyContext);
+		MemoryContextResetAndDeleteChildren(ApplyMessageContext);
 		MemoryContextSwitchTo(TopMemoryContext);
 
 		/* Check if we need to exit the streaming loop. */
@@ -1258,7 +1262,7 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 
 	if (!reply_message)
 	{
-		MemoryContext	oldctx = MemoryContextSwitchTo(ApplyCacheContext);
+		MemoryContext	oldctx = MemoryContextSwitchTo(ApplyContext);
 		reply_message = makeStringInfo();
 		MemoryContextSwitchTo(oldctx);
 	}
@@ -1308,7 +1312,7 @@ reread_subscription(void)
 	}
 
 	/* Ensure allocations in permanent context. */
-	oldctx = MemoryContextSwitchTo(ApplyCacheContext);
+	oldctx = MemoryContextSwitchTo(ApplyContext);
 
 	newsub = GetSubscription(MyLogicalRepWorker->subid, true);
 
@@ -1322,6 +1326,22 @@ reread_subscription(void)
 		ereport(LOG,
 				(errmsg("logical replication worker for subscription \"%s\" will "
 						"stop because the subscription was removed",
+						MySubscription->name)));
+
+		walrcv_disconnect(wrconn);
+		proc_exit(0);
+	}
+
+	/*
+	 * Exit if the subscription was disabled.
+	 * This normally should not happen as the worker gets killed
+	 * during ALTER SUBSCRIPTION ... DISABLE.
+	 */
+	if (!newsub->enabled)
+	{
+		ereport(LOG,
+				(errmsg("logical replication worker for subscription \"%s\" will "
+						"stop because the subscription was disabled",
 						MySubscription->name)));
 
 		walrcv_disconnect(wrconn);
@@ -1358,6 +1378,9 @@ reread_subscription(void)
 		proc_exit(0);
 	}
 
+	/* !slotname should never happen when enabled is true. */
+	Assert(newsub->slotname);
+
 	/*
 	 * We need to make new connection to new slot if slot name has changed
 	 * so exit here as well if that's the case.
@@ -1382,22 +1405,6 @@ reread_subscription(void)
 		ereport(LOG,
 				(errmsg("logical replication worker for subscription \"%s\" will "
 						"restart because subscription's publications were changed",
-						MySubscription->name)));
-
-		walrcv_disconnect(wrconn);
-		proc_exit(0);
-	}
-
-	/*
-	 * Exit if the subscription was disabled.
-	 * This normally should not happen as the worker gets killed
-	 * during ALTER SUBSCRIPTION ... DISABLE.
-	 */
-	if (!newsub->enabled)
-	{
-		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
-						"stop because the subscription was disabled",
 						MySubscription->name)));
 
 		walrcv_disconnect(wrconn);
@@ -1480,12 +1487,11 @@ ApplyWorkerMain(Datum main_arg)
 											  MyLogicalRepWorker->userid);
 
 	/* Load the subscription into persistent memory context. */
-	CreateCacheMemoryContext();
-	ApplyCacheContext = AllocSetContextCreate(CacheMemoryContext,
-											  "ApplyCacheContext",
+	ApplyContext = AllocSetContextCreate(TopMemoryContext,
+											  "ApplyContext",
 											  ALLOCSET_DEFAULT_SIZES);
 	StartTransactionCommand();
-	oldctx = MemoryContextSwitchTo(ApplyCacheContext);
+	oldctx = MemoryContextSwitchTo(ApplyContext);
 	MySubscription = GetSubscription(MyLogicalRepWorker->subid, false);
 	MySubscriptionValid = true;
 	MemoryContextSwitchTo(oldctx);
@@ -1530,7 +1536,7 @@ ApplyWorkerMain(Datum main_arg)
 		syncslotname = LogicalRepSyncTableStart(&origin_startpos);
 
 		/* The slot name needs to be allocated in permanent memory context. */
-		oldctx = MemoryContextSwitchTo(ApplyCacheContext);
+		oldctx = MemoryContextSwitchTo(ApplyContext);
 		myslotname = pstrdup(syncslotname);
 		MemoryContextSwitchTo(oldctx);
 

@@ -978,9 +978,18 @@ connectOptions2(PGconn *conn)
 
 		for (i = 0; i < conn->nconnhost; i++)
 		{
-			/* Try to get a password for this host from pgpassfile */
+			/*
+			 * Try to get a password for this host from pgpassfile. We use host
+			 * name rather than host address in the same manner to PQhost().
+			 */
+			char *pwhost = conn->connhost[i].host;
+
+			if (conn->connhost[i].type == CHT_HOST_ADDRESS &&
+				conn->pghost != NULL && conn->pghost[0] != '\0')
+				pwhost = conn->pghost;
+
 			conn->connhost[i].password =
-				passwordFromFile(conn->connhost[i].host,
+				passwordFromFile(pwhost,
 								 conn->connhost[i].port,
 								 conn->dbName,
 								 conn->pguser,
@@ -5063,6 +5072,30 @@ conninfo_add_defaults(PQconninfoOption *options, PQExpBuffer errorMessage)
 			if ((tmp = getenv(option->envvar)) != NULL)
 			{
 				option->val = strdup(tmp);
+				if (!option->val)
+				{
+					if (errorMessage)
+						printfPQExpBuffer(errorMessage,
+										  libpq_gettext("out of memory\n"));
+					return false;
+				}
+				continue;
+			}
+		}
+
+		/*
+		 * Interpret the deprecated PGREQUIRESSL environment variable.  Per
+		 * tradition, translate values starting with "1" to sslmode=require,
+		 * and ignore other values.  Given both PGREQUIRESSL=1 and PGSSLMODE,
+		 * PGSSLMODE takes precedence; the opposite was true before v9.3.
+		 */
+		if (strcmp(option->keyword, "sslmode") == 0)
+		{
+			const char *requiresslenv = getenv("PGREQUIRESSL");
+
+			if (requiresslenv != NULL && requiresslenv[0] == '1')
+			{
+				option->val = strdup("require");
 				if (!option->val)
 				{
 					if (errorMessage)

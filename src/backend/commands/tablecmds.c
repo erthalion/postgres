@@ -1259,7 +1259,8 @@ ExecuteTruncate(TruncateStmt *stmt)
 		else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					 errmsg("must truncate child tables too")));
+					 errmsg("cannot truncate only a partitioned table"),
+					 errhint("Do not specify the ONLY keyword, or use truncate only on the partitions directly.")));
 	}
 
 	/*
@@ -1918,6 +1919,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				def->is_local = false;
 				def->is_not_null = attribute->attnotnull;
 				def->is_from_type = false;
+				def->is_from_parent = true;
 				def->storage = attribute->attstorage;
 				def->raw_default = NULL;
 				def->cooked_default = NULL;
@@ -2205,11 +2207,20 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					 * merge the column options into the column from the
 					 * parent
 					 */
-					coldef->is_not_null = restdef->is_not_null;
-					coldef->raw_default = restdef->raw_default;
-					coldef->cooked_default = restdef->cooked_default;
-					coldef->constraints = restdef->constraints;
-					list_delete_cell(schema, rest, prev);
+					if (coldef->is_from_parent)
+					{
+						coldef->is_not_null = restdef->is_not_null;
+						coldef->raw_default = restdef->raw_default;
+						coldef->cooked_default = restdef->cooked_default;
+						coldef->constraints = restdef->constraints;
+						coldef->is_from_parent = false;
+						list_delete_cell(schema, rest, prev);
+					}
+					else
+						ereport(ERROR,
+								(errcode(ERRCODE_DUPLICATE_COLUMN),
+								 errmsg("column \"%s\" specified more than once",
+										coldef->colname)));
 				}
 				prev = rest;
 				rest = next;
@@ -5578,14 +5589,20 @@ static void
 ATPrepDropNotNull(Relation rel, bool recurse, bool recursing)
 {
 	/*
-	 * If the parent is a partitioned table, like check constraints, NOT NULL
-	 * constraints must be dropped from child tables.
+	 * If the parent is a partitioned table, like check constraints, we do
+	 * not support removing the NOT NULL while partitions exist.
 	 */
-	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
-		!recurse && !recursing)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				 errmsg("constraint must be dropped from child tables too")));
+	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		PartitionDesc	partdesc = RelationGetPartitionDesc(rel);
+
+		Assert(partdesc != NULL);
+		if (partdesc->nparts > 0 && !recurse && !recursing)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					 errmsg("cannot remove constraint from only the partitioned table when partitions exist"),
+					 errhint("Do not specify the ONLY keyword.")));
+	}
 }
 static ObjectAddress
 ATExecDropNotNull(Relation rel, const char *colName, LOCKMODE lockmode)
@@ -5746,13 +5763,19 @@ ATPrepSetNotNull(Relation rel, bool recurse, bool recursing)
 {
 	/*
 	 * If the parent is a partitioned table, like check constraints, NOT NULL
-	 * constraints must be added to the child tables.
+	 * constraints must be added to the child tables.  Complain if requested
+	 * otherwise and partitions exist.
 	 */
-	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
-		!recurse && !recursing)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				 errmsg("constraint must be added to child tables too")));
+	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		PartitionDesc	partdesc = RelationGetPartitionDesc(rel);
+
+		if (partdesc && partdesc->nparts > 0 && !recurse && !recursing)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					 errmsg("cannot add constraint to only the partitioned table when partitions exist"),
+					 errhint("Do not specify the ONLY keyword.")));
+	}
 }
 
 static ObjectAddress
@@ -6547,7 +6570,8 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
 		if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE && !recurse)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					 errmsg("column must be dropped from child tables too")));
+					 errmsg("cannot drop column from only the partitioned table when partitions exist"),
+					 errhint("Do not specify the ONLY keyword.")));
 
 		attr_rel = heap_open(AttributeRelationId, RowExclusiveLock);
 		foreach(child, children)
@@ -7680,9 +7704,10 @@ ATExecValidateConstraint(Relation rel, char *constrName, bool recurse,
 
 			/*
 			 * If we're recursing, the parent has already done this, so skip
-			 * it.
+			 * it.  Also, if the constraint is a NO INHERIT constraint, we
+			 * shouldn't try to look for it in the children.
 			 */
-			if (!recursing)
+			if (!recursing && !con->connoinherit)
 				children = find_all_inheritors(RelationGetRelid(rel),
 											   lockmode, NULL);
 
@@ -8562,16 +8587,6 @@ ATExecDropConstraint(Relation rel, const char *constrName,
 	}
 
 	/*
-	 * In case of a partitioned table, the constraint must be dropped from the
-	 * partitions too.  There is no such thing as NO INHERIT constraints in
-	 * case of partitioned tables.
-	 */
-	if (!recurse && rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				 errmsg("constraint must be dropped from child tables too")));
-
-	/*
 	 * Propagate to children as appropriate.  Unlike most other ALTER
 	 * routines, we have to do this one level of recursion at a time; we can't
 	 * use find_all_inheritors to do it in one pass.
@@ -8580,6 +8595,18 @@ ATExecDropConstraint(Relation rel, const char *constrName,
 		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
 	else
 		children = NIL;
+
+	/*
+	 * For a partitioned table, if partitions exist and we are told not to
+	 * recurse, it's a user error.  It doesn't make sense to have a constraint
+	 * be defined only on the parent, especially if it's a partitioned table.
+	 */
+	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
+		children != NIL && !recurse)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+				 errmsg("cannot remove constraint from only the partitioned table when partitions exist"),
+				 errhint("Do not specify the ONLY keyword.")));
 
 	foreach(child, children)
 	{

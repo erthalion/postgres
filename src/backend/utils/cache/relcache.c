@@ -3858,13 +3858,20 @@ RelationCacheInitializePhase3(void)
 		}
 
 		/*
-		 * Reload partition key and descriptor for a partitioned table.
+		 * Reload the partition key and descriptor for a partitioned table.
 		 */
-		if (relation->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		if (relation->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
+			relation->rd_partkey == NULL)
 		{
 			RelationBuildPartitionKey(relation);
 			Assert(relation->rd_partkey != NULL);
 
+			restart = true;
+		}
+
+		if (relation->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
+			relation->rd_partdesc == NULL)
+		{
 			RelationBuildPartitionDesc(relation);
 			Assert(relation->rd_partdesc != NULL);
 
@@ -5608,6 +5615,7 @@ load_relcache_init_file(bool shared)
 		rel->rd_rsdesc = NULL;
 		rel->rd_partkeycxt = NULL;
 		rel->rd_partkey = NULL;
+		rel->rd_pdcxt = NULL;
 		rel->rd_partdesc = NULL;
 		rel->rd_partcheck = NIL;
 		rel->rd_indexprs = NIL;

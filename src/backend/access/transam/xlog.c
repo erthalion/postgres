@@ -6930,7 +6930,7 @@ StartupXLOG(void)
 
 				ProcArrayApplyRecoveryInfo(&running);
 
-				StandbyRecoverPreparedTransactions(false);
+				StandbyRecoverPreparedTransactions();
 			}
 		}
 
@@ -8325,6 +8325,12 @@ ShutdownXLOG(int code, Datum arg)
 	ereport(IsPostmasterEnvironment ? LOG : NOTICE,
 			(errmsg("shutting down")));
 
+	/*
+	 * Wait for WAL senders to be in stopping state.  This prevents commands
+	 * from writing new WAL.
+	 */
+	WalSndWaitStopping();
+
 	if (RecoveryInProgress())
 		CreateRestartPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
 	else
@@ -9692,7 +9698,7 @@ xlog_redo(XLogReaderState *record)
 
 			ProcArrayApplyRecoveryInfo(&running);
 
-			StandbyRecoverPreparedTransactions(true);
+			StandbyRecoverPreparedTransactions();
 		}
 
 		/* ControlFile->checkPointCopy always tracks the latest ckpt XID */

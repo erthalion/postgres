@@ -1634,10 +1634,10 @@ psql_completion(const char *text, int start, int end)
 	{
 		static const char *const list_ALTERUSER[] =
 		{"BYPASSRLS", "CONNECTION LIMIT", "CREATEDB", "CREATEROLE",
-			"ENCRYPTED", "INHERIT", "LOGIN", "NOBYPASSRLS",
+			"ENCRYPTED PASSWORD", "INHERIT", "LOGIN", "NOBYPASSRLS",
 			"NOCREATEDB", "NOCREATEROLE", "NOINHERIT",
 			"NOLOGIN", "NOREPLICATION", "NOSUPERUSER", "PASSWORD", "RENAME TO",
-			"REPLICATION", "RESET", "SET", "SUPERUSER", "UNENCRYPTED",
+			"REPLICATION", "RESET", "SET", "SUPERUSER",
 		"VALID UNTIL", "WITH", NULL};
 
 		COMPLETE_WITH_LIST(list_ALTERUSER);
@@ -1649,18 +1649,15 @@ psql_completion(const char *text, int start, int end)
 		/* Similar to the above, but don't complete "WITH" again. */
 		static const char *const list_ALTERUSER_WITH[] =
 		{"BYPASSRLS", "CONNECTION LIMIT", "CREATEDB", "CREATEROLE",
-			"ENCRYPTED", "INHERIT", "LOGIN", "NOBYPASSRLS",
+			"ENCRYPTED PASSWORD", "INHERIT", "LOGIN", "NOBYPASSRLS",
 			"NOCREATEDB", "NOCREATEROLE", "NOINHERIT",
 			"NOLOGIN", "NOREPLICATION", "NOSUPERUSER", "PASSWORD", "RENAME TO",
-			"REPLICATION", "RESET", "SET", "SUPERUSER", "UNENCRYPTED",
+			"REPLICATION", "RESET", "SET", "SUPERUSER",
 		"VALID UNTIL", NULL};
 
 		COMPLETE_WITH_LIST(list_ALTERUSER_WITH);
 	}
 
-	/* complete ALTER USER,ROLE <name> ENCRYPTED,UNENCRYPTED with PASSWORD */
-	else if (Matches4("ALTER", "USER|ROLE", MatchAny, "ENCRYPTED|UNENCRYPTED"))
-		COMPLETE_WITH_CONST("PASSWORD");
 	/* ALTER DEFAULT PRIVILEGES */
 	else if (Matches3("ALTER", "DEFAULT", "PRIVILEGES"))
 		COMPLETE_WITH_LIST2("FOR ROLE", "IN SCHEMA");
@@ -2502,10 +2499,10 @@ psql_completion(const char *text, int start, int end)
 	{
 		static const char *const list_CREATEROLE[] =
 		{"ADMIN", "BYPASSRLS", "CONNECTION LIMIT", "CREATEDB", "CREATEROLE",
-			"ENCRYPTED", "IN", "INHERIT", "LOGIN", "NOBYPASSRLS",
+			"ENCRYPTED PASSWORD", "IN", "INHERIT", "LOGIN", "NOBYPASSRLS",
 			"NOCREATEDB", "NOCREATEROLE", "NOINHERIT",
 			"NOLOGIN", "NOREPLICATION", "NOSUPERUSER", "PASSWORD",
-			"REPLICATION", "ROLE", "SUPERUSER", "SYSID", "UNENCRYPTED",
+			"REPLICATION", "ROLE", "SUPERUSER", "SYSID",
 		"VALID UNTIL", "WITH", NULL};
 
 		COMPLETE_WITH_LIST(list_CREATEROLE);
@@ -2517,21 +2514,15 @@ psql_completion(const char *text, int start, int end)
 		/* Similar to the above, but don't complete "WITH" again. */
 		static const char *const list_CREATEROLE_WITH[] =
 		{"ADMIN", "BYPASSRLS", "CONNECTION LIMIT", "CREATEDB", "CREATEROLE",
-			"ENCRYPTED", "IN", "INHERIT", "LOGIN", "NOBYPASSRLS",
+			"ENCRYPTED PASSWORD", "IN", "INHERIT", "LOGIN", "NOBYPASSRLS",
 			"NOCREATEDB", "NOCREATEROLE", "NOINHERIT",
 			"NOLOGIN", "NOREPLICATION", "NOSUPERUSER", "PASSWORD",
-			"REPLICATION", "ROLE", "SUPERUSER", "SYSID", "UNENCRYPTED",
+			"REPLICATION", "ROLE", "SUPERUSER", "SYSID",
 		"VALID UNTIL", NULL};
 
 		COMPLETE_WITH_LIST(list_CREATEROLE_WITH);
 	}
 
-	/*
-	 * complete CREATE ROLE,USER,GROUP <name> ENCRYPTED,UNENCRYPTED with
-	 * PASSWORD
-	 */
-	else if (Matches4("CREATE", "ROLE|USER|GROUP", MatchAny, "ENCRYPTED|UNENCRYPTED"))
-		COMPLETE_WITH_CONST("PASSWORD");
 	/* complete CREATE ROLE,USER,GROUP <name> IN with ROLE,GROUP */
 	else if (Matches4("CREATE", "ROLE|USER|GROUP", MatchAny, "IN"))
 		COMPLETE_WITH_LIST2("GROUP", "ROLE");
@@ -2598,7 +2589,7 @@ psql_completion(const char *text, int start, int end)
 /* DROP */
 	/* Complete DROP object with CASCADE / RESTRICT */
 	else if (Matches3("DROP",
-					  "COLLATION|CONVERSION|DOMAIN|EXTENSION|LANGUAGE|PUBLICATION|SCHEMA|SEQUENCE|SERVER|TABLE|TYPE|VIEW",
+					  "COLLATION|CONVERSION|DOMAIN|EXTENSION|LANGUAGE|PUBLICATION|SCHEMA|SEQUENCE|SERVER|SUBSCRIPTION|TABLE|TYPE|VIEW",
 					  MatchAny) ||
 			 Matches4("DROP", "ACCESS", "METHOD", MatchAny) ||
 			 (Matches4("DROP", "AGGREGATE|FUNCTION", MatchAny, MatchAny) &&
@@ -2690,10 +2681,6 @@ psql_completion(const char *text, int start, int end)
 	}
 	else if (Matches5("DROP", "RULE", MatchAny, "ON", MatchAny))
 		COMPLETE_WITH_LIST2("CASCADE", "RESTRICT");
-
-	/* DROP SUBSCRIPTION */
-	else if (Matches3("DROP", "SUBSCRIPTION", MatchAny))
-		COMPLETE_WITH_LIST2("DROP SLOT", "NODROP SLOT");
 
 /* EXECUTE */
 	else if (Matches1("EXECUTE"))

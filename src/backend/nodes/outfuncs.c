@@ -253,6 +253,7 @@ _outPlannedStmt(StringInfo str, const PlannedStmt *node)
 	WRITE_NODE_FIELD(rtable);
 	WRITE_NODE_FIELD(resultRelations);
 	WRITE_NODE_FIELD(nonleafResultRelations);
+	WRITE_NODE_FIELD(rootResultRelations);
 	WRITE_NODE_FIELD(subplans);
 	WRITE_BITMAPSET_FIELD(rewindPlanIDs);
 	WRITE_NODE_FIELD(rowMarks);
@@ -350,6 +351,7 @@ _outModifyTable(StringInfo str, const ModifyTable *node)
 	WRITE_NODE_FIELD(partitioned_rels);
 	WRITE_NODE_FIELD(resultRelations);
 	WRITE_INT_FIELD(resultRelIndex);
+	WRITE_INT_FIELD(rootResultRelIndex);
 	WRITE_NODE_FIELD(plans);
 	WRITE_NODE_FIELD(withCheckOptionLists);
 	WRITE_NODE_FIELD(returningLists);
@@ -2147,6 +2149,7 @@ _outPlannerGlobal(StringInfo str, const PlannerGlobal *node)
 	WRITE_NODE_FIELD(finalrowmarks);
 	WRITE_NODE_FIELD(resultRelations);
 	WRITE_NODE_FIELD(nonleafResultRelations);
+	WRITE_NODE_FIELD(rootResultRelations);
 	WRITE_NODE_FIELD(relationOids);
 	WRITE_NODE_FIELD(invalItems);
 	WRITE_INT_FIELD(nParamExec);
@@ -2768,6 +2771,7 @@ _outColumnDef(StringInfo str, const ColumnDef *node)
 	WRITE_BOOL_FIELD(is_local);
 	WRITE_BOOL_FIELD(is_not_null);
 	WRITE_BOOL_FIELD(is_from_type);
+	WRITE_BOOL_FIELD(is_from_parent);
 	WRITE_CHAR_FIELD(storage);
 	WRITE_NODE_FIELD(raw_default);
 	WRITE_NODE_FIELD(cooked_default);

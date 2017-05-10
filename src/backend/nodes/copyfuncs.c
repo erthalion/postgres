@@ -91,6 +91,7 @@ _copyPlannedStmt(const PlannedStmt *from)
 	COPY_NODE_FIELD(rtable);
 	COPY_NODE_FIELD(resultRelations);
 	COPY_NODE_FIELD(nonleafResultRelations);
+	COPY_NODE_FIELD(rootResultRelations);
 	COPY_NODE_FIELD(subplans);
 	COPY_BITMAPSET_FIELD(rewindPlanIDs);
 	COPY_NODE_FIELD(rowMarks);
@@ -205,6 +206,7 @@ _copyModifyTable(const ModifyTable *from)
 	COPY_NODE_FIELD(partitioned_rels);
 	COPY_NODE_FIELD(resultRelations);
 	COPY_SCALAR_FIELD(resultRelIndex);
+	COPY_SCALAR_FIELD(rootResultRelIndex);
 	COPY_NODE_FIELD(plans);
 	COPY_NODE_FIELD(withCheckOptionLists);
 	COPY_NODE_FIELD(returningLists);
@@ -2806,6 +2808,7 @@ _copyColumnDef(const ColumnDef *from)
 	COPY_SCALAR_FIELD(is_local);
 	COPY_SCALAR_FIELD(is_not_null);
 	COPY_SCALAR_FIELD(is_from_type);
+	COPY_SCALAR_FIELD(is_from_parent);
 	COPY_SCALAR_FIELD(storage);
 	COPY_NODE_FIELD(raw_default);
 	COPY_NODE_FIELD(cooked_default);
@@ -4536,8 +4539,8 @@ _copyDropSubscriptionStmt(const DropSubscriptionStmt *from)
 	DropSubscriptionStmt *newnode = makeNode(DropSubscriptionStmt);
 
 	COPY_STRING_FIELD(subname);
-	COPY_SCALAR_FIELD(drop_slot);
 	COPY_SCALAR_FIELD(missing_ok);
+	COPY_SCALAR_FIELD(behavior);
 
 	return newnode;
 }

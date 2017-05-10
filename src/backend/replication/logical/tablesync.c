@@ -33,12 +33,12 @@
  *		 When the desired state appears it will compare its position in the
  *		 stream with the SYNCWAIT position and based on that changes the
  *		 state to based on following rules:
- *		  - if the apply is in front of the sync in the wal stream the new
+ *		  - if the apply is in front of the sync in the WAL stream the new
  *			state is set to CATCHUP and apply loops until the sync process
  *			catches up to the same LSN as apply
- *		  - if the sync is in front of the apply in the wal stream the new
+ *		  - if the sync is in front of the apply in the WAL stream the new
  *			state is set to SYNCDONE
- *		  - if both apply and sync are at the same position in the wal stream
+ *		  - if both apply and sync are at the same position in the WAL stream
  *			the state of the table is set to READY
  *	   - If the state was set to CATCHUP sync will read the stream and
  *		 apply changes until it catches up to the specified stream
@@ -245,7 +245,10 @@ process_syncing_tables_for_sync(XLogRecPtr current_lsn)
  *
  * If there are tables that need synchronizing and are not being synchronized
  * yet, start sync workers for them (if there are free slots for sync
- * workers).
+ * workers).  To prevent starting the sync worker for the same relation at a
+ * high frequency after a failure, we store its last start time with each sync
+ * state info.  We start the sync worker for the same relation after waiting
+ * at least wal_retrieve_retry_interval.
  *
  * For tables that are being synchronized already, check if sync workers
  * either need action from the apply worker or have finished.
@@ -263,8 +266,15 @@ process_syncing_tables_for_sync(XLogRecPtr current_lsn)
 static void
 process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 {
+	struct tablesync_start_time_mapping
+	{
+		Oid			relid;
+		TimestampTz	last_start_time;
+	};
 	static List *table_states = NIL;
+	static HTAB *last_start_times = NULL;
 	ListCell   *lc;
+	bool		started_tx = false;
 
 	Assert(!IsTransactionState());
 
@@ -281,6 +291,7 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 		table_states = NIL;
 
 		StartTransactionCommand();
+		started_tx = true;
 
 		/* Fetch all non-ready tables. */
 		rstates	= GetSubscriptionNotReadyRelations(MySubscription->oid);
@@ -295,9 +306,32 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 		}
 		MemoryContextSwitchTo(oldctx);
 
-		CommitTransactionCommand();
-
 		table_states_valid = true;
+	}
+
+	/*
+	 * Prepare hash table for tracking last start times of workers, to avoid
+	 * immediate restarts.  We don't need it if there are no tables that need
+	 * syncing.
+	 */
+	if (table_states && !last_start_times)
+	{
+		HASHCTL		ctl;
+
+		memset(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(Oid);
+		ctl.entrysize = sizeof(struct tablesync_start_time_mapping);
+		last_start_times = hash_create("Logical replication table sync worker start times",
+									   256, &ctl, HASH_ELEM | HASH_BLOBS);
+	}
+	/*
+	 * Clean up the hash table when we're done with all tables (just to
+	 * release the bit of memory).
+	 */
+	else if (!table_states && last_start_times)
+	{
+		hash_destroy(last_start_times);
+		last_start_times = NULL;
 	}
 
 	/* Process all tables that are being synchronized. */
@@ -316,11 +350,14 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 			{
 				rstate->state = SUBREL_STATE_READY;
 				rstate->lsn = current_lsn;
-				StartTransactionCommand();
+				if (!started_tx)
+				{
+					StartTransactionCommand();
+					started_tx = true;
+				}
 				SetSubscriptionRelState(MyLogicalRepWorker->subid,
 										rstate->relid, rstate->state,
 										rstate->lsn);
-				CommitTransactionCommand();
 			}
 		}
 		else
@@ -403,13 +440,31 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 			 */
 			else if (!syncworker && nsyncworkers < max_sync_workers_per_subscription)
 			{
-				logicalrep_worker_launch(MyLogicalRepWorker->dbid,
-										 MySubscription->oid,
-										 MySubscription->name,
-										 MyLogicalRepWorker->userid,
-										 rstate->relid);
+				TimestampTz	now = GetCurrentTimestamp();
+				struct tablesync_start_time_mapping *hentry;
+				bool		found;
+
+				hentry = hash_search(last_start_times, &rstate->relid, HASH_ENTER, &found);
+
+				if (!found ||
+					TimestampDifferenceExceeds(hentry->last_start_time, now,
+											   wal_retrieve_retry_interval))
+				{
+					logicalrep_worker_launch(MyLogicalRepWorker->dbid,
+											 MySubscription->oid,
+											 MySubscription->name,
+											 MyLogicalRepWorker->userid,
+											 rstate->relid);
+					hentry->last_start_time = now;
+				}
 			}
 		}
+	}
+
+	if (started_tx)
+	{
+		CommitTransactionCommand();
+		pgstat_report_stat(false);
 	}
 }
 
@@ -560,8 +615,9 @@ fetch_remote_table_info(char *nspname, char *relname,
 	/* First fetch Oid and replica identity. */
 	initStringInfo(&cmd);
 	appendStringInfo(&cmd, "SELECT c.oid, c.relreplident"
-						   "  FROM pg_catalog.pg_class c,"
-						   "       pg_catalog.pg_namespace n"
+						   "  FROM pg_catalog.pg_class c"
+						   "  INNER JOIN pg_catalog.pg_namespace n"
+						   "        ON (c.relnamespace = n.oid)"
 						   " WHERE n.nspname = %s"
 						   "   AND c.relname = %s"
 						   "   AND c.relkind = 'r'",
@@ -698,7 +754,7 @@ copy_table(Relation rel)
 /*
  * Start syncing the table in the sync worker.
  *
- * The returned slot name is palloced in current memory context.
+ * The returned slot name is palloc'ed in current memory context.
  */
 char *
 LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
@@ -759,6 +815,7 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 										MyLogicalRepWorker->relstate,
 										MyLogicalRepWorker->relstate_lsn);
 				CommitTransactionCommand();
+				pgstat_report_stat(false);
 
 				/*
 				 * We want to do the table data sync in single

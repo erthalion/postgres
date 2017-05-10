@@ -355,6 +355,7 @@ main(int argc, char **argv)
 		{"no-security-labels", no_argument, &dopt.no_security_labels, 1},
 		{"no-synchronized-snapshots", no_argument, &dopt.no_synchronized_snapshots, 1},
 		{"no-unlogged-table-data", no_argument, &dopt.no_unlogged_table_data, 1},
+		{"no-subscriptions", no_argument, &dopt.no_subscriptions, 1},
 		{"no-sync", no_argument, NULL, 7},
 
 		{NULL, 0, NULL, 0}
@@ -862,6 +863,7 @@ main(int argc, char **argv)
 	ropt->disable_dollar_quoting = dopt.disable_dollar_quoting;
 	ropt->dump_inserts = dopt.dump_inserts;
 	ropt->no_security_labels = dopt.no_security_labels;
+	ropt->no_subscriptions = dopt.no_subscriptions;
 	ropt->lockWaitTimeout = dopt.lockWaitTimeout;
 	ropt->include_everything = dopt.include_everything;
 	ropt->enable_row_security = dopt.enable_row_security;
@@ -950,6 +952,7 @@ help(const char *progname)
 	printf(_("  --if-exists                  use IF EXISTS when dropping objects\n"));
 	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
 	printf(_("  --no-security-labels         do not dump security label assignments\n"));
+	printf(_("  --no-subscriptions           do not dump subscriptions\n"));
 	printf(_("  --no-synchronized-snapshots  do not use synchronized snapshots in parallel jobs\n"));
 	printf(_("  --no-tablespaces             do not dump tablespace assignments\n"));
 	printf(_("  --no-unlogged-table-data     do not dump unlogged table data\n"));
@@ -3674,6 +3677,7 @@ is_superuser(Archive *fout)
 void
 getSubscriptions(Archive *fout)
 {
+	DumpOptions *dopt = fout->dopt;
 	PQExpBuffer query;
 	PGresult   *res;
 	SubscriptionInfo *subinfo;
@@ -3688,7 +3692,7 @@ getSubscriptions(Archive *fout)
 	int			i,
 				ntups;
 
-	if (fout->remoteVersion < 100000)
+	if (dopt->no_subscriptions || fout->remoteVersion < 100000)
 		return;
 
 	if (!is_superuser(fout))
@@ -5507,6 +5511,9 @@ getTables(Archive *fout, int *numTables)
 	int			i_relpages;
 	int			i_is_identity_sequence;
 	int			i_changed_acl;
+	int			i_partkeydef;
+	int			i_ispartition;
+	int			i_partbound;
 
 	/* Make sure we are in proper schema */
 	selectSourceSchema(fout, "pg_catalog");
@@ -5533,6 +5540,10 @@ getTables(Archive *fout, int *numTables)
 
 	if (fout->remoteVersion >= 90600)
 	{
+		char	   *partkeydef = "NULL";
+		char	   *ispartition = "false";
+		char	   *partbound = "NULL";
+
 		PQExpBuffer acl_subquery = createPQExpBuffer();
 		PQExpBuffer racl_subquery = createPQExpBuffer();
 		PQExpBuffer initacl_subquery = createPQExpBuffer();
@@ -5542,6 +5553,18 @@ getTables(Archive *fout, int *numTables)
 		PQExpBuffer attracl_subquery = createPQExpBuffer();
 		PQExpBuffer attinitacl_subquery = createPQExpBuffer();
 		PQExpBuffer attinitracl_subquery = createPQExpBuffer();
+
+		/*
+		 * Collect the information about any partitioned tables, which were
+		 * added in PG10.
+		 */
+
+		if (fout->remoteVersion >= 100000)
+		{
+			partkeydef = "pg_get_partkeydef(c.oid)";
+			ispartition = "c.relispartition";
+			partbound = "pg_get_expr(c.relpartbound, c.oid)";
+		}
 
 		/*
 		 * Left join to pick up dependency info linking sequences to their
@@ -5594,7 +5617,10 @@ getTables(Archive *fout, int *numTables)
 						  "OR %s IS NOT NULL "
 						  "OR %s IS NOT NULL"
 						  "))"
-						  "AS changed_acl "
+						  "AS changed_acl, "
+						  "%s AS partkeydef, "
+						  "%s AS ispartition, "
+						  "%s AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5618,6 +5644,9 @@ getTables(Archive *fout, int *numTables)
 						  attracl_subquery->data,
 						  attinitacl_subquery->data,
 						  attinitracl_subquery->data,
+						  partkeydef,
+						  ispartition,
+						  partbound,
 						  RELKIND_SEQUENCE,
 						  RELKIND_RELATION, RELKIND_SEQUENCE,
 						  RELKIND_VIEW, RELKIND_COMPOSITE_TYPE,
@@ -5663,7 +5692,10 @@ getTables(Archive *fout, int *numTables)
 						  "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
 						  "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
 						  "tc.reloptions AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5709,7 +5741,10 @@ getTables(Archive *fout, int *numTables)
 						  "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
 						  "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
 						  "tc.reloptions AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5755,7 +5790,10 @@ getTables(Archive *fout, int *numTables)
 						  "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
 						  "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
 						  "tc.reloptions AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5799,7 +5837,10 @@ getTables(Archive *fout, int *numTables)
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
 						  "c.reloptions AS reloptions, "
 						  "tc.reloptions AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5843,7 +5884,10 @@ getTables(Archive *fout, int *numTables)
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
 						  "c.reloptions AS reloptions, "
 						  "tc.reloptions AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5886,7 +5930,10 @@ getTables(Archive *fout, int *numTables)
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
 						  "c.reloptions AS reloptions, "
 						  "tc.reloptions AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5929,7 +5976,10 @@ getTables(Archive *fout, int *numTables)
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
 						  "c.reloptions AS reloptions, "
 						  "NULL AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -5971,7 +6021,10 @@ getTables(Archive *fout, int *numTables)
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
 						  "NULL AS reloptions, "
 						  "NULL AS toast_reloptions, "
-						  "NULL AS changed_acl "
+						  "NULL AS changed_acl, "
+						  "NULL AS partkeydef, "
+						  "false AS ispartition, "
+						  "NULL AS partbound "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -6038,6 +6091,9 @@ getTables(Archive *fout, int *numTables)
 	i_reloftype = PQfnumber(res, "reloftype");
 	i_is_identity_sequence = PQfnumber(res, "is_identity_sequence");
 	i_changed_acl = PQfnumber(res, "changed_acl");
+	i_partkeydef = PQfnumber(res, "partkeydef");
+	i_ispartition = PQfnumber(res, "ispartition");
+	i_partbound = PQfnumber(res, "partbound");
 
 	if (dopt->lockWaitTimeout)
 	{
@@ -6139,6 +6195,11 @@ getTables(Archive *fout, int *numTables)
 
 		tblinfo[i].is_identity_sequence = (i_is_identity_sequence >= 0 &&
 										   strcmp(PQgetvalue(res, i, i_is_identity_sequence), "t") == 0);
+
+		/* Partition key string or NULL */
+		tblinfo[i].partkeydef = pg_strdup(PQgetvalue(res, i, i_partkeydef));
+		tblinfo[i].ispartition = (strcmp(PQgetvalue(res, i, i_ispartition), "t") == 0);
+		tblinfo[i].partbound = pg_strdup(PQgetvalue(res, i, i_partbound));
 
 		/*
 		 * Read-lock target tables to make sure they aren't DROPPED or altered
@@ -6265,11 +6326,7 @@ getInherits(Archive *fout, int *numInherits)
 	 * we want more information about partitions than just the parent-child
 	 * relationship.
 	 */
-	appendPQExpBufferStr(query,
-						 "SELECT inhrelid, inhparent "
-						 "FROM pg_inherits "
-						 "WHERE inhparent NOT IN (SELECT oid FROM pg_class "
-						 "WHERE relkind = " CppAsString2(RELKIND_PARTITIONED_TABLE) ")");
+	appendPQExpBufferStr(query, "SELECT inhrelid, inhparent FROM pg_inherits");
 
 	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
@@ -6293,72 +6350,6 @@ getInherits(Archive *fout, int *numInherits)
 	destroyPQExpBuffer(query);
 
 	return inhinfo;
-}
-
-/*
- * getPartitions
- *	  read all the partition inheritance and partition bound information
- * from the system catalogs return them in the PartInfo* structure
- *
- * numPartitions is set to the number of pairs read in
- */
-PartInfo *
-getPartitions(Archive *fout, int *numPartitions)
-{
-	PGresult   *res;
-	int			ntups;
-	int			i;
-	PQExpBuffer query;
-	PartInfo    *partinfo;
-
-	int			i_partrelid;
-	int			i_partparent;
-	int			i_partbound;
-
-	/* Before version 10, there are no partitions  */
-	if (fout->remoteVersion < 100000)
-	{
-		*numPartitions = 0;
-		return NULL;
-	}
-
-	query = createPQExpBuffer();
-
-	/* Make sure we are in proper schema */
-	selectSourceSchema(fout, "pg_catalog");
-
-	/* find the inheritance and boundary information about partitions */
-
-	appendPQExpBufferStr(query,
-						 "SELECT inhrelid as partrelid, inhparent AS partparent,"
-						 "       pg_get_expr(relpartbound, inhrelid) AS partbound"
-						 " FROM pg_class c, pg_inherits"
-						 " WHERE c.oid = inhrelid AND c.relispartition");
-
-	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-
-	ntups = PQntuples(res);
-
-	*numPartitions = ntups;
-
-	partinfo = (PartInfo *) pg_malloc(ntups * sizeof(PartInfo));
-
-	i_partrelid = PQfnumber(res, "partrelid");
-	i_partparent = PQfnumber(res, "partparent");
-	i_partbound = PQfnumber(res, "partbound");
-
-	for (i = 0; i < ntups; i++)
-	{
-		partinfo[i].partrelid = atooid(PQgetvalue(res, i, i_partrelid));
-		partinfo[i].partparent = atooid(PQgetvalue(res, i, i_partparent));
-		partinfo[i].partdef = pg_strdup(PQgetvalue(res, i, i_partbound));
-	}
-
-	PQclear(res);
-
-	destroyPQExpBuffer(query);
-
-	return partinfo;
 }
 
 /*
@@ -7727,49 +7718,6 @@ getTransforms(Archive *fout, int *numTransforms)
 	destroyPQExpBuffer(query);
 
 	return transforminfo;
-}
-
-/*
- * getTablePartitionKeyInfo -
- *	  for each interesting partitioned table, read information about its
- *	  partition key
- *
- *	modifies tblinfo
- */
-void
-getTablePartitionKeyInfo(Archive *fout, TableInfo *tblinfo, int numTables)
-{
-	PQExpBuffer q;
-	int			i;
-	PGresult   *res;
-
-	/* No partitioned tables before 10 */
-	if (fout->remoteVersion < 100000)
-		return;
-
-	q = createPQExpBuffer();
-
-	for (i = 0; i < numTables; i++)
-	{
-		TableInfo  *tbinfo = &(tblinfo[i]);
-
-		/* Only partitioned tables have partition key */
-		if (tbinfo->relkind != RELKIND_PARTITIONED_TABLE)
-			continue;
-
-		/* Don't bother computing anything for non-target tables, either */
-		if (!tbinfo->dobj.dump)
-			continue;
-
-		resetPQExpBuffer(q);
-		appendPQExpBuffer(q, "SELECT pg_catalog.pg_get_partkeydef('%u'::pg_catalog.oid)",
-							 tbinfo->dobj.catId.oid);
-		res = ExecuteSqlQuery(fout, q->data, PGRES_TUPLES_OK);
-		Assert(PQntuples(res) == 1);
-		tbinfo->partkeydef = pg_strdup(PQgetvalue(res, 0, 0));
-	}
-
-	destroyPQExpBuffer(q);
 }
 
 /*
@@ -15196,9 +15144,22 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 		if (tbinfo->reloftype && !dopt->binary_upgrade)
 			appendPQExpBuffer(q, " OF %s", tbinfo->reloftype);
 
-		if (tbinfo->partitionOf && !dopt->binary_upgrade)
+		/*
+		 * If the table is a partition, dump it as such; except in the case
+		 * of a binary upgrade, we dump the table normally and attach it to
+		 * the parent afterward.
+		 */
+		if (tbinfo->ispartition && !dopt->binary_upgrade)
 		{
-			TableInfo  *parentRel = tbinfo->partitionOf;
+			TableInfo  *parentRel = tbinfo->parents[0];
+
+			/*
+			 * With partitions, unlike inheritance, there can only be one
+			 * parent.
+			 */
+			if (tbinfo->numParents != 1)
+				exit_horribly(NULL, "invalid number of parents %d for table \"%s\"\n",
+							  tbinfo->numParents, tbinfo->dobj.name);
 
 			appendPQExpBuffer(q, " PARTITION OF ");
 			if (parentRel->dobj.namespace != tbinfo->dobj.namespace)
@@ -15239,7 +15200,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 					 * Skip column if fully defined by reloftype or the
 					 * partition parent.
 					 */
-					if ((tbinfo->reloftype || tbinfo->partitionOf) &&
+					if ((tbinfo->reloftype || tbinfo->ispartition) &&
 						!has_default && !has_notnull && !dopt->binary_upgrade)
 						continue;
 
@@ -15267,13 +15228,16 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 						continue;
 					}
 
-					/* Attribute type */
-					if ((tbinfo->reloftype || tbinfo->partitionOf) &&
-						!dopt->binary_upgrade)
-					{
-						appendPQExpBufferStr(q, " WITH OPTIONS");
-					}
-					else
+					/*
+					 * Attribute type
+					 *
+					 * In binary-upgrade mode, we always include the type.
+					 * If we aren't in binary-upgrade mode, then we skip the
+					 * type when creating a typed table ('OF type_name') or a
+					 * partition ('PARTITION OF'), since the type comes from
+					 * the parent/partitioned table.
+					 */
+					if (dopt->binary_upgrade || (!tbinfo->reloftype && !tbinfo->ispartition))
 					{
 						appendPQExpBuffer(q, " %s",
 										  tbinfo->atttypnames[j]);
@@ -15327,7 +15291,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 
 			if (actual_atts)
 				appendPQExpBufferStr(q, "\n)");
-			else if (!((tbinfo->reloftype || tbinfo->partitionOf) &&
+			else if (!((tbinfo->reloftype || tbinfo->ispartition) &&
 						!dopt->binary_upgrade))
 			{
 				/*
@@ -15337,13 +15301,16 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 				appendPQExpBufferStr(q, " (\n)");
 			}
 
-			if (tbinfo->partitiondef && !dopt->binary_upgrade)
+			if (tbinfo->ispartition && !dopt->binary_upgrade)
 			{
 				appendPQExpBufferStr(q, "\n");
-				appendPQExpBufferStr(q, tbinfo->partitiondef);
+				appendPQExpBufferStr(q, tbinfo->partbound);
 			}
 
-			if (numParents > 0 && !dopt->binary_upgrade)
+			/* Emit the INHERITS clause, except if this is a partition. */
+			if (numParents > 0 &&
+				!tbinfo->ispartition &&
+				!dopt->binary_upgrade)
 			{
 				appendPQExpBufferStr(q, "\nINHERITS (");
 				for (k = 0; k < numParents; k++)
@@ -15489,18 +15456,38 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 
 			if (numParents > 0)
 			{
-				appendPQExpBufferStr(q, "\n-- For binary upgrade, set up inheritance this way.\n");
+				appendPQExpBufferStr(q, "\n-- For binary upgrade, set up inheritance and partitioning this way.\n");
 				for (k = 0; k < numParents; k++)
 				{
 					TableInfo  *parentRel = parents[k];
+					PQExpBuffer	parentname = createPQExpBuffer();
 
-					appendPQExpBuffer(q, "ALTER TABLE ONLY %s INHERIT ",
-									  fmtId(tbinfo->dobj.name));
+					/* Schema-qualify the parent table, if necessary */
 					if (parentRel->dobj.namespace != tbinfo->dobj.namespace)
-						appendPQExpBuffer(q, "%s.",
-								fmtId(parentRel->dobj.namespace->dobj.name));
-					appendPQExpBuffer(q, "%s;\n",
+						appendPQExpBuffer(parentname, "%s.",
+							fmtId(parentRel->dobj.namespace->dobj.name));
+
+					appendPQExpBuffer(parentname, "%s",
 									  fmtId(parentRel->dobj.name));
+
+					/* In the partitioning case, we alter the parent */
+					if (tbinfo->ispartition)
+						appendPQExpBuffer(q,
+									"ALTER TABLE ONLY %s ATTACH PARTITION ",
+										  parentname->data);
+					else
+						appendPQExpBuffer(q, "ALTER TABLE ONLY %s INHERIT ",
+											fmtId(tbinfo->dobj.name));
+
+					/* Partition needs specifying the bounds */
+					if (tbinfo->ispartition)
+						appendPQExpBuffer(q, "%s %s;\n",
+										  fmtId(tbinfo->dobj.name),
+										  tbinfo->partbound);
+					else
+						appendPQExpBuffer(q, "%s;\n", parentname->data);
+
+					destroyPQExpBuffer(parentname);
 				}
 			}
 
@@ -15510,16 +15497,6 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 				appendPQExpBuffer(q, "ALTER TABLE ONLY %s OF %s;\n",
 								  fmtId(tbinfo->dobj.name),
 								  tbinfo->reloftype);
-			}
-
-			if (tbinfo->partitionOf)
-			{
-				appendPQExpBufferStr(q, "\n-- For binary upgrade, set up partitions this way.\n");
-				appendPQExpBuffer(q, "ALTER TABLE ONLY %s ",
-								  fmtId(tbinfo->partitionOf->dobj.name));
-				appendPQExpBuffer(q, "ATTACH PARTITION %s %s;\n",
-								  fmtId(tbinfo->dobj.name),
-								  tbinfo->partitiondef);
 			}
 
 			appendPQExpBufferStr(q, "\n-- For binary upgrade, set heap's relfrozenxid and relminmxid\n");

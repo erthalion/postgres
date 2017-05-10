@@ -38,6 +38,9 @@ SET SESSION AUTHORIZATION 'regress_subscription_user2';
 CREATE SUBSCRIPTION testsub2 CONNECTION 'dbname=doesnotexist' PUBLICATION foo WITH (NOCONNECT);
 SET SESSION AUTHORIZATION 'regress_subscription_user';
 
+-- fail - invalid connection string
+ALTER SUBSCRIPTION testsub CONNECTION 'foobar';
+
 \dRs+
 
 ALTER SUBSCRIPTION testsub SET PUBLICATION testpub2, testpub3 NOREFRESH;
@@ -80,17 +83,20 @@ ALTER ROLE regress_subscription_user2 SUPERUSER;
 -- now it works
 ALTER SUBSCRIPTION testsub OWNER TO regress_subscription_user2;
 
--- fail - cannot do DROP SUBSCRIPTION DROP SLOT inside transaction block
+-- fail - cannot do DROP SUBSCRIPTION inside transaction block with slot name
 BEGIN;
-DROP SUBSCRIPTION testsub DROP SLOT;
+DROP SUBSCRIPTION testsub;
 COMMIT;
 
+ALTER SUBSCRIPTION testsub WITH (SLOT NAME = NONE);
+
+-- now it works
 BEGIN;
-DROP SUBSCRIPTION testsub NODROP SLOT;
+DROP SUBSCRIPTION testsub;
 COMMIT;
 
-DROP SUBSCRIPTION IF EXISTS testsub NODROP SLOT;
-DROP SUBSCRIPTION testsub NODROP SLOT;  -- fail
+DROP SUBSCRIPTION IF EXISTS testsub;
+DROP SUBSCRIPTION testsub;  -- fail
 
 RESET SESSION AUTHORIZATION;
 DROP ROLE regress_subscription_user;
