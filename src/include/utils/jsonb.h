@@ -178,7 +178,7 @@ typedef uint32 JEntry;
  * bits instead.  This allows changes in the offset-placement heuristic
  * without breaking on-disk compatibility.
  */
-#define JB_OFFSET_STRIDE		32
+#define JB_OFFSET_STRIDE		1000
 
 /*
  * A jsonb array or object node, within a Jsonb Datum.
