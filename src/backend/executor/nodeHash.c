@@ -657,7 +657,7 @@ ExecHashIncreaseNumBatches(HashJoinTable hashtable)
 		hashtable->log2_nbuckets = hashtable->log2_nbuckets_optimal;
 
 		hashtable->buckets = repalloc(hashtable->buckets,
-								sizeof(HashJoinTuple) * hashtable->nbuckets);
+									  sizeof(HashJoinTuple) * hashtable->nbuckets);
 	}
 
 	/*
@@ -783,7 +783,7 @@ ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
 	 */
 	hashtable->buckets =
 		(HashJoinTuple *) repalloc(hashtable->buckets,
-								hashtable->nbuckets * sizeof(HashJoinTuple));
+								   hashtable->nbuckets * sizeof(HashJoinTuple));
 
 	memset(hashtable->buckets, 0, hashtable->nbuckets * sizeof(HashJoinTuple));
 
@@ -1176,7 +1176,7 @@ ExecScanHashTableForUnmatched(HashJoinState *hjstate, ExprContext *econtext)
 				/* insert hashtable's tuple into exec slot */
 				inntuple = ExecStoreMinimalTuple(HJTUPLE_MINTUPLE(hashTuple),
 												 hjstate->hj_HashTupleSlot,
-												 false);		/* do not pfree */
+												 false);	/* do not pfree */
 				econtext->ecxt_innertuple = inntuple;
 
 				/*
@@ -1283,10 +1283,7 @@ static void
 ExecHashBuildSkewHash(HashJoinTable hashtable, Hash *node, int mcvsToUse)
 {
 	HeapTupleData *statsTuple;
-	Datum	   *values;
-	int			nvalues;
-	float4	   *numbers;
-	int			nnumbers;
+	AttStatsSlot sslot;
 
 	/* Do nothing if planner didn't identify the outer relation's join key */
 	if (!OidIsValid(node->skewTable))
@@ -1305,19 +1302,17 @@ ExecHashBuildSkewHash(HashJoinTable hashtable, Hash *node, int mcvsToUse)
 	if (!HeapTupleIsValid(statsTuple))
 		return;
 
-	if (get_attstatsslot(statsTuple, node->skewColType, node->skewColTypmod,
+	if (get_attstatsslot(&sslot, statsTuple,
 						 STATISTIC_KIND_MCV, InvalidOid,
-						 NULL,
-						 &values, &nvalues,
-						 &numbers, &nnumbers))
+						 ATTSTATSSLOT_VALUES | ATTSTATSSLOT_NUMBERS))
 	{
 		double		frac;
 		int			nbuckets;
 		FmgrInfo   *hashfunctions;
 		int			i;
 
-		if (mcvsToUse > nvalues)
-			mcvsToUse = nvalues;
+		if (mcvsToUse > sslot.nvalues)
+			mcvsToUse = sslot.nvalues;
 
 		/*
 		 * Calculate the expected fraction of outer relation that will
@@ -1326,11 +1321,10 @@ ExecHashBuildSkewHash(HashJoinTable hashtable, Hash *node, int mcvsToUse)
 		 */
 		frac = 0;
 		for (i = 0; i < mcvsToUse; i++)
-			frac += numbers[i];
+			frac += sslot.numbers[i];
 		if (frac < SKEW_MIN_OUTER_FRACTION)
 		{
-			free_attstatsslot(node->skewColType,
-							  values, nvalues, numbers, nnumbers);
+			free_attstatsslot(&sslot);
 			ReleaseSysCache(statsTuple);
 			return;
 		}
@@ -1392,7 +1386,7 @@ ExecHashBuildSkewHash(HashJoinTable hashtable, Hash *node, int mcvsToUse)
 			int			bucket;
 
 			hashvalue = DatumGetUInt32(FunctionCall1(&hashfunctions[0],
-													 values[i]));
+													 sslot.values[i]));
 
 			/*
 			 * While we have not hit a hole in the hashtable and have not hit
@@ -1426,8 +1420,7 @@ ExecHashBuildSkewHash(HashJoinTable hashtable, Hash *node, int mcvsToUse)
 				hashtable->spacePeak = hashtable->spaceUsed;
 		}
 
-		free_attstatsslot(node->skewColType,
-						  values, nvalues, numbers, nnumbers);
+		free_attstatsslot(&sslot);
 	}
 
 	ReleaseSysCache(statsTuple);
@@ -1657,7 +1650,7 @@ dense_alloc(HashJoinTable hashtable, Size size)
 	{
 		/* allocate new chunk and put it at the beginning of the list */
 		newChunk = (HashMemoryChunk) MemoryContextAlloc(hashtable->batchCxt,
-								 offsetof(HashMemoryChunkData, data) + size);
+														offsetof(HashMemoryChunkData, data) + size);
 		newChunk->maxlen = size;
 		newChunk->used = 0;
 		newChunk->ntuples = 0;
@@ -1692,7 +1685,7 @@ dense_alloc(HashJoinTable hashtable, Size size)
 	{
 		/* allocate new chunk and put it at the beginning of the list */
 		newChunk = (HashMemoryChunk) MemoryContextAlloc(hashtable->batchCxt,
-					  offsetof(HashMemoryChunkData, data) + HASH_CHUNK_SIZE);
+														offsetof(HashMemoryChunkData, data) + HASH_CHUNK_SIZE);
 
 		newChunk->maxlen = HASH_CHUNK_SIZE;
 		newChunk->used = size;

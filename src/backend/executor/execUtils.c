@@ -102,7 +102,7 @@ CreateExecutorState(void)
 	 * Initialize all fields of the Executor State structure
 	 */
 	estate->es_direction = ForwardScanDirection;
-	estate->es_snapshot = InvalidSnapshot;		/* caller must initialize this */
+	estate->es_snapshot = InvalidSnapshot;	/* caller must initialize this */
 	estate->es_crosscheck_snapshot = InvalidSnapshot;	/* no crosscheck */
 	estate->es_range_table = NIL;
 	estate->es_plannedstmt = NULL;
@@ -826,14 +826,14 @@ void
 ExecLockNonLeafAppendTables(List *partitioned_rels, EState *estate)
 {
 	PlannedStmt *stmt = estate->es_plannedstmt;
-	ListCell	*lc;
+	ListCell   *lc;
 
 	foreach(lc, partitioned_rels)
 	{
 		ListCell   *l;
-		Index	rti = lfirst_int(lc);
-		bool	is_result_rel = false;
-		Oid		relid = getrelid(rti, estate->es_range_table);
+		Index		rti = lfirst_int(lc);
+		bool		is_result_rel = false;
+		Oid			relid = getrelid(rti, estate->es_range_table);
 
 		/* If this is a result relation, already locked in InitPlan */
 		foreach(l, stmt->nonleafResultRelations)

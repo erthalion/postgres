@@ -119,7 +119,6 @@ extern void RemoveAttrDefault(Oid relid, AttrNumber attnum,
 				  DropBehavior behavior, bool complain, bool internal);
 extern void RemoveAttrDefaultById(Oid attrdefId);
 extern void RemoveStatistics(Oid relid, AttrNumber attnum);
-extern void RemoveStatisticsExt(Oid relid, AttrNumber attnum);
 
 extern Form_pg_attribute SystemAttributeDefinition(AttrNumber attno,
 						  bool relhasoids);
@@ -144,6 +143,7 @@ extern void StorePartitionKey(Relation rel,
 				  Oid *partopclass,
 				  Oid *partcollation);
 extern void RemovePartitionKeyByRelId(Oid relid);
-extern void StorePartitionBound(Relation rel, Relation parent, Node *bound);
+extern void StorePartitionBound(Relation rel, Relation parent,
+					PartitionBoundSpec *bound);
 
-#endif   /* HEAP_H */
+#endif							/* HEAP_H */

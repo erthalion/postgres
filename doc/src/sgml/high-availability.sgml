@@ -138,7 +138,7 @@ protocol to make nodes agree on a serializable transactional order.
   </varlistentry>
 
   <varlistentry>
-   <term>Transaction Log Shipping</term>
+   <term>Write-Ahead Log Shipping</term>
    <listitem>
 
     <para>
@@ -289,7 +289,7 @@ protocol to make nodes agree on a serializable transactional order.
      <entry>Feature</entry>
      <entry>Shared Disk Failover</entry>
      <entry>File System Replication</entry>
-     <entry>Transaction Log Shipping</entry>
+     <entry>Write-Ahead Log Shipping</entry>
      <entry>Trigger-Based Master-Standby Replication</entry>
      <entry>Statement-Based Replication Middleware</entry>
      <entry>Asynchronous Multimaster Replication</entry>
@@ -850,9 +850,9 @@ primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
      of WAL records generated in the primary, but not yet applied in the
      standby. You can calculate this lag by comparing the current WAL write
      location on the primary with the last WAL location received by the
-     standby. They can be retrieved using
-     <function>pg_current_wal_location</> on the primary and the
-     <function>pg_last_wal_receive_location</> on the standby,
+     standby. These locations can be retrieved using
+     <function>pg_current_wal_lsn</> on the primary and
+     <function>pg_last_wal_receive_lsn</> on the standby,
      respectively (see <xref linkend="functions-admin-backup-table"> and
      <xref linkend="functions-recovery-info-table"> for details).
      The last WAL receive location in the standby is also displayed in the
@@ -863,10 +863,10 @@ primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
      You can retrieve a list of WAL sender processes via the
      <link linkend="monitoring-stats-views-table">
      <literal>pg_stat_replication</></link> view. Large differences between
-     <function>pg_current_wal_location</> and <literal>sent_location</> field
+     <function>pg_current_wal_lsn</> and the view's <literal>sent_lsn</> field
      might indicate that the master server is under heavy load, while
-     differences between <literal>sent_location</> and
-     <function>pg_last_wal_receive_location</> on the standby might indicate
+     differences between <literal>sent_lsn</> and
+     <function>pg_last_wal_receive_lsn</> on the standby might indicate
      network delay, or that the standby is under heavy load.
     </para>
    </sect3>
@@ -927,8 +927,8 @@ primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
      You can create a replication slot like this:
 <programlisting>
 postgres=# SELECT * FROM pg_create_physical_replication_slot('node_a_slot');
-  slot_name  | wal_position
--------------+---------------
+  slot_name  | lsn
+-------------+-----
  node_a_slot |
 
 postgres=# SELECT * FROM pg_replication_slots;
@@ -1036,7 +1036,7 @@ primary_slot_name = 'node_a_slot'
    <para>
     When requesting synchronous replication, each commit of a
     write transaction will wait until confirmation is
-    received that the commit has been written to the transaction log on disk
+    received that the commit has been written to the write-ahead log on disk
     of both the primary and standby server. The only possibility that data
     can be lost is if both the primary and the standby suffer crashes at the
     same time. This can provide a much higher level of durability, though only
@@ -1054,6 +1054,18 @@ primary_slot_name = 'node_a_slot'
     running actions such as data loading or index building do not wait
     until the very final commit message. All two-phase commit actions
     require commit waits, including both prepare and commit.
+   </para>
+
+   <para>
+    A synchronous standby can be a physical replication standby or a logical
+    replication subscriber.  It can also be any other physical or logical WAL
+    replication stream consumer that knows how to send the appropriate
+    feedback messages.  Besides the built-in physical and logical replication
+    systems, this includes special programs such
+    as <command>pg_receivewal</command> and <command>pg_recvlogical</command>
+    as well as some third-party replication systems and custom programs.
+    Check the respective documentation for details on synchronous replication
+    support.
    </para>
 
    <sect3 id="synchronous-replication-config">
@@ -1175,7 +1187,7 @@ synchronous_standby_names = 'FIRST 2 (s1, s2, s3)'
     An example of <varname>synchronous_standby_names</> for
     a quorum-based multiple synchronous standbys is:
 <programlisting>
- synchronous_standby_names = 'ANY 2 (s1, s2, s3)'
+synchronous_standby_names = 'ANY 2 (s1, s2, s3)'
 </programlisting>
     In this example, if four standby servers <literal>s1</>, <literal>s2</>,
     <literal>s3</> and <literal>s4</> are running, transaction commits will
@@ -1824,7 +1836,7 @@ if (!triggered)
 
    <para>
     In normal operation, <quote>read-only</> transactions are allowed to
-    update sequences and to use <command>LISTEN</>, <command>UNLISTEN</>, and
+    use <command>LISTEN</>, <command>UNLISTEN</>, and
     <command>NOTIFY</>, so Hot Standby sessions operate under slightly tighter
     restrictions than ordinary read-only sessions.  It is possible that some
     of these restrictions might be loosened in a future release.
@@ -2203,12 +2215,12 @@ LOG:  database system is ready to accept read only connections
     <function>pg_cancel_backend()</>
     and <function>pg_terminate_backend()</> will work on user backends,
     but not the Startup process, which performs
-    recovery. <structname>pg_stat_activity</structname> does not show an
-    entry for the Startup process, nor do recovering transactions show
-    as active. As a result, <structname>pg_prepared_xacts</structname>
-    is always empty during recovery. If you wish to resolve in-doubt
-    prepared transactions, view <literal>pg_prepared_xacts</> on the
-    primary and issue commands to resolve transactions there.
+    recovery. <structname>pg_stat_activity</structname> does not show
+    recovering transactions as active. As a result,
+    <structname>pg_prepared_xacts</structname> is always empty during
+    recovery. If you wish to resolve in-doubt prepared transactions, view
+    <literal>pg_prepared_xacts</> on the primary and issue commands to
+    resolve transactions there or resolve them after the end of recovery.
    </para>
 
    <para>

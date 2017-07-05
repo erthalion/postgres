@@ -343,7 +343,7 @@ tfuncInitialize(TableFuncScanState *tstate, ExprContext *econtext, Datum doc)
 	int			colno;
 	Datum		value;
 	int			ordinalitycol =
-		((TableFuncScan *) (tstate->ss.ps.plan))->tablefunc->ordinalitycol;
+	((TableFuncScan *) (tstate->ss.ps.plan))->tablefunc->ordinalitycol;
 
 	/*
 	 * Install the document as a possibly-toasted Datum into the tablefunc
@@ -398,9 +398,9 @@ tfuncInitialize(TableFuncScanState *tstate, ExprContext *econtext, Datum doc)
 				if (isnull)
 					ereport(ERROR,
 							(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-						 errmsg("column filter expression must not be null"),
+							 errmsg("column filter expression must not be null"),
 							 errdetail("Filter for column \"%s\" is null.",
-								  NameStr(tupdesc->attrs[colno]->attname))));
+									   NameStr(tupdesc->attrs[colno]->attname))));
 				colfilter = TextDatumGetCString(value);
 			}
 			else
@@ -443,8 +443,8 @@ tfuncLoadRows(TableFuncScanState *tstate, ExprContext *econtext)
 		ExecClearTuple(tstate->ss.ss_ScanTupleSlot);
 
 		/*
-		 * Obtain the value of each column for this row, installing them into the
-		 * slot; then add the tuple to the tuplestore.
+		 * Obtain the value of each column for this row, installing them into
+		 * the slot; then add the tuple to the tuplestore.
 		 */
 		for (colno = 0; colno < natts; colno++)
 		{
@@ -456,7 +456,7 @@ tfuncLoadRows(TableFuncScanState *tstate, ExprContext *econtext)
 			}
 			else
 			{
-				bool	isnull;
+				bool		isnull;
 
 				values[colno] = routine->GetValue(tstate,
 												  colno,

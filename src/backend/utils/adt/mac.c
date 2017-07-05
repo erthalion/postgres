@@ -40,7 +40,7 @@ typedef struct
 	bool		estimating;		/* true if estimating cardinality */
 
 	hyperLogLogState abbr_card; /* cardinality estimator */
-}	macaddr_sortsupport_state;
+} macaddr_sortsupport_state;
 
 static int	macaddr_cmp_internal(macaddr *a1, macaddr *a2);
 static int	macaddr_fast_cmp(Datum x, Datum y, SortSupport ssup);
@@ -99,7 +99,7 @@ macaddr_in(PG_FUNCTION_ARGS)
 		(e < 0) || (e > 255) || (f < 0) || (f > 255))
 		ereport(ERROR,
 				(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-		   errmsg("invalid octet value in \"macaddr\" value: \"%s\"", str)));
+				 errmsg("invalid octet value in \"macaddr\" value: \"%s\"", str)));
 
 	result = (macaddr *) palloc(sizeof(macaddr));
 
@@ -460,7 +460,7 @@ macaddr_abbrev_abort(int memtupcount, SortSupport ssup)
 		if (trace_sort)
 			elog(LOG,
 				 "macaddr_abbrev: aborting abbreviation at cardinality %f"
-			   " below threshold %f after " INT64_FORMAT " values (%d rows)",
+				 " below threshold %f after " INT64_FORMAT " values (%d rows)",
 				 abbr_card, uss->input_count / 2000.0 + 0.5, uss->input_count,
 				 memtupcount);
 #endif

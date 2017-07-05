@@ -983,6 +983,11 @@ SELECT '52093.89'::money::numeric::float8;
    </para>
 
    <para>
+    Division of a <type>money</type> value by an integer value is performed
+    with truncation of the fractional part towards zero.  To get a rounded
+    result, divide by a floating-point value, or cast the <type>money</type>
+    value to <type>numeric</> before dividing and back to <type>money</type>
+    afterwards.  (The latter is preferable to avoid risking precision loss.)
     When a <type>money</type> value is divided by another <type>money</type>
     value, the result is <type>double precision</type> (i.e., a pure number,
     not money); the currency units cancel each other out in the division.
@@ -4635,7 +4640,7 @@ SELECT * FROM pg_attribute
     standard comparison operators, like <literal>=</literal> and
     <literal>&gt;</literal>.  Two LSNs can be subtracted using the
     <literal>-</literal> operator; the result is the number of bytes separating
-    those write-ahead log positions.
+    those write-ahead log locations.
    </para>
   </sect1>
 

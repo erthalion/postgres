@@ -30,13 +30,13 @@ typedef int XidStatus;
 
 typedef struct xl_clog_truncate
 {
-	int pageno;
+	int			pageno;
 	TransactionId oldestXact;
-	Oid oldestXactDb;
+	Oid			oldestXactDb;
 } xl_clog_truncate;
 
 extern void TransactionIdSetTreeStatus(TransactionId xid, int nsubxids,
-				   TransactionId *subxids, XidStatus status, XLogRecPtr lsn);
+						   TransactionId *subxids, XidStatus status, XLogRecPtr lsn);
 extern XidStatus TransactionIdGetStatus(TransactionId xid, XLogRecPtr *lsn);
 
 extern Size CLOGShmemBuffers(void);
@@ -58,4 +58,4 @@ extern void clog_redo(XLogReaderState *record);
 extern void clog_desc(StringInfo buf, XLogReaderState *record);
 extern const char *clog_identify(uint8 info);
 
-#endif   /* CLOG_H */
+#endif							/* CLOG_H */

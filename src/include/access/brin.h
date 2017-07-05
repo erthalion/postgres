@@ -31,8 +31,8 @@ typedef struct BrinOptions
  */
 typedef struct BrinStatsData
 {
-	BlockNumber	pagesPerRange;
-	BlockNumber	revmapNumPages;
+	BlockNumber pagesPerRange;
+	BlockNumber revmapNumPages;
 } BrinStatsData;
 
 
@@ -49,4 +49,4 @@ typedef struct BrinStatsData
 
 extern void brinGetStats(Relation index, BrinStatsData *stats);
 
-#endif   /* BRIN_H */
+#endif							/* BRIN_H */

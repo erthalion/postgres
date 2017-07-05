@@ -17,7 +17,7 @@ typedef enum
 	CLOSE_NORMAL,
 	CLOSE_UNLINK,
 	CLOSE_NO_RENAME
-}	WalCloseMethod;
+} WalCloseMethod;
 
 /*
  * A WalWriteMethod structure represents the different methods used
@@ -38,7 +38,7 @@ struct WalWriteMethod
 	 * automatically renamed in close(). If pad_to_size is specified, the file
 	 * will be padded with NUL up to that size, if supported by the Walmethod.
 	 */
-	Walfile(*open_for_write) (const char *pathname, const char *temp_suffix, size_t pad_to_size);
+	Walfile		(*open_for_write) (const char *pathname, const char *temp_suffix, size_t pad_to_size);
 
 	/*
 	 * Close an open Walfile, using one or more methods for handling automatic
@@ -80,15 +80,15 @@ struct WalWriteMethod
 
 /*
  * Available WAL methods:
- *	- WalDirectoryMethod - write WAL to regular files in a standard pg_xlog
- *	- TarDirectoryMethod - write WAL to a tarfile corresponding to pg_xlog
+ *	- WalDirectoryMethod - write WAL to regular files in a standard pg_wal
+ *	- TarDirectoryMethod - write WAL to a tarfile corresponding to pg_wal
  *						   (only implements the methods required for pg_basebackup,
  *						   not all those required for pg_receivewal)
  */
 WalWriteMethod *CreateWalDirectoryMethod(const char *basedir,
-										 int compression, bool sync);
+						 int compression, bool sync);
 WalWriteMethod *CreateWalTarMethod(const char *tarbase, int compression, bool sync);
 
 /* Cleanup routines for previously-created methods */
-void FreeWalDirectoryMethod(void);
-void FreeWalTarMethod(void);
+void		FreeWalDirectoryMethod(void);
+void		FreeWalTarMethod(void);

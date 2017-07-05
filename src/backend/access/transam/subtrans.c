@@ -10,6 +10,7 @@
  * The tree can easily be walked from child to parent, but not in the
  * opposite direction.
  *
+ * This code is based on xact.c, but the robustness requirements
  * are completely different from pg_xact, because we only need to remember
  * pg_subtrans information for currently-open transactions.  Thus, there is
  * no need to preserve data over a crash and restart.
@@ -87,9 +88,9 @@ SubTransSetParent(TransactionId xid, TransactionId parent)
 	ptr += entryno;
 
 	/*
-	 * It's possible we'll try to set the parent xid multiple times
-	 * but we shouldn't ever be changing the xid from one valid xid
-	 * to another valid xid, which would corrupt the data structure.
+	 * It's possible we'll try to set the parent xid multiple times but we
+	 * shouldn't ever be changing the xid from one valid xid to another valid
+	 * xid, which would corrupt the data structure.
 	 */
 	if (*ptr != parent)
 	{
@@ -162,13 +163,13 @@ SubTransGetTopmostTransaction(TransactionId xid)
 		parentXid = SubTransGetParent(parentXid);
 
 		/*
-		 * By convention the parent xid gets allocated first, so should
-		 * always precede the child xid. Anything else points to a corrupted
-		 * data structure that could lead to an infinite loop, so exit.
+		 * By convention the parent xid gets allocated first, so should always
+		 * precede the child xid. Anything else points to a corrupted data
+		 * structure that could lead to an infinite loop, so exit.
 		 */
 		if (!TransactionIdPrecedes(parentXid, previousXid))
 			elog(ERROR, "pg_subtrans contains invalid entry: xid %u points to parent xid %u",
-							previousXid, parentXid);
+				 previousXid, parentXid);
 	}
 
 	Assert(TransactionIdIsValid(previousXid));

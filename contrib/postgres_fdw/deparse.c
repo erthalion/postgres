@@ -168,11 +168,11 @@ static void deparseLockingClause(deparse_expr_cxt *context);
 static void appendOrderByClause(List *pathkeys, deparse_expr_cxt *context);
 static void appendConditions(List *exprs, deparse_expr_cxt *context);
 static void deparseFromExprForRel(StringInfo buf, PlannerInfo *root,
-					RelOptInfo *joinrel, bool use_alias, List **params_list);
+					  RelOptInfo *joinrel, bool use_alias, List **params_list);
 static void deparseFromExpr(List *quals, deparse_expr_cxt *context);
 static void deparseRangeTblRef(StringInfo buf, PlannerInfo *root,
-							   RelOptInfo *foreignrel, bool make_subquery,
-							   List **params_list);
+				   RelOptInfo *foreignrel, bool make_subquery,
+				   List **params_list);
 static void deparseAggref(Aggref *node, deparse_expr_cxt *context);
 static void appendGroupByClause(List *tlist, deparse_expr_cxt *context);
 static void appendAggOrderBy(List *orderList, List *targetList,
@@ -185,9 +185,9 @@ static Node *deparseSortGroupClause(Index ref, List *tlist,
  * Helper functions
  */
 static bool is_subquery_var(Var *node, RelOptInfo *foreignrel,
-							int *relno, int *colno);
+				int *relno, int *colno);
 static void get_relation_column_alias_ids(Var *node, RelOptInfo *foreignrel,
-										  int *relno, int *colno);
+							  int *relno, int *colno);
 
 
 /*
@@ -728,7 +728,7 @@ foreign_expr_walker(Node *node,
 												   agg->args);
 						sortcoltype = exprType((Node *) tle->expr);
 						typentry = lookup_type_cache(sortcoltype,
-										TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
+													 TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
 						/* Check shippability of non-default sort operator. */
 						if (srt->sortop != typentry->lt_opr &&
 							srt->sortop != typentry->gt_opr &&
@@ -883,8 +883,8 @@ build_tlist_to_deparse(RelOptInfo *foreignrel)
 	 * required for evaluating the local conditions.
 	 */
 	tlist = add_to_flat_tlist(tlist,
-					   pull_var_clause((Node *) foreignrel->reltarget->exprs,
-									   PVC_RECURSE_PLACEHOLDERS));
+							  pull_var_clause((Node *) foreignrel->reltarget->exprs,
+											  PVC_RECURSE_PLACEHOLDERS));
 	foreach(lc, fpinfo->local_conds)
 	{
 		RestrictInfo *rinfo = lfirst_node(RestrictInfo, lc);
@@ -1017,8 +1017,8 @@ deparseSelectSql(List *tlist, bool is_subquery, List **retrieved_attrs,
 	{
 		/*
 		 * For a relation that is deparsed as a subquery, emit expressions
-		 * specified in the relation's reltarget.  Note that since this is
-		 * for the subquery, no need to care about *retrieved_attrs.
+		 * specified in the relation's reltarget.  Note that since this is for
+		 * the subquery, no need to care about *retrieved_attrs.
 		 */
 		deparseSubqueryTargetList(context);
 	}
@@ -1434,7 +1434,7 @@ deparseFromExprForRel(StringInfo buf, PlannerInfo *root, RelOptInfo *foreignrel,
 		 * ((outer relation) <join type> (inner relation) ON (joinclauses))
 		 */
 		appendStringInfo(buf, "(%s %s JOIN %s ON ", join_sql_o.data,
-					   get_jointype_name(fpinfo->jointype), join_sql_i.data);
+						 get_jointype_name(fpinfo->jointype), join_sql_i.data);
 
 		/* Append join clause; (TRUE) if no join clause */
 		if (fpinfo->joinclauses)
@@ -1596,7 +1596,7 @@ deparseInsertSql(StringInfo buf, PlannerInfo *root,
 		appendStringInfoString(buf, " ON CONFLICT DO NOTHING");
 
 	deparseReturningList(buf, root, rtindex, rel,
-					   rel->trigdesc && rel->trigdesc->trig_insert_after_row,
+						 rel->trigdesc && rel->trigdesc->trig_insert_after_row,
 						 returningList, retrieved_attrs);
 }
 
@@ -1638,7 +1638,7 @@ deparseUpdateSql(StringInfo buf, PlannerInfo *root,
 	appendStringInfoString(buf, " WHERE ctid = $1");
 
 	deparseReturningList(buf, root, rtindex, rel,
-					   rel->trigdesc && rel->trigdesc->trig_update_after_row,
+						 rel->trigdesc && rel->trigdesc->trig_update_after_row,
 						 returningList, retrieved_attrs);
 }
 
@@ -1728,7 +1728,7 @@ deparseDeleteSql(StringInfo buf, PlannerInfo *root,
 	appendStringInfoString(buf, " WHERE ctid = $1");
 
 	deparseReturningList(buf, root, rtindex, rel,
-					   rel->trigdesc && rel->trigdesc->trig_delete_after_row,
+						 rel->trigdesc && rel->trigdesc->trig_delete_after_row,
 						 returningList, retrieved_attrs);
 }
 
@@ -2189,8 +2189,8 @@ deparseVar(Var *node, deparse_expr_cxt *context)
 
 	/*
 	 * If the Var belongs to the foreign relation that is deparsed as a
-	 * subquery, use the relation and column alias to the Var provided
-	 * by the subquery, instead of the remote name.
+	 * subquery, use the relation and column alias to the Var provided by the
+	 * subquery, instead of the remote name.
 	 */
 	if (is_subquery_var(node, context->scanrel, &relno, &colno))
 	{

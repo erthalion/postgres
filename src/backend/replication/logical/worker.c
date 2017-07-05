@@ -52,6 +52,7 @@
 
 #include "postmaster/bgworker.h"
 #include "postmaster/postmaster.h"
+#include "postmaster/walwriter.h"
 
 #include "replication/decode.h"
 #include "replication/logical.h"
@@ -72,6 +73,8 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 
+#include "tcop/tcopprot.h"
+
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/datum.h"
@@ -88,35 +91,38 @@
 
 typedef struct FlushPosition
 {
-	dlist_node node;
-	XLogRecPtr local_end;
-	XLogRecPtr remote_end;
+	dlist_node	node;
+	XLogRecPtr	local_end;
+	XLogRecPtr	remote_end;
 } FlushPosition;
 
 static dlist_head lsn_mapping = DLIST_STATIC_INIT(lsn_mapping);
 
 typedef struct SlotErrCallbackArg
 {
-	LogicalRepRelation	*rel;
+	LogicalRepRelation *rel;
 	int			attnum;
 } SlotErrCallbackArg;
 
-static MemoryContext	ApplyMessageContext = NULL;
-MemoryContext			ApplyContext = NULL;
+static MemoryContext ApplyMessageContext = NULL;
+MemoryContext ApplyContext = NULL;
 
-WalReceiverConn	   *wrconn = NULL;
+WalReceiverConn *wrconn = NULL;
 
-Subscription	   *MySubscription = NULL;
-bool				MySubscriptionValid = false;
+Subscription *MySubscription = NULL;
+bool		MySubscriptionValid = false;
 
-bool				in_remote_transaction = false;
-static XLogRecPtr	remote_final_lsn = InvalidXLogRecPtr;
+bool		in_remote_transaction = false;
+static XLogRecPtr remote_final_lsn = InvalidXLogRecPtr;
 
 static void send_feedback(XLogRecPtr recvpos, bool force, bool requestReply);
 
 static void store_flush_position(XLogRecPtr remote_lsn);
 
-static void reread_subscription(void);
+static void maybe_reread_subscription(void);
+
+/* Flags set by signal handlers */
+static volatile sig_atomic_t got_SIGHUP = false;
 
 /*
  * Should this worker apply changes for given relation.
@@ -152,16 +158,18 @@ ensure_transaction(void)
 {
 	if (IsTransactionState())
 	{
+		SetCurrentStatementStartTimestamp();
+
 		if (CurrentMemoryContext != ApplyMessageContext)
 			MemoryContextSwitchTo(ApplyMessageContext);
 
 		return false;
 	}
 
+	SetCurrentStatementStartTimestamp();
 	StartTransactionCommand();
 
-	if (!MySubscriptionValid)
-		reread_subscription();
+	maybe_reread_subscription();
 
 	MemoryContextSwitchTo(ApplyMessageContext);
 	return true;
@@ -215,7 +223,7 @@ create_estate_for_relation(LogicalRepRelMapEntry *rel)
  */
 static void
 slot_fill_defaults(LogicalRepRelMapEntry *rel, EState *estate,
-				 TupleTableSlot *slot)
+				   TupleTableSlot *slot)
 {
 	TupleDesc	desc = RelationGetDescr(rel->localrel);
 	int			num_phys_attrs = desc->natts;
@@ -271,9 +279,9 @@ slot_fill_defaults(LogicalRepRelMapEntry *rel, EState *estate,
 static void
 slot_store_error_callback(void *arg)
 {
-	SlotErrCallbackArg	   *errarg = (SlotErrCallbackArg *) arg;
-	Oid		remotetypoid,
-			localtypoid;
+	SlotErrCallbackArg *errarg = (SlotErrCallbackArg *) arg;
+	Oid			remotetypoid,
+				localtypoid;
 
 	if (errarg->attnum < 0)
 		return;
@@ -295,12 +303,12 @@ slot_store_error_callback(void *arg)
  */
 static void
 slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
-				  char **values)
+					char **values)
 {
-	int		natts = slot->tts_tupleDescriptor->natts;
-	int		i;
-	SlotErrCallbackArg		errarg;
-	ErrorContextCallback	errcallback;
+	int			natts = slot->tts_tupleDescriptor->natts;
+	int			i;
+	SlotErrCallbackArg errarg;
+	ErrorContextCallback errcallback;
 
 	ExecClearTuple(slot);
 
@@ -315,14 +323,14 @@ slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 	/* Call the "in" function for each non-dropped attribute */
 	for (i = 0; i < natts; i++)
 	{
-		Form_pg_attribute	att = slot->tts_tupleDescriptor->attrs[i];
-		int					remoteattnum = rel->attrmap[i];
+		Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
+		int			remoteattnum = rel->attrmap[i];
 
 		if (!att->attisdropped && remoteattnum >= 0 &&
 			values[remoteattnum] != NULL)
 		{
-			Oid typinput;
-			Oid typioparam;
+			Oid			typinput;
+			Oid			typioparam;
 
 			errarg.attnum = remoteattnum;
 
@@ -359,12 +367,12 @@ slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
  */
 static void
 slot_modify_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
-				   char **values, bool *replaces)
+					 char **values, bool *replaces)
 {
-	int		natts = slot->tts_tupleDescriptor->natts;
-	int		i;
-	SlotErrCallbackArg		errarg;
-	ErrorContextCallback	errcallback;
+	int			natts = slot->tts_tupleDescriptor->natts;
+	int			i;
+	SlotErrCallbackArg errarg;
+	ErrorContextCallback errcallback;
 
 	slot_getallattrs(slot);
 	ExecClearTuple(slot);
@@ -380,16 +388,16 @@ slot_modify_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 	/* Call the "in" function for each replaced attribute */
 	for (i = 0; i < natts; i++)
 	{
-		Form_pg_attribute	att = slot->tts_tupleDescriptor->attrs[i];
-		int					remoteattnum = rel->attrmap[i];
+		Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
+		int			remoteattnum = rel->attrmap[i];
 
 		if (remoteattnum >= 0 && !replaces[remoteattnum])
 			continue;
 
 		if (remoteattnum >= 0 && values[remoteattnum] != NULL)
 		{
-			Oid typinput;
-			Oid typioparam;
+			Oid			typinput;
+			Oid			typioparam;
 
 			errarg.attnum = remoteattnum;
 
@@ -418,7 +426,7 @@ slot_modify_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 static void
 apply_handle_begin(StringInfo s)
 {
-	LogicalRepBeginData	begin_data;
+	LogicalRepBeginData begin_data;
 
 	logicalrep_read_begin(s, &begin_data);
 
@@ -437,7 +445,7 @@ apply_handle_begin(StringInfo s)
 static void
 apply_handle_commit(StringInfo s)
 {
-	LogicalRepCommitData	commit_data;
+	LogicalRepCommitData commit_data;
 
 	logicalrep_read_commit(s, &commit_data);
 
@@ -458,6 +466,12 @@ apply_handle_commit(StringInfo s)
 
 		store_flush_position(commit_data.end_lsn);
 	}
+	else
+	{
+		/* Process any invalidation messages that might have accumulated. */
+		AcceptInvalidationMessages();
+		maybe_reread_subscription();
+	}
 
 	in_remote_transaction = false;
 
@@ -476,8 +490,8 @@ static void
 apply_handle_origin(StringInfo s)
 {
 	/*
-	 * ORIGIN message can only come inside remote transaction and before
-	 * any actual writes.
+	 * ORIGIN message can only come inside remote transaction and before any
+	 * actual writes.
 	 */
 	if (!in_remote_transaction ||
 		(IsTransactionState() && !am_tablesync_worker()))
@@ -497,7 +511,7 @@ apply_handle_origin(StringInfo s)
 static void
 apply_handle_relation(StringInfo s)
 {
-	LogicalRepRelation  *rel;
+	LogicalRepRelation *rel;
 
 	rel = logicalrep_read_rel(s);
 	logicalrep_relmap_update(rel);
@@ -512,7 +526,7 @@ apply_handle_relation(StringInfo s)
 static void
 apply_handle_type(StringInfo s)
 {
-	LogicalRepTyp	typ;
+	LogicalRepTyp typ;
 
 	logicalrep_read_typ(s, &typ);
 	logicalrep_typmap_update(&typ);
@@ -526,7 +540,7 @@ apply_handle_type(StringInfo s)
 static Oid
 GetRelationIdentityOrPK(Relation rel)
 {
-	Oid	idxoid;
+	Oid			idxoid;
 
 	idxoid = RelationGetReplicaIndex(rel);
 
@@ -543,11 +557,11 @@ static void
 apply_handle_insert(StringInfo s)
 {
 	LogicalRepRelMapEntry *rel;
-	LogicalRepTupleData	newtup;
-	LogicalRepRelId		relid;
-	EState			   *estate;
-	TupleTableSlot	   *remoteslot;
-	MemoryContext		oldctx;
+	LogicalRepTupleData newtup;
+	LogicalRepRelId relid;
+	EState	   *estate;
+	TupleTableSlot *remoteslot;
+	MemoryContext oldctx;
 
 	ensure_transaction();
 
@@ -607,8 +621,8 @@ check_relation_updatable(LogicalRepRelMapEntry *rel)
 		return;
 
 	/*
-	 * We are in error mode so it's fine this is somewhat slow.
-	 * It's better to give user correct error.
+	 * We are in error mode so it's fine this is somewhat slow. It's better to
+	 * give user correct error.
 	 */
 	if (OidIsValid(GetRelationIdentityOrPK(rel->localrel)))
 	{
@@ -637,17 +651,17 @@ static void
 apply_handle_update(StringInfo s)
 {
 	LogicalRepRelMapEntry *rel;
-	LogicalRepRelId		relid;
-	Oid					idxoid;
-	EState			   *estate;
-	EPQState			epqstate;
-	LogicalRepTupleData	oldtup;
-	LogicalRepTupleData	newtup;
-	bool				has_oldtup;
-	TupleTableSlot	   *localslot;
-	TupleTableSlot	   *remoteslot;
-	bool				found;
-	MemoryContext		oldctx;
+	LogicalRepRelId relid;
+	Oid			idxoid;
+	EState	   *estate;
+	EPQState	epqstate;
+	LogicalRepTupleData oldtup;
+	LogicalRepTupleData newtup;
+	bool		has_oldtup;
+	TupleTableSlot *localslot;
+	TupleTableSlot *remoteslot;
+	bool		found;
+	MemoryContext oldctx;
 
 	ensure_transaction();
 
@@ -685,8 +699,8 @@ apply_handle_update(StringInfo s)
 	MemoryContextSwitchTo(oldctx);
 
 	/*
-	 * Try to find tuple using either replica identity index, primary key
-	 * or if needed, sequential scan.
+	 * Try to find tuple using either replica identity index, primary key or
+	 * if needed, sequential scan.
 	 */
 	idxoid = GetRelationIdentityOrPK(rel->localrel);
 	Assert(OidIsValid(idxoid) ||
@@ -758,15 +772,15 @@ static void
 apply_handle_delete(StringInfo s)
 {
 	LogicalRepRelMapEntry *rel;
-	LogicalRepTupleData	oldtup;
-	LogicalRepRelId		relid;
-	Oid					idxoid;
-	EState			   *estate;
-	EPQState			epqstate;
-	TupleTableSlot	   *remoteslot;
-	TupleTableSlot	   *localslot;
-	bool				found;
-	MemoryContext		oldctx;
+	LogicalRepTupleData oldtup;
+	LogicalRepRelId relid;
+	Oid			idxoid;
+	EState	   *estate;
+	EPQState	epqstate;
+	TupleTableSlot *remoteslot;
+	TupleTableSlot *localslot;
+	bool		found;
+	MemoryContext oldctx;
 
 	ensure_transaction();
 
@@ -802,8 +816,8 @@ apply_handle_delete(StringInfo s)
 	MemoryContextSwitchTo(oldctx);
 
 	/*
-	 * Try to find tuple using either replica identity index, primary key
-	 * or if needed, sequential scan.
+	 * Try to find tuple using either replica identity index, primary key or
+	 * if needed, sequential scan.
 	 */
 	idxoid = GetRelationIdentityOrPK(rel->localrel);
 	Assert(OidIsValid(idxoid) ||
@@ -826,7 +840,7 @@ apply_handle_delete(StringInfo s)
 	}
 	else
 	{
-		/* The tuple to be deleted could not be found.*/
+		/* The tuple to be deleted could not be found. */
 		ereport(DEBUG1,
 				(errmsg("logical replication could not find row for delete "
 						"in replication target %s",
@@ -856,39 +870,39 @@ apply_handle_delete(StringInfo s)
 static void
 apply_dispatch(StringInfo s)
 {
-	char action = pq_getmsgbyte(s);
+	char		action = pq_getmsgbyte(s);
 
 	switch (action)
 	{
-		/* BEGIN */
+			/* BEGIN */
 		case 'B':
 			apply_handle_begin(s);
 			break;
-		/* COMMIT */
+			/* COMMIT */
 		case 'C':
 			apply_handle_commit(s);
 			break;
-		/* INSERT */
+			/* INSERT */
 		case 'I':
 			apply_handle_insert(s);
 			break;
-		/* UPDATE */
+			/* UPDATE */
 		case 'U':
 			apply_handle_update(s);
 			break;
-		/* DELETE */
+			/* DELETE */
 		case 'D':
 			apply_handle_delete(s);
 			break;
-		/* RELATION */
+			/* RELATION */
 		case 'R':
 			apply_handle_relation(s);
 			break;
-		/* TYPE */
+			/* TYPE */
 		case 'Y':
 			apply_handle_type(s);
 			break;
-		/* ORIGIN */
+			/* ORIGIN */
 		case 'O':
 			apply_handle_origin(s);
 			break;
@@ -925,7 +939,7 @@ get_flush_position(XLogRecPtr *write, XLogRecPtr *flush,
 	dlist_foreach_modify(iter, &lsn_mapping)
 	{
 		FlushPosition *pos =
-			dlist_container(FlushPosition, node, iter.cur);
+		dlist_container(FlushPosition, node, iter.cur);
 
 		*write = pos->remote_end;
 
@@ -995,17 +1009,17 @@ static void
 LogicalRepApplyLoop(XLogRecPtr last_received)
 {
 	/*
-	 * Init the ApplyMessageContext which we clean up after each
-	 * replication protocol message.
+	 * Init the ApplyMessageContext which we clean up after each replication
+	 * protocol message.
 	 */
 	ApplyMessageContext = AllocSetContextCreate(ApplyContext,
-										 "ApplyMessageContext",
-										 ALLOCSET_DEFAULT_SIZES);
+												"ApplyMessageContext",
+												ALLOCSET_DEFAULT_SIZES);
 
 	/* mark as idle, before starting to loop */
 	pgstat_report_activity(STATE_IDLE, NULL);
 
-	while (!got_SIGTERM)
+	for (;;)
 	{
 		pgsocket	fd = PGINVALID_SOCKET;
 		int			rc;
@@ -1014,6 +1028,9 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		bool		endofstream = false;
 		TimestampTz last_recv_timestamp = GetCurrentTimestamp();
 		bool		ping_sent = false;
+		long		wait_time;
+
+		CHECK_FOR_INTERRUPTS();
 
 		MemoryContextSwitchTo(ApplyMessageContext);
 
@@ -1039,7 +1056,7 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 				}
 				else
 				{
-					int c;
+					int			c;
 					StringInfoData s;
 
 					/* Reset timeout. */
@@ -1099,20 +1116,20 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 
 				len = walrcv_receive(wrconn, &buf, &fd);
 			}
-
-			/* confirm all writes at once */
-			send_feedback(last_received, false, false);
 		}
+
+		/* confirm all writes so far */
+		send_feedback(last_received, false, false);
 
 		if (!in_remote_transaction)
 		{
 			/*
 			 * If we didn't get any transactions for a while there might be
-			 * unconsumed invalidation messages in the queue, consume them now.
+			 * unconsumed invalidation messages in the queue, consume them
+			 * now.
 			 */
 			AcceptInvalidationMessages();
-			if (!MySubscriptionValid)
-				reread_subscription();
+			maybe_reread_subscription();
 
 			/* Process any table synchronization changes. */
 			process_syncing_tables(last_received);
@@ -1126,22 +1143,38 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		if (endofstream)
 		{
 			TimeLineID	tli;
+
 			walrcv_endstreaming(wrconn, &tli);
 			break;
 		}
 
 		/*
-		 * Wait for more data or latch.
+		 * Wait for more data or latch.  If we have unflushed transactions,
+		 * wake up after WalWriterDelay to see if they've been flushed yet (in
+		 * which case we should send a feedback message).  Otherwise, there's
+		 * no particular urgency about waking up unless we get data or a
+		 * signal.
 		 */
-		rc = WaitLatchOrSocket(&MyProc->procLatch,
+		if (!dlist_is_empty(&lsn_mapping))
+			wait_time = WalWriterDelay;
+		else
+			wait_time = NAPTIME_PER_CYCLE;
+
+		rc = WaitLatchOrSocket(MyLatch,
 							   WL_SOCKET_READABLE | WL_LATCH_SET |
 							   WL_TIMEOUT | WL_POSTMASTER_DEATH,
-							   fd, NAPTIME_PER_CYCLE,
+							   fd, wait_time,
 							   WAIT_EVENT_LOGICAL_APPLY_MAIN);
 
 		/* Emergency bailout if postmaster has died */
 		if (rc & WL_POSTMASTER_DEATH)
 			proc_exit(1);
+
+		if (rc & WL_LATCH_SET)
+		{
+			ResetLatch(MyLatch);
+			CHECK_FOR_INTERRUPTS();
+		}
 
 		if (got_SIGHUP)
 		{
@@ -1152,19 +1185,18 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 		if (rc & WL_TIMEOUT)
 		{
 			/*
-			 * We didn't receive anything new. If we haven't heard
-			 * anything from the server for more than
-			 * wal_receiver_timeout / 2, ping the server. Also, if
-			 * it's been longer than wal_receiver_status_interval
-			 * since the last update we sent, send a status update to
-			 * the master anyway, to report any progress in applying
-			 * WAL.
+			 * We didn't receive anything new. If we haven't heard anything
+			 * from the server for more than wal_receiver_timeout / 2, ping
+			 * the server. Also, if it's been longer than
+			 * wal_receiver_status_interval since the last update we sent,
+			 * send a status update to the master anyway, to report any
+			 * progress in applying WAL.
 			 */
 			bool		requestReply = false;
 
 			/*
-			 * Check if time since last receive from standby has
-			 * reached the configured limit.
+			 * Check if time since last receive from standby has reached the
+			 * configured limit.
 			 */
 			if (wal_receiver_timeout > 0)
 			{
@@ -1180,8 +1212,8 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 							(errmsg("terminating logical replication worker due to timeout")));
 
 				/*
-				 * We didn't receive anything new, for half of
-				 * receiver replication timeout. Ping the server.
+				 * We didn't receive anything new, for half of receiver
+				 * replication timeout. Ping the server.
 				 */
 				if (!ping_sent)
 				{
@@ -1197,8 +1229,6 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 
 			send_feedback(last_received, requestReply, requestReply);
 		}
-
-		ResetLatch(&MyProc->procLatch);
 	}
 }
 
@@ -1211,17 +1241,17 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 static void
 send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 {
-	static StringInfo	reply_message = NULL;
-	static TimestampTz	send_time = 0;
+	static StringInfo reply_message = NULL;
+	static TimestampTz send_time = 0;
 
 	static XLogRecPtr last_recvpos = InvalidXLogRecPtr;
 	static XLogRecPtr last_writepos = InvalidXLogRecPtr;
 	static XLogRecPtr last_flushpos = InvalidXLogRecPtr;
 
-	XLogRecPtr writepos;
-	XLogRecPtr flushpos;
+	XLogRecPtr	writepos;
+	XLogRecPtr	flushpos;
 	TimestampTz now;
-	bool have_pending_txes;
+	bool		have_pending_txes;
 
 	/*
 	 * If the user doesn't want status to be reported to the publisher, be
@@ -1237,8 +1267,8 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 	get_flush_position(&writepos, &flushpos, &have_pending_txes);
 
 	/*
-	 * No outstanding transactions to flush, we can report the latest
-	 * received position. This is important for synchronous replication.
+	 * No outstanding transactions to flush, we can report the latest received
+	 * position. This is important for synchronous replication.
 	 */
 	if (!have_pending_txes)
 		flushpos = writepos = recvpos;
@@ -1262,7 +1292,8 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 
 	if (!reply_message)
 	{
-		MemoryContext	oldctx = MemoryContextSwitchTo(ApplyContext);
+		MemoryContext oldctx = MemoryContextSwitchTo(ApplyContext);
+
 		reply_message = makeStringInfo();
 		MemoryContextSwitchTo(oldctx);
 	}
@@ -1270,10 +1301,10 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 		resetStringInfo(reply_message);
 
 	pq_sendbyte(reply_message, 'r');
-	pq_sendint64(reply_message, recvpos);		/* write */
-	pq_sendint64(reply_message, flushpos);		/* flush */
-	pq_sendint64(reply_message, writepos);		/* apply */
-	pq_sendint64(reply_message, now);			/* sendTime */
+	pq_sendint64(reply_message, recvpos);	/* write */
+	pq_sendint64(reply_message, flushpos);	/* flush */
+	pq_sendint64(reply_message, writepos);	/* apply */
+	pq_sendint64(reply_message, now);	/* sendTime */
 	pq_sendbyte(reply_message, requestReply);	/* replyRequested */
 
 	elog(DEBUG2, "sending feedback (force %d) to recv %X/%X, write %X/%X, flush %X/%X",
@@ -1293,16 +1324,19 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
 		last_flushpos = flushpos;
 }
 
-
 /*
- * Reread subscription info and exit on change.
+ * Reread subscription info if needed. Most changes will be exit.
  */
 static void
-reread_subscription(void)
+maybe_reread_subscription(void)
 {
-	MemoryContext	oldctx;
-	Subscription   *newsub;
-	bool			started_tx = false;
+	MemoryContext oldctx;
+	Subscription *newsub;
+	bool		started_tx = false;
+
+	/* When cache state is valid there is nothing to do here. */
+	if (MySubscriptionValid)
+		return;
 
 	/* This function might be called inside or outside of transaction. */
 	if (!IsTransactionState())
@@ -1317,49 +1351,44 @@ reread_subscription(void)
 	newsub = GetSubscription(MyLogicalRepWorker->subid, true);
 
 	/*
-	 * Exit if the subscription was removed.
-	 * This normally should not happen as the worker gets killed
-	 * during DROP SUBSCRIPTION.
+	 * Exit if the subscription was removed. This normally should not happen
+	 * as the worker gets killed during DROP SUBSCRIPTION.
 	 */
 	if (!newsub)
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
+				(errmsg("logical replication apply worker for subscription \"%s\" will "
 						"stop because the subscription was removed",
 						MySubscription->name)));
 
-		walrcv_disconnect(wrconn);
 		proc_exit(0);
 	}
 
 	/*
-	 * Exit if the subscription was disabled.
-	 * This normally should not happen as the worker gets killed
-	 * during ALTER SUBSCRIPTION ... DISABLE.
+	 * Exit if the subscription was disabled. This normally should not happen
+	 * as the worker gets killed during ALTER SUBSCRIPTION ... DISABLE.
 	 */
 	if (!newsub->enabled)
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
+				(errmsg("logical replication apply worker for subscription \"%s\" will "
 						"stop because the subscription was disabled",
 						MySubscription->name)));
 
-		walrcv_disconnect(wrconn);
 		proc_exit(0);
 	}
 
 	/*
-	 * Exit if connection string was changed. The launcher will start
-	 * new worker.
+	 * Exit if connection string was changed. The launcher will start new
+	 * worker.
 	 */
 	if (strcmp(newsub->conninfo, MySubscription->conninfo) != 0)
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
+				(errmsg("logical replication apply worker for subscription \"%s\" will "
 						"restart because the connection information was changed",
 						MySubscription->name)));
 
-		walrcv_disconnect(wrconn);
 		proc_exit(0);
 	}
 
@@ -1370,11 +1399,10 @@ reread_subscription(void)
 	if (strcmp(newsub->name, MySubscription->name) != 0)
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
+				(errmsg("logical replication apply worker for subscription \"%s\" will "
 						"restart because subscription was renamed",
 						MySubscription->name)));
 
-		walrcv_disconnect(wrconn);
 		proc_exit(0);
 	}
 
@@ -1382,32 +1410,30 @@ reread_subscription(void)
 	Assert(newsub->slotname);
 
 	/*
-	 * We need to make new connection to new slot if slot name has changed
-	 * so exit here as well if that's the case.
+	 * We need to make new connection to new slot if slot name has changed so
+	 * exit here as well if that's the case.
 	 */
 	if (strcmp(newsub->slotname, MySubscription->slotname) != 0)
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
+				(errmsg("logical replication apply worker for subscription \"%s\" will "
 						"restart because the replication slot name was changed",
 						MySubscription->name)));
 
-		walrcv_disconnect(wrconn);
 		proc_exit(0);
 	}
 
 	/*
-	 * Exit if publication list was changed. The launcher will start
-	 * new worker.
+	 * Exit if publication list was changed. The launcher will start new
+	 * worker.
 	 */
 	if (!equal(newsub->publications, MySubscription->publications))
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will "
+				(errmsg("logical replication apply worker for subscription \"%s\" will "
 						"restart because subscription's publications were changed",
 						MySubscription->name)));
 
-		walrcv_disconnect(wrconn);
 		proc_exit(0);
 	}
 
@@ -1443,16 +1469,29 @@ subscription_change_cb(Datum arg, int cacheid, uint32 hashvalue)
 	MySubscriptionValid = false;
 }
 
+/* SIGHUP: set flag to reload configuration at next convenient time */
+static void
+logicalrep_worker_sighup(SIGNAL_ARGS)
+{
+	int			save_errno = errno;
+
+	got_SIGHUP = true;
+
+	/* Waken anything waiting on the process latch */
+	SetLatch(MyLatch);
+
+	errno = save_errno;
+}
 
 /* Logical Replication Apply worker entry point */
 void
 ApplyWorkerMain(Datum main_arg)
 {
-	int				worker_slot = DatumGetInt32(main_arg);
-	MemoryContext	oldctx;
-	char			originname[NAMEDATALEN];
-	XLogRecPtr		origin_startpos;
-	char		   *myslotname;
+	int			worker_slot = DatumGetInt32(main_arg);
+	MemoryContext oldctx;
+	char		originname[NAMEDATALEN];
+	XLogRecPtr	origin_startpos;
+	char	   *myslotname;
 	WalRcvStreamOptions options;
 
 	/* Attach to slot */
@@ -1460,16 +1499,12 @@ ApplyWorkerMain(Datum main_arg)
 
 	/* Setup signal handling */
 	pqsignal(SIGHUP, logicalrep_worker_sighup);
-	pqsignal(SIGTERM, logicalrep_worker_sigterm);
+	pqsignal(SIGTERM, die);
 	BackgroundWorkerUnblockSignals();
 
 	/* Initialise stats to a sanish value */
 	MyLogicalRepWorker->last_send_time = MyLogicalRepWorker->last_recv_time =
 		MyLogicalRepWorker->reply_time = GetCurrentTimestamp();
-
-	/* Make it easy to identify our processes. */
-	SetConfigOption("application_name", MyBgworkerEntry->bgw_name,
-					PGC_USERSET, PGC_S_SESSION);
 
 	/* Load the libpq-specific functions */
 	load_file("libpqwalreceiver", false);
@@ -1488,8 +1523,8 @@ ApplyWorkerMain(Datum main_arg)
 
 	/* Load the subscription into persistent memory context. */
 	ApplyContext = AllocSetContextCreate(TopMemoryContext,
-											  "ApplyContext",
-											  ALLOCSET_DEFAULT_SIZES);
+										 "ApplyContext",
+										 ALLOCSET_DEFAULT_SIZES);
 	StartTransactionCommand();
 	oldctx = MemoryContextSwitchTo(ApplyContext);
 	MySubscription = GetSubscription(MyLogicalRepWorker->subid, false);
@@ -1503,7 +1538,7 @@ ApplyWorkerMain(Datum main_arg)
 	if (!MySubscription->enabled)
 	{
 		ereport(LOG,
-				(errmsg("logical replication worker for subscription \"%s\" will not "
+				(errmsg("logical replication apply worker for subscription \"%s\" will not "
 						"start because the subscription was disabled during startup",
 						MySubscription->name)));
 
@@ -1516,11 +1551,13 @@ ApplyWorkerMain(Datum main_arg)
 								  (Datum) 0);
 
 	if (am_tablesync_worker())
-		elog(LOG, "logical replication sync for subscription %s, table %s started",
-			 MySubscription->name, get_rel_name(MyLogicalRepWorker->relid));
+		ereport(LOG,
+				(errmsg("logical replication table synchronization worker for subscription \"%s\", table \"%s\" has started",
+						MySubscription->name, get_rel_name(MyLogicalRepWorker->relid))));
 	else
-		elog(LOG, "logical replication apply for subscription %s started",
-			 MySubscription->name);
+		ereport(LOG,
+				(errmsg("logical replication apply worker for subscription \"%s\" has started",
+						MySubscription->name)));
 
 	CommitTransactionCommand();
 
@@ -1530,7 +1567,7 @@ ApplyWorkerMain(Datum main_arg)
 
 	if (am_tablesync_worker())
 	{
-		char *syncslotname;
+		char	   *syncslotname;
 
 		/* This is table synchroniation worker, call initial sync. */
 		syncslotname = LogicalRepSyncTableStart(&origin_startpos);
@@ -1545,12 +1582,21 @@ ApplyWorkerMain(Datum main_arg)
 	else
 	{
 		/* This is main apply worker */
-		RepOriginId		originid;
-		TimeLineID		startpointTLI;
-		char		   *err;
-		int				server_version;
+		RepOriginId originid;
+		TimeLineID	startpointTLI;
+		char	   *err;
+		int			server_version;
 
 		myslotname = MySubscription->slotname;
+
+		/*
+		 * This shouldn't happen if the subscription is enabled, but guard
+		 * against DDL bugs or manual catalog changes.  (libpqwalreceiver will
+		 * crash if slot is NULL.)
+		 */
+		if (!myslotname)
+			ereport(ERROR,
+					(errmsg("subscription has no replication slot set")));
 
 		/* Setup replication origin tracking. */
 		StartTransactionCommand();
@@ -1563,16 +1609,15 @@ ApplyWorkerMain(Datum main_arg)
 		origin_startpos = replorigin_session_get_progress(false);
 		CommitTransactionCommand();
 
-		wrconn = walrcv_connect(MySubscription->conninfo, true, myslotname,
+		wrconn = walrcv_connect(MySubscription->conninfo, true, MySubscription->name,
 								&err);
 		if (wrconn == NULL)
 			ereport(ERROR,
 					(errmsg("could not connect to the publisher: %s", err)));
 
 		/*
-		 * We don't really use the output identify_system for anything
-		 * but it does some initializations on the upstream so let's still
-		 * call it.
+		 * We don't really use the output identify_system for anything but it
+		 * does some initializations on the upstream so let's still call it.
 		 */
 		(void) walrcv_identify_system(wrconn, &startpointTLI,
 									  &server_version);
@@ -1580,8 +1625,8 @@ ApplyWorkerMain(Datum main_arg)
 	}
 
 	/*
-	 * Setup callback for syscache so that we know when something
-	 * changes in the subscription relation state.
+	 * Setup callback for syscache so that we know when something changes in
+	 * the subscription relation state.
 	 */
 	CacheRegisterSyscacheCallback(SUBSCRIPTIONRELMAP,
 								  invalidate_syncing_table_states,
@@ -1600,8 +1645,14 @@ ApplyWorkerMain(Datum main_arg)
 	/* Run the main loop. */
 	LogicalRepApplyLoop(origin_startpos);
 
-	walrcv_disconnect(wrconn);
-
-	/* We should only get here if we received SIGTERM */
 	proc_exit(0);
+}
+
+/*
+ * Is current process a logical replication worker?
+ */
+bool
+IsLogicalWorker(void)
+{
+	return MyLogicalRepWorker != NULL;
 }

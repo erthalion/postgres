@@ -37,6 +37,11 @@
  * CollationCreate
  *
  * Add a new tuple to pg_collation.
+ *
+ * if_not_exists: if true, don't fail on duplicate name, just print a notice
+ * and return InvalidOid.
+ * quiet: if true, don't fail on duplicate name, just silently return
+ * InvalidOid (overrides if_not_exists).
  */
 Oid
 CollationCreate(const char *collname, Oid collnamespace,
@@ -45,7 +50,8 @@ CollationCreate(const char *collname, Oid collnamespace,
 				int32 collencoding,
 				const char *collcollate, const char *collctype,
 				const char *collversion,
-				bool if_not_exists)
+				bool if_not_exists,
+				bool quiet)
 {
 	Relation	rel;
 	TupleDesc	tupDesc;
@@ -77,15 +83,17 @@ CollationCreate(const char *collname, Oid collnamespace,
 							  Int32GetDatum(collencoding),
 							  ObjectIdGetDatum(collnamespace)))
 	{
-		if (if_not_exists)
+		if (quiet)
+			return InvalidOid;
+		else if (if_not_exists)
 		{
 			ereport(NOTICE,
-				(errcode(ERRCODE_DUPLICATE_OBJECT),
-				 collencoding == -1
-				 ? errmsg("collation \"%s\" already exists, skipping",
-						  collname)
-				 : errmsg("collation \"%s\" for encoding \"%s\" already exists, skipping",
-						  collname, pg_encoding_to_char(collencoding))));
+					(errcode(ERRCODE_DUPLICATE_OBJECT),
+					 collencoding == -1
+					 ? errmsg("collation \"%s\" already exists, skipping",
+							  collname)
+					 : errmsg("collation \"%s\" for encoding \"%s\" already exists, skipping",
+							  collname, pg_encoding_to_char(collencoding))));
 			return InvalidOid;
 		}
 		else
@@ -119,20 +127,25 @@ CollationCreate(const char *collname, Oid collnamespace,
 							   Int32GetDatum(-1),
 							   ObjectIdGetDatum(collnamespace))))
 	{
-		if (if_not_exists)
+		if (quiet)
+		{
+			heap_close(rel, NoLock);
+			return InvalidOid;
+		}
+		else if (if_not_exists)
 		{
 			heap_close(rel, NoLock);
 			ereport(NOTICE,
-				(errcode(ERRCODE_DUPLICATE_OBJECT),
-				 errmsg("collation \"%s\" already exists, skipping",
-						collname)));
+					(errcode(ERRCODE_DUPLICATE_OBJECT),
+					 errmsg("collation \"%s\" already exists, skipping",
+							collname)));
 			return InvalidOid;
 		}
 		else
 			ereport(ERROR,
-				(errcode(ERRCODE_DUPLICATE_OBJECT),
-				 errmsg("collation \"%s\" already exists",
-						collname)));
+					(errcode(ERRCODE_DUPLICATE_OBJECT),
+					 errmsg("collation \"%s\" already exists",
+							collname)));
 	}
 
 	tupDesc = RelationGetDescr(rel);

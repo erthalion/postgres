@@ -410,11 +410,6 @@ CREATE TABLE partitioned (
 -- check relkind
 SELECT relkind FROM pg_class WHERE relname = 'partitioned';
 
--- check that range partition key columns are marked NOT NULL
-SELECT attname, attnotnull FROM pg_attribute
-  WHERE attrelid = 'partitioned'::regclass AND attnum > 0
-  ORDER BY attnum;
-
 -- prevent a function referenced in partition key from being dropped
 DROP FUNCTION plusone(int);
 
@@ -458,6 +453,23 @@ CREATE TABLE bools (
 ) PARTITION BY LIST (a);
 CREATE TABLE bools_true PARTITION OF bools FOR VALUES IN (1);
 DROP TABLE bools;
+
+-- specified literal can be cast, but cast isn't immutable
+CREATE TABLE moneyp (
+	a money
+) PARTITION BY LIST (a);
+CREATE TABLE moneyp_10 PARTITION OF moneyp FOR VALUES IN (10);
+CREATE TABLE moneyp_10 PARTITION OF moneyp FOR VALUES IN ('10');
+DROP TABLE moneyp;
+
+-- immutable cast should work, though
+CREATE TABLE bigintp (
+	a bigint
+) PARTITION BY LIST (a);
+CREATE TABLE bigintp_10 PARTITION OF bigintp FOR VALUES IN (10);
+-- fails due to overlap:
+CREATE TABLE bigintp_10_2 PARTITION OF bigintp FOR VALUES IN ('10');
+DROP TABLE bigintp;
 
 CREATE TABLE range_parted (
 	a date
@@ -598,16 +610,32 @@ CREATE TABLE part_c PARTITION OF parted (b WITH OPTIONS NOT NULL DEFAULT 0) FOR 
 CREATE TABLE part_c_1_10 PARTITION OF part_c FOR VALUES FROM (1) TO (10);
 
 -- Partition bound in describe output
-\d part_b
+\d+ part_b
 
 -- Both partition bound and partition key in describe output
-\d part_c
+\d+ part_c
+
+-- a level-2 partition's constraint will include the parent's expressions
+\d+ part_c_1_10
 
 -- Show partition count in the parent's describe output
 -- Tempted to include \d+ output listing partitions with bound info but
 -- output could vary depending on the order in which partition oids are
 -- returned.
 \d parted
+
+-- check that we get the expected partition constraints
+CREATE TABLE range_parted4 (a int, b int, c int) PARTITION BY RANGE (abs(a), abs(b), c);
+CREATE TABLE unbounded_range_part PARTITION OF range_parted4 FOR VALUES FROM (UNBOUNDED, UNBOUNDED, UNBOUNDED) TO (UNBOUNDED, UNBOUNDED, UNBOUNDED);
+\d+ unbounded_range_part
+DROP TABLE unbounded_range_part;
+CREATE TABLE range_parted4_1 PARTITION OF range_parted4 FOR VALUES FROM (UNBOUNDED, UNBOUNDED, UNBOUNDED) TO (1, UNBOUNDED, UNBOUNDED);
+\d+ range_parted4_1
+CREATE TABLE range_parted4_2 PARTITION OF range_parted4 FOR VALUES FROM (3, 4, 5) TO (6, 7, UNBOUNDED);
+\d+ range_parted4_2
+CREATE TABLE range_parted4_3 PARTITION OF range_parted4 FOR VALUES FROM (6, 8, UNBOUNDED) TO (9, UNBOUNDED, UNBOUNDED);
+\d+ range_parted4_3
+DROP TABLE range_parted4;
 
 -- cleanup
 DROP TABLE parted, list_parted, range_parted, list_parted2, range_parted2, range_parted3;

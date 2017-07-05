@@ -150,9 +150,9 @@ typedef struct Expr
  * are very useful for debugging and interpreting completed plans, so we keep
  * them around.
  */
-#define    INNER_VAR		65000		/* reference to inner subplan */
-#define    OUTER_VAR		65001		/* reference to outer subplan */
-#define    INDEX_VAR		65002		/* reference to index column */
+#define    INNER_VAR		65000	/* reference to inner subplan */
+#define    OUTER_VAR		65001	/* reference to outer subplan */
+#define    INDEX_VAR		65002	/* reference to index column */
 
 #define IS_SPECIAL_VARNO(varno)		((varno) >= INNER_VAR)
 
@@ -699,8 +699,8 @@ typedef struct SubPlan
 	/* Extra data useful for determining subplan's output type: */
 	Oid			firstColType;	/* Type of first column of subplan result */
 	int32		firstColTypmod; /* Typmod of first column of subplan result */
-	Oid			firstColCollation;		/* Collation of first column of
-										 * subplan result */
+	Oid			firstColCollation;	/* Collation of first column of subplan
+									 * result */
 	/* Information about execution strategy: */
 	bool		useHashTable;	/* TRUE to store subselect output in a hash
 								 * table (implies we are doing "IN") */
@@ -1375,8 +1375,8 @@ typedef struct TargetEntry
 	Expr	   *expr;			/* expression to evaluate */
 	AttrNumber	resno;			/* attribute number (see notes above) */
 	char	   *resname;		/* name of the column (could be NULL) */
-	Index		ressortgroupref;/* nonzero if referenced by a sort/group
-								 * clause */
+	Index		ressortgroupref;	/* nonzero if referenced by a sort/group
+									 * clause */
 	Oid			resorigtbl;		/* OID of column's source table */
 	AttrNumber	resorigcol;		/* column's number in source table */
 	bool		resjunk;		/* set to true to eliminate the attribute from
@@ -1506,4 +1506,4 @@ typedef struct OnConflictExpr
 	List	   *exclRelTlist;	/* tlist of the EXCLUDED pseudo relation */
 } OnConflictExpr;
 
-#endif   /* PRIMNODES_H */
+#endif							/* PRIMNODES_H */

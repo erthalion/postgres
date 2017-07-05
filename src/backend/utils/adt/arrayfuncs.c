@@ -90,7 +90,7 @@ typedef struct ArrayIteratorData
 	/* current position information, updated on each iteration */
 	char	   *data_ptr;		/* our current position in the array */
 	int			current_item;	/* the item # we're at in the array */
-}	ArrayIteratorData;
+}			ArrayIteratorData;
 
 static bool array_isspace(char ch);
 static int	ArrayCount(const char *str, int *dim, char typdelim);
@@ -176,8 +176,8 @@ Datum
 array_in(PG_FUNCTION_ARGS)
 {
 	char	   *string = PG_GETARG_CSTRING(0);	/* external form */
-	Oid			element_type = PG_GETARG_OID(1);		/* type of an array
-														 * element */
+	Oid			element_type = PG_GETARG_OID(1);	/* type of an array
+													 * element */
 	int32		typmod = PG_GETARG_INT32(2);	/* typmod for array elements */
 	int			typlen;
 	bool		typbyval;
@@ -506,7 +506,7 @@ ArrayCount(const char *str, int *dim, char typdelim)
 						parse_state != ARRAY_ELEM_DELIMITED)
 						ereport(ERROR,
 								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
+								 errmsg("malformed array literal: \"%s\"", str),
 								 errdetail("Unexpected \"%c\" character.",
 										   '\\')));
 					if (parse_state != ARRAY_QUOTED_ELEM_STARTED)
@@ -517,7 +517,7 @@ ArrayCount(const char *str, int *dim, char typdelim)
 					else
 						ereport(ERROR,
 								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
+								 errmsg("malformed array literal: \"%s\"", str),
 								 errdetail("Unexpected end of input.")));
 					break;
 				case '"':
@@ -532,7 +532,7 @@ ArrayCount(const char *str, int *dim, char typdelim)
 						parse_state != ARRAY_ELEM_DELIMITED)
 						ereport(ERROR,
 								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
+								 errmsg("malformed array literal: \"%s\"", str),
 								 errdetail("Unexpected array element.")));
 					in_quotes = !in_quotes;
 					if (in_quotes)
@@ -552,10 +552,10 @@ ArrayCount(const char *str, int *dim, char typdelim)
 							parse_state != ARRAY_LEVEL_STARTED &&
 							parse_state != ARRAY_LEVEL_DELIMITED)
 							ereport(ERROR,
-							   (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
-								errdetail("Unexpected \"%c\" character.",
-										  '{')));
+									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+									 errmsg("malformed array literal: \"%s\"", str),
+									 errdetail("Unexpected \"%c\" character.",
+											   '{')));
 						parse_state = ARRAY_LEVEL_STARTED;
 						if (nest_level >= MAXDIM)
 							ereport(ERROR,
@@ -582,26 +582,26 @@ ArrayCount(const char *str, int *dim, char typdelim)
 							parse_state != ARRAY_LEVEL_COMPLETED &&
 							!(nest_level == 1 && parse_state == ARRAY_LEVEL_STARTED))
 							ereport(ERROR,
-							   (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
-								errdetail("Unexpected \"%c\" character.",
-										  '}')));
+									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+									 errmsg("malformed array literal: \"%s\"", str),
+									 errdetail("Unexpected \"%c\" character.",
+											   '}')));
 						parse_state = ARRAY_LEVEL_COMPLETED;
 						if (nest_level == 0)
 							ereport(ERROR,
-							   (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
-							 errdetail("Unmatched \"%c\" character.", '}')));
+									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+									 errmsg("malformed array literal: \"%s\"", str),
+									 errdetail("Unmatched \"%c\" character.", '}')));
 						nest_level--;
 
 						if (nelems_last[nest_level] != 0 &&
 							nelems[nest_level] != nelems_last[nest_level])
 							ereport(ERROR,
-							   (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							  errmsg("malformed array literal: \"%s\"", str),
-								errdetail("Multidimensional arrays must have "
-										  "sub-arrays with matching "
-										  "dimensions.")));
+									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+									 errmsg("malformed array literal: \"%s\"", str),
+									 errdetail("Multidimensional arrays must have "
+											   "sub-arrays with matching "
+											   "dimensions.")));
 						nelems_last[nest_level] = nelems[nest_level];
 						nelems[nest_level] = 1;
 						if (nest_level == 0)
@@ -631,10 +631,10 @@ ArrayCount(const char *str, int *dim, char typdelim)
 								parse_state != ARRAY_QUOTED_ELEM_COMPLETED &&
 								parse_state != ARRAY_LEVEL_COMPLETED)
 								ereport(ERROR,
-								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								 errmsg("malformed array literal: \"%s\"", str),
-								 errdetail("Unexpected \"%c\" character.",
-										   typdelim)));
+										(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+										 errmsg("malformed array literal: \"%s\"", str),
+										 errdetail("Unexpected \"%c\" character.",
+												   typdelim)));
 							if (parse_state == ARRAY_LEVEL_COMPLETED)
 								parse_state = ARRAY_LEVEL_DELIMITED;
 							else
@@ -654,9 +654,9 @@ ArrayCount(const char *str, int *dim, char typdelim)
 								parse_state != ARRAY_ELEM_STARTED &&
 								parse_state != ARRAY_ELEM_DELIMITED)
 								ereport(ERROR,
-								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								 errmsg("malformed array literal: \"%s\"", str),
-								 errdetail("Unexpected array element.")));
+										(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+										 errmsg("malformed array literal: \"%s\"", str),
+										 errdetail("Unexpected array element.")));
 							parse_state = ARRAY_ELEM_STARTED;
 						}
 					}
@@ -825,9 +825,9 @@ ReadArrayStr(char *arrayStr,
 					{
 						if (nest_level >= ndim)
 							ereport(ERROR,
-							   (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								errmsg("malformed array literal: \"%s\"",
-									   origStr)));
+									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+									 errmsg("malformed array literal: \"%s\"",
+											origStr)));
 						nest_level++;
 						indx[nest_level - 1] = 0;
 						srcptr++;
@@ -840,9 +840,9 @@ ReadArrayStr(char *arrayStr,
 					{
 						if (nest_level == 0)
 							ereport(ERROR,
-							   (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								errmsg("malformed array literal: \"%s\"",
-									   origStr)));
+									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+									 errmsg("malformed array literal: \"%s\"",
+											origStr)));
 						if (i == -1)
 							i = ArrayGetOffset0(ndim, indx, prod);
 						indx[nest_level - 1] = 0;
@@ -1135,9 +1135,9 @@ array_out(PG_FUNCTION_ARGS)
 
 			/* count data plus backslashes; detect chars needing quotes */
 			if (values[i][0] == '\0')
-				needquote = true;		/* force quotes for empty string */
+				needquote = true;	/* force quotes for empty string */
 			else if (pg_strcasecmp(values[i], "NULL") == 0)
-				needquote = true;		/* force quotes for literal NULL */
+				needquote = true;	/* force quotes for literal NULL */
 			else
 				needquote = false;
 
@@ -2297,7 +2297,7 @@ array_set_element(Datum arraydatum,
 		return PointerGetDatum(construct_md_array(&dataValue, &isNull,
 												  nSubscripts, dim, lb,
 												  elmtype,
-												elmlen, elmbyval, elmalign));
+												  elmlen, elmbyval, elmalign));
 	}
 
 	if (ndim != nSubscripts)
@@ -2323,14 +2323,14 @@ array_set_element(Datum arraydatum,
 			dim[0] += addedbefore;
 			lb[0] = indx[0];
 			if (addedbefore > 1)
-				newhasnulls = true;		/* will insert nulls */
+				newhasnulls = true; /* will insert nulls */
 		}
 		if (indx[0] >= (dim[0] + lb[0]))
 		{
 			addedafter = indx[0] - (dim[0] + lb[0]) + 1;
 			dim[0] += addedafter;
 			if (addedafter > 1)
-				newhasnulls = true;		/* will insert nulls */
+				newhasnulls = true; /* will insert nulls */
 		}
 	}
 	else
@@ -2525,7 +2525,7 @@ array_set_element_expanded(Datum arraydatum,
 		eah->dims = (int *) MemoryContextAllocZero(eah->hdr.eoh_context,
 												   nSubscripts * sizeof(int));
 		eah->lbound = (int *) MemoryContextAllocZero(eah->hdr.eoh_context,
-												  nSubscripts * sizeof(int));
+													 nSubscripts * sizeof(int));
 
 		/* Update local copies of dimension info */
 		ndim = nSubscripts;
@@ -2580,7 +2580,7 @@ array_set_element_expanded(Datum arraydatum,
 			lb[0] = indx[0];
 			dimschanged = true;
 			if (addedbefore > 1)
-				newhasnulls = true;		/* will insert nulls */
+				newhasnulls = true; /* will insert nulls */
 		}
 		if (indx[0] >= (dim[0] + lb[0]))
 		{
@@ -2588,7 +2588,7 @@ array_set_element_expanded(Datum arraydatum,
 			dim[0] += addedafter;
 			dimschanged = true;
 			if (addedafter > 1)
-				newhasnulls = true;		/* will insert nulls */
+				newhasnulls = true; /* will insert nulls */
 		}
 	}
 	else
@@ -2797,7 +2797,7 @@ array_set_slice(Datum arraydatum,
 		 */
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-		errmsg("updates on slices of fixed-length arrays not implemented")));
+				 errmsg("updates on slices of fixed-length arrays not implemented")));
 	}
 
 	/* detoast arrays if necessary */
@@ -2828,9 +2828,9 @@ array_set_slice(Datum arraydatum,
 			if (!upperProvided[i] || !lowerProvided[i])
 				ereport(ERROR,
 						(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-				errmsg("array slice subscript must provide both boundaries"),
-				errdetail("When assigning to a slice of an empty array value,"
-						  " slice boundaries must be fully specified.")));
+						 errmsg("array slice subscript must provide both boundaries"),
+						 errdetail("When assigning to a slice of an empty array value,"
+								   " slice boundaries must be fully specified.")));
 
 			dim[i] = 1 + upperIndx[i] - lowerIndx[i];
 			lb[i] = lowerIndx[i];
@@ -2844,7 +2844,7 @@ array_set_slice(Datum arraydatum,
 
 		return PointerGetDatum(construct_md_array(dvalues, dnulls, nSubscripts,
 												  dim, lb, elmtype,
-												elmlen, elmbyval, elmalign));
+												  elmlen, elmbyval, elmalign));
 	}
 
 	if (ndim < nSubscripts || ndim <= 0 || ndim > MAXDIM)
@@ -2876,7 +2876,7 @@ array_set_slice(Datum arraydatum,
 		if (lowerIndx[0] < lb[0])
 		{
 			if (upperIndx[0] < lb[0] - 1)
-				newhasnulls = true;		/* will insert nulls */
+				newhasnulls = true; /* will insert nulls */
 			addedbefore = lb[0] - lowerIndx[0];
 			dim[0] += addedbefore;
 			lb[0] = lowerIndx[0];
@@ -2884,7 +2884,7 @@ array_set_slice(Datum arraydatum,
 		if (upperIndx[0] >= (dim[0] + lb[0]))
 		{
 			if (lowerIndx[0] > (dim[0] + lb[0]))
-				newhasnulls = true;		/* will insert nulls */
+				newhasnulls = true; /* will insert nulls */
 			addedafter = upperIndx[0] - (dim[0] + lb[0]) + 1;
 			dim[0] += addedafter;
 		}
@@ -2904,7 +2904,7 @@ array_set_slice(Datum arraydatum,
 			if (lowerIndx[i] > upperIndx[i])
 				ereport(ERROR,
 						(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-					 errmsg("upper bound cannot be less than lower bound")));
+						 errmsg("upper bound cannot be less than lower bound")));
 			if (lowerIndx[i] < lb[i] ||
 				upperIndx[i] >= (dim[i] + lb[i]))
 				ereport(ERROR,
@@ -2919,7 +2919,7 @@ array_set_slice(Datum arraydatum,
 			if (lowerIndx[i] > upperIndx[i])
 				ereport(ERROR,
 						(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-					 errmsg("upper bound cannot be less than lower bound")));
+						 errmsg("upper bound cannot be less than lower bound")));
 		}
 	}
 
@@ -2961,7 +2961,7 @@ array_set_slice(Datum arraydatum,
 									   ndim, dim, lb,
 									   lowerIndx, upperIndx,
 									   elmlen, elmbyval, elmalign);
-		lenbefore = lenafter = 0;		/* keep compiler quiet */
+		lenbefore = lenafter = 0;	/* keep compiler quiet */
 		itemsbefore = itemsafter = nolditems = 0;
 	}
 	else
@@ -3211,7 +3211,7 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
 
 		/* Get source element, checking for NULL */
 		fcinfo->arg[0] = array_iter_next(&iter, &fcinfo->argnull[0], i,
-									 inp_typlen, inp_typbyval, inp_typalign);
+										 inp_typlen, inp_typbyval, inp_typalign);
 
 		/*
 		 * Apply the given function to source elt and extra args.
@@ -3515,7 +3515,7 @@ deconstruct_array(ArrayType *array,
 			else
 				ereport(ERROR,
 						(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-				  errmsg("null array element not allowed in this context")));
+						 errmsg("null array element not allowed in this context")));
 		}
 		else
 		{
@@ -3641,8 +3641,8 @@ array_eq(PG_FUNCTION_ARGS)
 			if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
 				ereport(ERROR,
 						(errcode(ERRCODE_UNDEFINED_FUNCTION),
-				errmsg("could not identify an equality operator for type %s",
-					   format_type_be(element_type))));
+						 errmsg("could not identify an equality operator for type %s",
+								format_type_be(element_type))));
 			fcinfo->flinfo->fn_extra = (void *) typentry;
 		}
 		typlen = typentry->typlen;
@@ -3805,8 +3805,8 @@ array_cmp(FunctionCallInfo fcinfo)
 		if (!OidIsValid(typentry->cmp_proc_finfo.fn_oid))
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_FUNCTION),
-			   errmsg("could not identify a comparison function for type %s",
-					  format_type_be(element_type))));
+					 errmsg("could not identify a comparison function for type %s",
+							format_type_be(element_type))));
 		fcinfo->flinfo->fn_extra = (void *) typentry;
 	}
 	typlen = typentry->typlen;
@@ -4079,8 +4079,8 @@ array_contain_compare(AnyArrayType *array1, AnyArrayType *array2, Oid collation,
 		if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_FUNCTION),
-				errmsg("could not identify an equality operator for type %s",
-					   format_type_be(element_type))));
+					 errmsg("could not identify an equality operator for type %s",
+							format_type_be(element_type))));
 		*fn_extra = (void *) typentry;
 	}
 	typlen = typentry->typlen;
@@ -4968,8 +4968,7 @@ initArrayResult(Oid element_type, MemoryContext rcontext, bool subcontext)
 		MemoryContextAlloc(arr_context, sizeof(ArrayBuildState));
 	astate->mcontext = arr_context;
 	astate->private_cxt = subcontext;
-	astate->alen = (subcontext ? 64 : 8);		/* arbitrary starting array
-												 * size */
+	astate->alen = (subcontext ? 64 : 8);	/* arbitrary starting array size */
 	astate->dvalues = (Datum *)
 		MemoryContextAlloc(arr_context, astate->alen * sizeof(Datum));
 	astate->dnulls = (bool *)
@@ -5145,8 +5144,7 @@ initArrayResultArr(Oid array_type, Oid element_type, MemoryContext rcontext,
 				   bool subcontext)
 {
 	ArrayBuildStateArr *astate;
-	MemoryContext arr_context = rcontext;		/* by default use the parent
-												 * ctx */
+	MemoryContext arr_context = rcontext;	/* by default use the parent ctx */
 
 	/* Lookup element type, unless element_type already provided */
 	if (!OidIsValid(element_type))
@@ -5268,7 +5266,7 @@ accumArrayResultArr(ArrayBuildStateArr *astate,
 		if (astate->ndims != ndims + 1)
 			ereport(ERROR,
 					(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-			errmsg("cannot accumulate arrays of different dimensionality")));
+					 errmsg("cannot accumulate arrays of different dimensionality")));
 		for (i = 0; i < ndims; i++)
 		{
 			if (astate->dims[i + 1] != dims[i] || astate->lbs[i + 1] != lbs[i])
@@ -5640,7 +5638,7 @@ array_fill_with_lower_bounds(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(1) || PG_ARGISNULL(2))
 		ereport(ERROR,
 				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-			   errmsg("dimension array or low bound array cannot be null")));
+				 errmsg("dimension array or low bound array cannot be null")));
 
 	dims = PG_GETARG_ARRAYTYPE_P(1);
 	lbs = PG_GETARG_ARRAYTYPE_P(2);
@@ -5680,7 +5678,7 @@ array_fill(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(1))
 		ereport(ERROR,
 				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-			   errmsg("dimension array or low bound array cannot be null")));
+				 errmsg("dimension array or low bound array cannot be null")));
 
 	dims = PG_GETARG_ARRAYTYPE_P(1);
 
@@ -6041,8 +6039,8 @@ array_replace_internal(ArrayType *array,
 		if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_FUNCTION),
-				errmsg("could not identify an equality operator for type %s",
-					   format_type_be(element_type))));
+					 errmsg("could not identify an equality operator for type %s",
+							format_type_be(element_type))));
 		fcinfo->flinfo->fn_extra = (void *) typentry;
 	}
 	typlen = typentry->typlen;
@@ -6161,8 +6159,8 @@ array_replace_internal(ArrayType *array,
 				if (!AllocSizeIsValid(nbytes))
 					ereport(ERROR,
 							(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						errmsg("array size exceeds the maximum allowed (%d)",
-							   (int) MaxAllocSize)));
+							 errmsg("array size exceeds the maximum allowed (%d)",
+									(int) MaxAllocSize)));
 			}
 			nresult++;
 		}
@@ -6327,8 +6325,8 @@ width_bucket_array(PG_FUNCTION_ARGS)
 			if (!OidIsValid(typentry->cmp_proc_finfo.fn_oid))
 				ereport(ERROR,
 						(errcode(ERRCODE_UNDEFINED_FUNCTION),
-				errmsg("could not identify a comparison function for type %s",
-					   format_type_be(element_type))));
+						 errmsg("could not identify a comparison function for type %s",
+								format_type_be(element_type))));
 			fcinfo->flinfo->fn_extra = (void *) typentry;
 		}
 

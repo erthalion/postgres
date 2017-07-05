@@ -221,7 +221,7 @@ text_to_cstring_buffer(const text *src, char *dst, size_t dst_len)
 		dst_len--;
 		if (dst_len >= src_len)
 			dst_len = src_len;
-		else	/* ensure truncation is encoding-safe */
+		else					/* ensure truncation is encoding-safe */
 			dst_len = pg_mbcliplen(VARDATA_ANY(srcunpacked), src_len, dst_len);
 		memcpy(dst, VARDATA_ANY(srcunpacked), dst_len);
 		dst[dst_len] = '\0';
@@ -268,7 +268,7 @@ byteain(PG_FUNCTION_ARGS)
 		bc = (len - 2) / 2 + VARHDRSZ;	/* maximum possible length */
 		result = palloc(bc);
 		bc = hex_decode(inputText + 2, len - 2, VARDATA(result));
-		SET_VARSIZE(result, bc + VARHDRSZ);		/* actual length */
+		SET_VARSIZE(result, bc + VARHDRSZ); /* actual length */
 
 		PG_RETURN_BYTEA_P(result);
 	}
@@ -823,8 +823,8 @@ text_substring(Datum str, int32 start, int32 length, bool length_not_specified)
 	{
 		S1 = Max(S, 1);
 
-		if (length_not_specified)		/* special case - get length to end of
-										 * string */
+		if (length_not_specified)	/* special case - get length to end of
+									 * string */
 			L1 = -1;
 		else
 		{
@@ -888,8 +888,8 @@ text_substring(Datum str, int32 start, int32 length, bool length_not_specified)
 		 */
 		slice_start = 0;
 
-		if (length_not_specified)		/* special case - get length to end of
-										 * string */
+		if (length_not_specified)	/* special case - get length to end of
+									 * string */
 			slice_size = L1 = -1;
 		else
 		{
@@ -1012,8 +1012,8 @@ textoverlay(PG_FUNCTION_ARGS)
 {
 	text	   *t1 = PG_GETARG_TEXT_PP(0);
 	text	   *t2 = PG_GETARG_TEXT_PP(1);
-	int			sp = PG_GETARG_INT32(2);		/* substring start position */
-	int			sl = PG_GETARG_INT32(3);		/* substring length */
+	int			sp = PG_GETARG_INT32(2);	/* substring start position */
+	int			sl = PG_GETARG_INT32(3);	/* substring length */
 
 	PG_RETURN_TEXT_P(text_overlay(t1, t2, sp, sl));
 }
@@ -1023,10 +1023,10 @@ textoverlay_no_len(PG_FUNCTION_ARGS)
 {
 	text	   *t1 = PG_GETARG_TEXT_PP(0);
 	text	   *t2 = PG_GETARG_TEXT_PP(1);
-	int			sp = PG_GETARG_INT32(2);		/* substring start position */
+	int			sp = PG_GETARG_INT32(2);	/* substring start position */
 	int			sl;
 
-	sl = text_length(PointerGetDatum(t2));		/* defaults to length(t2) */
+	sl = text_length(PointerGetDatum(t2));	/* defaults to length(t2) */
 	PG_RETURN_TEXT_P(text_overlay(t1, t2, sp, sl));
 }
 
@@ -1433,7 +1433,8 @@ varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid)
 
 #ifdef WIN32
 		/* Win32 does not have UTF-8, so we need to map to UTF-16 */
-		if (GetDatabaseEncoding() == PG_UTF8)
+		if (GetDatabaseEncoding() == PG_UTF8
+			&& (!mylocale || mylocale->provider == COLLPROVIDER_LIBC))
 		{
 			int			a1len;
 			int			a2len;
@@ -1519,7 +1520,7 @@ varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid)
 
 			return result;
 		}
-#endif   /* WIN32 */
+#endif							/* WIN32 */
 
 		if (len1 >= TEXTBUFLEN)
 			a1p = (char *) palloc(len1 + 1);
@@ -1557,8 +1558,10 @@ varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid)
 				else
 #endif
 				{
-					int32_t ulen1, ulen2;
-					UChar *uchar1, *uchar2;
+					int32_t		ulen1,
+								ulen2;
+					UChar	   *uchar1,
+							   *uchar2;
 
 					ulen1 = icu_to_uchar(&uchar1, arg1, len1);
 					ulen2 = icu_to_uchar(&uchar2, arg2, len2);
@@ -1566,11 +1569,14 @@ varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid)
 					result = ucol_strcoll(mylocale->info.icu.ucol,
 										  uchar1, ulen1,
 										  uchar2, ulen2);
+
+					pfree(uchar1);
+					pfree(uchar2);
 				}
-#else	/* not USE_ICU */
+#else							/* not USE_ICU */
 				/* shouldn't happen */
 				elog(ERROR, "unsupported collprovider: %c", mylocale->provider);
-#endif	/* not USE_ICU */
+#endif							/* not USE_ICU */
 			}
 			else
 			{
@@ -2141,8 +2147,10 @@ varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
 			else
 #endif
 			{
-				int32_t ulen1, ulen2;
-				UChar *uchar1, *uchar2;
+				int32_t		ulen1,
+							ulen2;
+				UChar	   *uchar1,
+						   *uchar2;
 
 				ulen1 = icu_to_uchar(&uchar1, a1p, len1);
 				ulen2 = icu_to_uchar(&uchar2, a2p, len2);
@@ -2150,11 +2158,14 @@ varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
 				result = ucol_strcoll(sss->locale->info.icu.ucol,
 									  uchar1, ulen1,
 									  uchar2, ulen2);
+
+				pfree(uchar1);
+				pfree(uchar2);
 			}
-#else	/* not USE_ICU */
+#else							/* not USE_ICU */
 			/* shouldn't happen */
 			elog(ERROR, "unsupported collprovider: %c", sss->locale->provider);
-#endif	/* not USE_ICU */
+#endif							/* not USE_ICU */
 		}
 		else
 		{
@@ -2274,7 +2285,7 @@ varstr_abbrev_convert(Datum original, SortSupport ssup)
 		Size		bsize;
 #ifdef USE_ICU
 		int32_t		ulen = -1;
-		UChar	   *uchar;
+		UChar	   *uchar = NULL;
 #endif
 
 		/*
@@ -2300,8 +2311,11 @@ varstr_abbrev_convert(Datum original, SortSupport ssup)
 		}
 
 		memcpy(sss->buf1, authoritative_data, len);
-		/* Just like strcoll(), strxfrm() expects a NUL-terminated string.
-		 * Not necessary for ICU, but doesn't hurt. */
+
+		/*
+		 * Just like strcoll(), strxfrm() expects a NUL-terminated string. Not
+		 * necessary for ICU, but doesn't hurt.
+		 */
 		sss->buf1[len] = '\0';
 		sss->last_len1 = len;
 
@@ -2336,7 +2350,7 @@ varstr_abbrev_convert(Datum original, SortSupport ssup)
 					UErrorCode	status;
 
 					uiter_setUTF8(&iter, sss->buf1, len);
-					state[0] = state[1] = 0;  /* won't need that again */
+					state[0] = state[1] = 0;	/* won't need that again */
 					status = U_ZERO_ERROR;
 					bsize = ucol_nextSortKeyPart(sss->locale->info.icu.ucol,
 												 &iter,
@@ -2346,7 +2360,8 @@ varstr_abbrev_convert(Datum original, SortSupport ssup)
 												 &status);
 					if (U_FAILURE(status))
 						ereport(ERROR,
-								(errmsg("sort key generation failed: %s", u_errorName(status))));
+								(errmsg("sort key generation failed: %s",
+										u_errorName(status))));
 				}
 				else
 					bsize = ucol_getSortKey(sss->locale->info.icu.ucol,
@@ -2386,6 +2401,11 @@ varstr_abbrev_convert(Datum original, SortSupport ssup)
 		 * okay.  See remarks on bytea case above.)
 		 */
 		memcpy(pres, sss->buf2, Min(sizeof(Datum), bsize));
+
+#ifdef USE_ICU
+		if (uchar)
+			pfree(uchar);
+#endif
 	}
 
 	/*
@@ -2891,8 +2911,8 @@ byteaoverlay(PG_FUNCTION_ARGS)
 {
 	bytea	   *t1 = PG_GETARG_BYTEA_PP(0);
 	bytea	   *t2 = PG_GETARG_BYTEA_PP(1);
-	int			sp = PG_GETARG_INT32(2);		/* substring start position */
-	int			sl = PG_GETARG_INT32(3);		/* substring length */
+	int			sp = PG_GETARG_INT32(2);	/* substring start position */
+	int			sl = PG_GETARG_INT32(3);	/* substring length */
 
 	PG_RETURN_BYTEA_P(bytea_overlay(t1, t2, sp, sl));
 }
@@ -2902,7 +2922,7 @@ byteaoverlay_no_len(PG_FUNCTION_ARGS)
 {
 	bytea	   *t1 = PG_GETARG_BYTEA_PP(0);
 	bytea	   *t2 = PG_GETARG_BYTEA_PP(1);
-	int			sp = PG_GETARG_INT32(2);		/* substring start position */
+	int			sp = PG_GETARG_INT32(2);	/* substring start position */
 	int			sl;
 
 	sl = VARSIZE_ANY_EXHDR(t2); /* defaults to length(t2) */
@@ -3245,7 +3265,7 @@ SplitIdentifierString(char *rawstring, char separator,
 
 	*namelist = NIL;
 
-	while (isspace((unsigned char) *nextp))
+	while (scanner_isspace(*nextp))
 		nextp++;				/* skip leading whitespace */
 
 	if (*nextp == '\0')
@@ -3265,7 +3285,7 @@ SplitIdentifierString(char *rawstring, char separator,
 			{
 				endp = strchr(nextp + 1, '"');
 				if (endp == NULL)
-					return false;		/* mismatched quotes */
+					return false;	/* mismatched quotes */
 				if (endp[1] != '"')
 					break;		/* found end of quoted name */
 				/* Collapse adjacent quotes into one quote, and look again */
@@ -3283,7 +3303,7 @@ SplitIdentifierString(char *rawstring, char separator,
 
 			curname = nextp;
 			while (*nextp && *nextp != separator &&
-				   !isspace((unsigned char) *nextp))
+				   !scanner_isspace(*nextp))
 				nextp++;
 			endp = nextp;
 			if (curname == nextp)
@@ -3305,13 +3325,13 @@ SplitIdentifierString(char *rawstring, char separator,
 			pfree(downname);
 		}
 
-		while (isspace((unsigned char) *nextp))
+		while (scanner_isspace(*nextp))
 			nextp++;			/* skip trailing whitespace */
 
 		if (*nextp == separator)
 		{
 			nextp++;
-			while (isspace((unsigned char) *nextp))
+			while (scanner_isspace(*nextp))
 				nextp++;		/* skip leading whitespace for next */
 			/* we expect another name, so done remains false */
 		}
@@ -3339,7 +3359,9 @@ SplitIdentifierString(char *rawstring, char separator,
 
 
 /*
- * SplitDirectoriesString --- parse a string containing directory names
+ * SplitDirectoriesString --- parse a string containing file/directory names
+ *
+ * This works fine on file names too; the function name is historical.
  *
  * This is similar to SplitIdentifierString, except that the parsing
  * rules are meant to handle pathnames instead of identifiers: there is
@@ -3370,7 +3392,7 @@ SplitDirectoriesString(char *rawstring, char separator,
 
 	*namelist = NIL;
 
-	while (isspace((unsigned char) *nextp))
+	while (scanner_isspace(*nextp))
 		nextp++;				/* skip leading whitespace */
 
 	if (*nextp == '\0')
@@ -3390,7 +3412,7 @@ SplitDirectoriesString(char *rawstring, char separator,
 			{
 				endp = strchr(nextp + 1, '"');
 				if (endp == NULL)
-					return false;		/* mismatched quotes */
+					return false;	/* mismatched quotes */
 				if (endp[1] != '"')
 					break;		/* found end of quoted name */
 				/* Collapse adjacent quotes into one quote, and look again */
@@ -3407,7 +3429,7 @@ SplitDirectoriesString(char *rawstring, char separator,
 			while (*nextp && *nextp != separator)
 			{
 				/* trailing whitespace should not be included in name */
-				if (!isspace((unsigned char) *nextp))
+				if (!scanner_isspace(*nextp))
 					endp = nextp + 1;
 				nextp++;
 			}
@@ -3415,13 +3437,13 @@ SplitDirectoriesString(char *rawstring, char separator,
 				return false;	/* empty unquoted name not allowed */
 		}
 
-		while (isspace((unsigned char) *nextp))
+		while (scanner_isspace(*nextp))
 			nextp++;			/* skip trailing whitespace */
 
 		if (*nextp == separator)
 		{
 			nextp++;
-			while (isspace((unsigned char) *nextp))
+			while (scanner_isspace(*nextp))
 				nextp++;		/* skip leading whitespace for next */
 			/* we expect another name, so done remains false */
 		}
@@ -3922,7 +3944,7 @@ replace_text_regexp(text *src_text, void *regexp,
 									data,
 									data_len,
 									search_start,
-									NULL,		/* no details */
+									NULL,	/* no details */
 									REGEXP_REPLACE_BACKREF_CNT,
 									pmatch,
 									0);
@@ -4234,14 +4256,14 @@ text_to_array_internal(PG_FUNCTION_ARGS)
 			/* XXX: this hardcodes assumptions about the text type */
 			PG_RETURN_ARRAYTYPE_P(construct_md_array(elems, nulls,
 													 1, dims, lbs,
-												   TEXTOID, -1, false, 'i'));
+													 TEXTOID, -1, false, 'i'));
 		}
 
 		start_posn = 1;
 		/* start_ptr points to the start_posn'th character of inputstring */
 		start_ptr = VARDATA_ANY(inputstring);
 
-		for (fldnum = 1;; fldnum++)		/* field number is 1 based */
+		for (fldnum = 1;; fldnum++) /* field number is 1 based */
 		{
 			CHECK_FOR_INTERRUPTS();
 
@@ -4685,7 +4707,7 @@ string_agg_transfn(PG_FUNCTION_ARGS)
 		else if (!PG_ARGISNULL(2))
 			appendStringInfoText(state, PG_GETARG_TEXT_PP(2));	/* delimiter */
 
-		appendStringInfoText(state, PG_GETARG_TEXT_PP(1));		/* value */
+		appendStringInfoText(state, PG_GETARG_TEXT_PP(1));	/* value */
 	}
 
 	/*
@@ -5307,7 +5329,7 @@ text_format_parse_format(const char *start_ptr, const char *end_ptr,
 			if (*cp != '$')
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				  errmsg("width argument position must be ended by \"$\"")));
+						 errmsg("width argument position must be ended by \"$\"")));
 			/* The number was width argument position */
 			*widthpos = n;
 			/* Explicit 0 for argument index is immediately refused */
@@ -5352,7 +5374,7 @@ text_format_string_conversion(StringInfo buf, char conversion,
 		else if (conversion == 'I')
 			ereport(ERROR,
 					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-			errmsg("null values cannot be formatted as an SQL identifier")));
+					 errmsg("null values cannot be formatted as an SQL identifier")));
 		return;
 	}
 

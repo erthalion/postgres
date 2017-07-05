@@ -15,7 +15,7 @@
  * <parentTLI> <switchpoint> <reason>
  *
  *	parentTLI	ID of the parent timeline
- *	switchpoint XLogRecPtr of the WAL position where the switch happened
+ *	switchpoint XLogRecPtr of the WAL location where the switch happened
  *	reason		human-readable explanation of why the timeline was changed
  *
  * The fields are separated by tabs. Lines beginning with # are comments, and
@@ -151,12 +151,12 @@ readTimeLineHistory(TimeLineID targetTLI)
 		if (nfields != 3)
 			ereport(FATAL,
 					(errmsg("syntax error in history file: %s", fline),
-			   errhint("Expected a transaction log switchpoint location.")));
+					 errhint("Expected a write-ahead log switchpoint location.")));
 
 		if (result && tli <= lasttli)
 			ereport(FATAL,
 					(errmsg("invalid data in history file: %s", fline),
-				   errhint("Timeline IDs must be in increasing sequence.")));
+					 errhint("Timeline IDs must be in increasing sequence.")));
 
 		lasttli = tli;
 
@@ -177,7 +177,7 @@ readTimeLineHistory(TimeLineID targetTLI)
 	if (result && targetTLI <= lasttli)
 		ereport(FATAL,
 				(errmsg("invalid data in history file \"%s\"", path),
-			errhint("Timeline IDs must be less than child timeline's ID.")));
+				 errhint("Timeline IDs must be less than child timeline's ID.")));
 
 	/*
 	 * Create one more entry for the "tip" of the timeline, which has no entry
@@ -261,7 +261,7 @@ findNewestTimeLine(TimeLineID startTLI)
 	{
 		if (existsTimeLineHistory(probeTLI))
 		{
-			newestTLI = probeTLI;		/* probeTLI exists */
+			newestTLI = probeTLI;	/* probeTLI exists */
 		}
 		else
 		{
@@ -278,7 +278,7 @@ findNewestTimeLine(TimeLineID startTLI)
  *
  *	newTLI: ID of the new timeline
  *	parentTLI: ID of its immediate parent
- *	switchpoint: XLOG position where the system switched to the new timeline
+ *	switchpoint: WAL location where the system switched to the new timeline
  *	reason: human-readable explanation of why the timeline was switched
  *
  * Currently this is only used at the end recovery, and so there are no locking
@@ -367,7 +367,7 @@ writeTimeLineHistory(TimeLineID newTLI, TimeLineID parentTLI,
 
 				ereport(ERROR,
 						(errcode_for_file_access(),
-					 errmsg("could not write to file \"%s\": %m", tmppath)));
+						 errmsg("could not write to file \"%s\": %m", tmppath)));
 			}
 			pgstat_report_wait_end();
 		}

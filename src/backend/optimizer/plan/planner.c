@@ -73,9 +73,9 @@ create_upper_paths_hook_type create_upper_paths_hook = NULL;
 #define EXPRKIND_QUAL				0
 #define EXPRKIND_TARGET				1
 #define EXPRKIND_RTFUNC				2
-#define EXPRKIND_RTFUNC_LATERAL 	3
+#define EXPRKIND_RTFUNC_LATERAL		3
 #define EXPRKIND_VALUES				4
-#define EXPRKIND_VALUES_LATERAL 	5
+#define EXPRKIND_VALUES_LATERAL		5
 #define EXPRKIND_LIMIT				6
 #define EXPRKIND_APPINFO			7
 #define EXPRKIND_PHV				8
@@ -1041,7 +1041,7 @@ inheritance_planner(PlannerInfo *root)
 	ListCell   *lc;
 	Index		rti;
 	RangeTblEntry *parent_rte;
-	List		  *partitioned_rels = NIL;
+	List	   *partitioned_rels = NIL;
 
 	Assert(parse->commandType != CMD_INSERT);
 
@@ -1102,10 +1102,10 @@ inheritance_planner(PlannerInfo *root)
 	/*
 	 * If the parent RTE is a partitioned table, we should use that as the
 	 * nominal relation, because the RTEs added for partitioned tables
-	 * (including the root parent) as child members of the inheritance set
-	 * do not appear anywhere else in the plan.  The situation is exactly
-	 * the opposite in the case of non-partitioned inheritance parent as
-	 * described below.
+	 * (including the root parent) as child members of the inheritance set do
+	 * not appear anywhere else in the plan.  The situation is exactly the
+	 * opposite in the case of non-partitioned inheritance parent as described
+	 * below.
 	 */
 	parent_rte = rt_fetch(parentRTindex, root->parse->rtable);
 	if (parent_rte->relkind == RELKIND_PARTITIONED_TABLE)
@@ -1278,9 +1278,9 @@ inheritance_planner(PlannerInfo *root)
 		 * is used elsewhere in the plan, so using the original parent RTE
 		 * would give rise to confusing use of multiple aliases in EXPLAIN
 		 * output for what the user will think is the "same" table.  OTOH,
-		 * it's not a problem in the partitioned inheritance case, because
-		 * the duplicate child RTE added for the parent does not appear
-		 * anywhere else in the plan tree.
+		 * it's not a problem in the partitioned inheritance case, because the
+		 * duplicate child RTE added for the parent does not appear anywhere
+		 * else in the plan tree.
 		 */
 		if (nominalRelation < 0)
 			nominalRelation = appinfo->child_relid;
@@ -1311,7 +1311,7 @@ inheritance_planner(PlannerInfo *root)
 		else
 			final_rtable = list_concat(final_rtable,
 									   list_copy_tail(subroot->parse->rtable,
-												 list_length(final_rtable)));
+													  list_length(final_rtable)));
 
 		/*
 		 * We need to collect all the RelOptInfos from all child plans into
@@ -1543,7 +1543,7 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
 			  translator: %s is a SQL row locking clause such as FOR UPDATE */
 					 errmsg("%s is not allowed with UNION/INTERSECT/EXCEPT",
 							LCS_asString(((RowMarkClause *)
-									linitial(parse->rowMarks))->strength))));
+										  linitial(parse->rowMarks))->strength))));
 
 		/*
 		 * Calculate pathkeys that represent result ordering requirements
@@ -1978,7 +1978,7 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
 		{
 			path = (Path *) create_lockrows_path(root, final_rel, path,
 												 root->rowMarks,
-											  SS_assign_special_param(root));
+												 SS_assign_special_param(root));
 		}
 
 		/*
@@ -2233,7 +2233,7 @@ preprocess_grouping_sets(PlannerInfo *root)
 		 */
 		gd->hash_sets_idx = remap_to_groupclause_idx(parse->groupClause,
 													 gd->unsortable_sets,
-												   gd->tleref_to_colnum_map);
+													 gd->tleref_to_colnum_map);
 		gd->any_hashable = true;
 	}
 
@@ -2412,7 +2412,7 @@ preprocess_rowmarks(PlannerInfo *root)
 		newrc->markType = select_rowmark_type(rte, LCS_NONE);
 		newrc->allMarkTypes = (1 << newrc->markType);
 		newrc->strength = LCS_NONE;
-		newrc->waitPolicy = LockWaitBlock;		/* doesn't matter */
+		newrc->waitPolicy = LockWaitBlock;	/* doesn't matter */
 		newrc->isParent = false;
 
 		prowmarks = lappend(prowmarks, newrc);
@@ -2469,7 +2469,7 @@ select_rowmark_type(RangeTblEntry *rte, LockClauseStrength strength)
 				break;
 		}
 		elog(ERROR, "unrecognized LockClauseStrength %d", (int) strength);
-		return ROW_MARK_EXCLUSIVE;		/* keep compiler quiet */
+		return ROW_MARK_EXCLUSIVE;	/* keep compiler quiet */
 	}
 }
 
@@ -2519,7 +2519,7 @@ preprocess_limit(PlannerInfo *root, double tuple_fraction,
 			{
 				*count_est = DatumGetInt64(((Const *) est)->constvalue);
 				if (*count_est <= 0)
-					*count_est = 1;		/* force to at least 1 */
+					*count_est = 1; /* force to at least 1 */
 			}
 		}
 		else
@@ -2653,7 +2653,7 @@ preprocess_limit(PlannerInfo *root, double tuple_fraction,
 				/* both fractional, so add them together */
 				tuple_fraction += limit_fraction;
 				if (tuple_fraction >= 1.0)
-					tuple_fraction = 0.0;		/* assume fetch all */
+					tuple_fraction = 0.0;	/* assume fetch all */
 			}
 		}
 	}
@@ -2778,7 +2778,7 @@ remove_useless_groupby_columns(PlannerInfo *root)
 		relid = var->varno;
 		Assert(relid <= list_length(parse->rtable));
 		groupbyattnos[relid] = bms_add_member(groupbyattnos[relid],
-						 var->varattno - FirstLowInvalidHeapAttributeNumber);
+											  var->varattno - FirstLowInvalidHeapAttributeNumber);
 	}
 
 	/*
@@ -2827,7 +2827,7 @@ remove_useless_groupby_columns(PlannerInfo *root)
 			 */
 			if (surplusvars == NULL)
 				surplusvars = (Bitmapset **) palloc0(sizeof(Bitmapset *) *
-										   (list_length(parse->rtable) + 1));
+													 (list_length(parse->rtable) + 1));
 
 			/* Remember the attnos of the removable columns */
 			surplusvars[relid] = bms_difference(relattnos, pkattnos);
@@ -2859,8 +2859,8 @@ remove_useless_groupby_columns(PlannerInfo *root)
 			 */
 			if (!IsA(var, Var) ||
 				var->varlevelsup > 0 ||
-			!bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber,
-						   surplusvars[var->varno]))
+				!bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber,
+							   surplusvars[var->varno]))
 				new_groupby = lappend(new_groupby, sgc);
 		}
 
@@ -3364,7 +3364,7 @@ get_number_of_groups(PlannerInfo *root,
 			ListCell   *lc;
 			ListCell   *lc2;
 
-			Assert(gd);  /* keep Coverity happy */
+			Assert(gd);			/* keep Coverity happy */
 
 			dNumGroups = 0;
 
@@ -3514,7 +3514,7 @@ create_grouping_paths(PlannerInfo *root,
 	RelOptInfo *grouped_rel;
 	PathTarget *partial_grouping_target = NULL;
 	AggClauseCosts agg_partial_costs;	/* parallel only */
-	AggClauseCosts agg_final_costs;		/* parallel only */
+	AggClauseCosts agg_final_costs; /* parallel only */
 	Size		hashaggtablesize;
 	double		dNumGroups;
 	double		dNumPartialGroups = 0;
@@ -3653,7 +3653,7 @@ create_grouping_paths(PlannerInfo *root,
 	 */
 	can_hash = (parse->groupClause != NIL &&
 				agg_costs->numOrderedAggs == 0 &&
-		 (gd ? gd->any_hashable : grouping_is_hashable(parse->groupClause)));
+				(gd ? gd->any_hashable : grouping_is_hashable(parse->groupClause)));
 
 	/*
 	 * If grouped_rel->consider_parallel is true, then paths that we generate
@@ -3774,9 +3774,9 @@ create_grouping_paths(PlannerInfo *root,
 										 create_agg_path(root,
 														 grouped_rel,
 														 path,
-													 partial_grouping_target,
-								 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-													 AGGSPLIT_INITIAL_SERIAL,
+														 partial_grouping_target,
+														 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+														 AGGSPLIT_INITIAL_SERIAL,
 														 parse->groupClause,
 														 NIL,
 														 &agg_partial_costs,
@@ -3786,10 +3786,10 @@ create_grouping_paths(PlannerInfo *root,
 										 create_group_path(root,
 														   grouped_rel,
 														   path,
-													 partial_grouping_target,
+														   partial_grouping_target,
 														   parse->groupClause,
 														   NIL,
-														 dNumPartialGroups));
+														   dNumPartialGroups));
 				}
 			}
 		}
@@ -3867,7 +3867,7 @@ create_grouping_paths(PlannerInfo *root,
 											 grouped_rel,
 											 path,
 											 target,
-								 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+											 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
 											 AGGSPLIT_SIMPLE,
 											 parse->groupClause,
 											 (List *) parse->havingQual,
@@ -3931,7 +3931,7 @@ create_grouping_paths(PlannerInfo *root,
 										 grouped_rel,
 										 path,
 										 target,
-								 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+										 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
 										 AGGSPLIT_FINAL_DESERIAL,
 										 parse->groupClause,
 										 (List *) parse->havingQual,
@@ -3993,7 +3993,7 @@ create_grouping_paths(PlannerInfo *root,
 												 grouped_rel,
 												 gmpath,
 												 target,
-								 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+												 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
 												 AGGSPLIT_FINAL_DESERIAL,
 												 parse->groupClause,
 												 (List *) parse->havingQual,
@@ -4243,7 +4243,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 				rollup->gsets_data = list_make1(gs);
 				rollup->gsets = remap_to_groupclause_idx(rollup->groupClause,
 														 rollup->gsets_data,
-												   gd->tleref_to_colnum_map);
+														 gd->tleref_to_colnum_map);
 				rollup->numGroups = gs->numGroups;
 				rollup->hashable = true;
 				rollup->is_hashed = true;
@@ -4336,8 +4336,8 @@ consider_groupingsets_paths(PlannerInfo *root,
 			/*
 			 * We treat this as a knapsack problem: the knapsack capacity
 			 * represents work_mem, the item weights are the estimated memory
-			 * usage of the hashtables needed to implement a single rollup, and
-			 * we really ought to use the cost saving as the item value;
+			 * usage of the hashtables needed to implement a single rollup,
+			 * and we really ought to use the cost saving as the item value;
 			 * however, currently the costs assigned to sort nodes don't
 			 * reflect the comparison costs well, and so we treat all items as
 			 * of equal value (each rollup we hash instead saves us one sort).
@@ -4373,7 +4373,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 				{
 					double		sz = estimate_hashagg_tablesize(path,
 																agg_costs,
-														  rollup->numGroups);
+																rollup->numGroups);
 
 					/*
 					 * If sz is enormous, but work_mem (and hence scale) is
@@ -4407,7 +4407,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 					{
 						if (bms_is_member(i, hash_items))
 							hash_sets = list_concat(hash_sets,
-											  list_copy(rollup->gsets_data));
+													list_copy(rollup->gsets_data));
 						else
 							rollups = lappend(rollups, rollup);
 						++i;
@@ -4432,7 +4432,7 @@ consider_groupingsets_paths(PlannerInfo *root,
 			rollup->gsets_data = list_make1(gs);
 			rollup->gsets = remap_to_groupclause_idx(rollup->groupClause,
 													 rollup->gsets_data,
-												   gd->tleref_to_colnum_map);
+													 gd->tleref_to_colnum_map);
 			rollup->numGroups = gs->numGroups;
 			rollup->hashable = true;
 			rollup->is_hashed = true;
@@ -4757,7 +4757,7 @@ create_distinct_paths(PlannerInfo *root,
 				add_path(distinct_rel, (Path *)
 						 create_upper_unique_path(root, distinct_rel,
 												  path,
-										list_length(root->distinct_pathkeys),
+												  list_length(root->distinct_pathkeys),
 												  numDistinctRows));
 			}
 		}
@@ -4784,7 +4784,7 @@ create_distinct_paths(PlannerInfo *root,
 		add_path(distinct_rel, (Path *)
 				 create_upper_unique_path(root, distinct_rel,
 										  path,
-										list_length(root->distinct_pathkeys),
+										  list_length(root->distinct_pathkeys),
 										  numDistinctRows));
 	}
 
@@ -4849,7 +4849,7 @@ create_distinct_paths(PlannerInfo *root,
 	if (distinct_rel->fdwroutine &&
 		distinct_rel->fdwroutine->GetForeignUpperPaths)
 		distinct_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_DISTINCT,
-													input_rel, distinct_rel);
+													   input_rel, distinct_rel);
 
 	/* Let extensions possibly add some more paths */
 	if (create_upper_paths_hook)
@@ -5525,7 +5525,7 @@ make_pathkeys_for_window(PlannerInfo *root, WindowClause *wc,
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("could not implement window ORDER BY"),
-		errdetail("Window ordering columns must be of sortable datatypes.")));
+				 errdetail("Window ordering columns must be of sortable datatypes.")));
 
 	/* Okay, make the combined pathkeys */
 	window_sortclauses = list_concat(list_copy(wc->partitionClause),
@@ -5626,7 +5626,7 @@ make_sort_input_target(PlannerInfo *root,
 	/* Shouldn't get here unless query has ORDER BY */
 	Assert(parse->sortClause);
 
-	*have_postponed_srfs = false;		/* default result */
+	*have_postponed_srfs = false;	/* default result */
 
 	/* Inspect tlist and collect per-column information */
 	ncols = list_length(final_target->exprs);
@@ -5739,7 +5739,7 @@ make_sort_input_target(PlannerInfo *root,
 			postponable_cols = lappend(postponable_cols, expr);
 		else
 			add_column_to_pathtarget(input_target, expr,
-							   get_pathtarget_sortgroupref(final_target, i));
+									 get_pathtarget_sortgroupref(final_target, i));
 
 		i++;
 	}
@@ -5793,7 +5793,7 @@ get_cheapest_fractional_path(RelOptInfo *rel, double tuple_fraction)
 		Path	   *path = (Path *) lfirst(l);
 
 		if (path == rel->cheapest_total_path ||
-		 compare_fractional_path_costs(best_path, path, tuple_fraction) <= 0)
+			compare_fractional_path_costs(best_path, path, tuple_fraction) <= 0)
 			continue;
 
 		best_path = path;
@@ -6072,7 +6072,7 @@ get_partitioned_child_rels(PlannerInfo *root, Index rti)
 
 	foreach(l, root->pcinfo_list)
 	{
-		PartitionedChildRelInfo	*pc = lfirst(l);
+		PartitionedChildRelInfo *pc = lfirst(l);
 
 		if (pc->parent_relid == rti)
 		{

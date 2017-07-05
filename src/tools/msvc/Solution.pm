@@ -156,7 +156,7 @@ sub GenerateFiles
 		{
 			s{PG_VERSION "[^"]+"}{PG_VERSION "$self->{strver}$extraver"};
 			s{PG_VERSION_NUM \d+}{PG_VERSION_NUM $self->{numver}};
-			s{PG_VERSION_STR "[^"]+"}{PG_VERSION_STR "PostgreSQL $self->{strver}$extraver, compiled by Visual C++ build " CppAsString2(_MSC_VER) ", $bits-bit"};
+s{PG_VERSION_STR "[^"]+"}{PG_VERSION_STR "PostgreSQL $self->{strver}$extraver, compiled by Visual C++ build " CppAsString2(_MSC_VER) ", $bits-bit"};
 			print $o $_;
 		}
 		print $o "#define PG_MAJORVERSION \"$self->{majorver}\"\n";
@@ -171,7 +171,8 @@ sub GenerateFiles
 		print $o "#define USE_OPENSSL 1\n" if ($self->{options}->{openssl});
 		print $o "#define ENABLE_NLS 1\n"  if ($self->{options}->{nls});
 
-		print $o "#define BLCKSZ ", 1024 * $self->{options}->{blocksize}, "\n";
+		print $o "#define BLCKSZ ", 1024 * $self->{options}->{blocksize},
+		  "\n";
 		print $o "#define RELSEG_SIZE ",
 		  (1024 / $self->{options}->{blocksize}) *
 		  $self->{options}->{segsize} *
@@ -218,6 +219,10 @@ sub GenerateFiles
 		if ($self->{options}->{gss})
 		{
 			print $o "#define ENABLE_GSS 1\n";
+		}
+		if ($self->{options}->{icu})
+		{
+			print $o "#define USE_ICU 1\n";
 		}
 		if (my $port = $self->{options}->{"--with-pgport"})
 		{
@@ -281,7 +286,8 @@ sub GenerateFiles
 			'src/include/utils/fmgrprotos.h',
 			'src/backend/utils/fmgrprotos.h'))
 	{
-		copyFile('src/backend/utils/fmgrprotos.h',
+		copyFile(
+			'src/backend/utils/fmgrprotos.h',
 			'src/include/utils/fmgrprotos.h');
 	}
 
@@ -521,10 +527,20 @@ sub AddProject
 	if ($self->{options}->{openssl})
 	{
 		$proj->AddIncludeDir($self->{options}->{openssl} . '\include');
-		$proj->AddLibrary(
-			$self->{options}->{openssl} . '\lib\VC\ssleay32.lib', 1);
-		$proj->AddLibrary(
-			$self->{options}->{openssl} . '\lib\VC\libeay32.lib', 1);
+		if (-e "$self->{options}->{openssl}/lib/VC/ssleay32MD.lib")
+		{
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\VC\ssleay32.lib', 1);
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\VC\libeay32.lib', 1);
+		}
+		else
+		{
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\ssleay32.lib', 1);
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\libeay32.lib', 1);
+		}
 	}
 	if ($self->{options}->{nls})
 	{
@@ -543,9 +559,26 @@ sub AddProject
 		$proj->AddIncludeDir($self->{options}->{iconv} . '\include');
 		$proj->AddLibrary($self->{options}->{iconv} . '\lib\iconv.lib');
 	}
+	if ($self->{options}->{icu})
+	{
+		$proj->AddIncludeDir($self->{options}->{icu} . '\include');
+		if ($self->{platform} eq 'Win32')
+		{
+			$proj->AddLibrary($self->{options}->{icu} . '\lib\icuin.lib');
+			$proj->AddLibrary($self->{options}->{icu} . '\lib\icuuc.lib');
+			$proj->AddLibrary($self->{options}->{icu} . '\lib\icudt.lib');
+		}
+		else
+		{
+			$proj->AddLibrary($self->{options}->{icu} . '\lib64\icuin.lib');
+			$proj->AddLibrary($self->{options}->{icu} . '\lib64\icuuc.lib');
+			$proj->AddLibrary($self->{options}->{icu} . '\lib64\icudt.lib');
+		}
+	}
 	if ($self->{options}->{xml})
 	{
 		$proj->AddIncludeDir($self->{options}->{xml} . '\include');
+		$proj->AddIncludeDir($self->{options}->{xml} . '\include\libxml2');
 		$proj->AddLibrary($self->{options}->{xml} . '\lib\libxml2.lib');
 	}
 	if ($self->{options}->{xslt})
@@ -653,7 +686,7 @@ sub GetFakeConfigure
 	my $self = shift;
 
 	my $cfg = '--enable-thread-safety';
-	$cfg .= ' --enable-cassert' if ($self->{options}->{asserts});
+	$cfg .= ' --enable-cassert'   if ($self->{options}->{asserts});
 	$cfg .= ' --enable-nls'       if ($self->{options}->{nls});
 	$cfg .= ' --enable-tap-tests' if ($self->{options}->{tap_tests});
 	$cfg .= ' --with-ldap'        if ($self->{options}->{ldap});
@@ -664,6 +697,7 @@ sub GetFakeConfigure
 	$cfg .= ' --with-libxml'        if ($self->{options}->{xml});
 	$cfg .= ' --with-libxslt'       if ($self->{options}->{xslt});
 	$cfg .= ' --with-gssapi'        if ($self->{options}->{gss});
+	$cfg .= ' --with-icu'           if ($self->{options}->{icu});
 	$cfg .= ' --with-tcl'           if ($self->{options}->{tcl});
 	$cfg .= ' --with-perl'          if ($self->{options}->{perl});
 	$cfg .= ' --with-python'        if ($self->{options}->{python});

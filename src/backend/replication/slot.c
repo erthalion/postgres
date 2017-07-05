@@ -86,7 +86,7 @@ typedef struct ReplicationSlotOnDisk
 #define ReplicationSlotOnDiskV2Size \
 	sizeof(ReplicationSlotOnDisk) - ReplicationSlotOnDiskConstantSize
 
-#define SLOT_MAGIC		0x1051CA1		/* format identifier */
+#define SLOT_MAGIC		0x1051CA1	/* format identifier */
 #define SLOT_VERSION	2		/* version for new files */
 
 /* Control array for replication slot management */
@@ -200,8 +200,8 @@ ReplicationSlotValidateName(const char *name, int elevel)
 		{
 			ereport(elevel,
 					(errcode(ERRCODE_INVALID_NAME),
-			errmsg("replication slot name \"%s\" contains invalid character",
-				   name),
+					 errmsg("replication slot name \"%s\" contains invalid character",
+							name),
 					 errhint("Replication slot names may only contain lower case letters, numbers, and the underscore character.")));
 			return false;
 		}
@@ -330,8 +330,6 @@ ReplicationSlotAcquire(const char *name)
 	int			active_pid = 0; /* Keep compiler quiet */
 
 	Assert(MyReplicationSlot == NULL);
-
-	ReplicationSlotValidateName(name, ERROR);
 
 	/* Search for the named slot and mark it active if we find it. */
 	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
@@ -502,8 +500,8 @@ ReplicationSlotDropPtr(ReplicationSlot *slot)
 	/*
 	 * Rename the slot directory on disk, so that we'll no longer recognize
 	 * this as a valid slot.  Note that if this fails, we've got to mark the
-	 * slot inactive before bailing out.  If we're dropping an ephemeral or
-	 * a temporary slot, we better never fail hard as the caller won't expect
+	 * slot inactive before bailing out.  If we're dropping an ephemeral or a
+	 * temporary slot, we better never fail hard as the caller won't expect
 	 * the slot to survive and this might get called during error handling.
 	 */
 	if (rename(path, tmppath) == 0)
@@ -839,8 +837,8 @@ restart:
 	for (i = 0; i < max_replication_slots; i++)
 	{
 		ReplicationSlot *s;
-		char *slotname;
-		int active_pid;
+		char	   *slotname;
+		int			active_pid;
 
 		s = &ReplicationSlotCtl->replication_slots[i];
 
@@ -1354,15 +1352,15 @@ RestoreSlotFromDisk(const char *name)
 	if (cp.version != SLOT_VERSION)
 		ereport(PANIC,
 				(errcode_for_file_access(),
-			errmsg("replication slot file \"%s\" has unsupported version %u",
-				   path, cp.version)));
+				 errmsg("replication slot file \"%s\" has unsupported version %u",
+						path, cp.version)));
 
 	/* boundary check on length */
 	if (cp.length != ReplicationSlotOnDiskV2Size)
 		ereport(PANIC,
 				(errcode_for_file_access(),
-			   errmsg("replication slot file \"%s\" has corrupted length %u",
-					  path, cp.length)));
+				 errmsg("replication slot file \"%s\" has corrupted length %u",
+						path, cp.length)));
 
 	/* Now that we know the size, read the entire file */
 	pgstat_report_wait_start(WAIT_EVENT_REPLICATION_SLOT_READ);

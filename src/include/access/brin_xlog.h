@@ -132,7 +132,7 @@ typedef struct xl_brin_revmap_extend
  */
 typedef struct xl_brin_desummarize
 {
-	BlockNumber	pagesPerRange;
+	BlockNumber pagesPerRange;
 	/* page number location to set to invalid */
 	BlockNumber heapBlk;
 	/* offset of item to delete in regular index page */
@@ -148,4 +148,4 @@ extern void brin_desc(StringInfo buf, XLogReaderState *record);
 extern const char *brin_identify(uint8 info);
 extern void brin_mask(char *pagedata, BlockNumber blkno);
 
-#endif   /* BRIN_XLOG_H */
+#endif							/* BRIN_XLOG_H */

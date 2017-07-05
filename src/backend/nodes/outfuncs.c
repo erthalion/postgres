@@ -468,7 +468,7 @@ _outGather(StringInfo str, const Gather *node)
 static void
 _outGatherMerge(StringInfo str, const GatherMerge *node)
 {
-	int		i;
+	int			i;
 
 	WRITE_NODE_TYPE("GATHERMERGE");
 
@@ -898,8 +898,6 @@ _outHash(StringInfo str, const Hash *node)
 	WRITE_OID_FIELD(skewTable);
 	WRITE_INT_FIELD(skewColumn);
 	WRITE_BOOL_FIELD(skewInherit);
-	WRITE_OID_FIELD(skewColType);
-	WRITE_INT_FIELD(skewColTypmod);
 }
 
 static void
@@ -1020,8 +1018,8 @@ _outTableFunc(StringInfo str, const TableFunc *node)
 {
 	WRITE_NODE_TYPE("TABLEFUNC");
 
-	WRITE_NODE_FIELD(ns_names);
 	WRITE_NODE_FIELD(ns_uris);
+	WRITE_NODE_FIELD(ns_names);
 	WRITE_NODE_FIELD(docexpr);
 	WRITE_NODE_FIELD(rowexpr);
 	WRITE_NODE_FIELD(colnames);
@@ -2641,9 +2639,9 @@ _outCreateStatsStmt(StringInfo str, const CreateStatsStmt *node)
 	WRITE_NODE_TYPE("CREATESTATSSTMT");
 
 	WRITE_NODE_FIELD(defnames);
-	WRITE_NODE_FIELD(relation);
-	WRITE_NODE_FIELD(keys);
-	WRITE_NODE_FIELD(options);
+	WRITE_NODE_FIELD(stat_types);
+	WRITE_NODE_FIELD(exprs);
+	WRITE_NODE_FIELD(relations);
 	WRITE_BOOL_FIELD(if_not_exists);
 }
 
@@ -3051,6 +3049,7 @@ _outRangeTblEntry(StringInfo str, const RangeTblEntry *node)
 			break;
 		case RTE_NAMEDTUPLESTORE:
 			WRITE_STRING_FIELD(enrname);
+			WRITE_FLOAT_FIELD(enrtuples, "%.0f");
 			WRITE_OID_FIELD(relid);
 			WRITE_NODE_FIELD(coltypes);
 			WRITE_NODE_FIELD(coltypmods);
@@ -3520,16 +3519,6 @@ _outForeignKeyCacheInfo(StringInfo str, const ForeignKeyCacheInfo *node)
 }
 
 static void
-_outPartitionSpec(StringInfo str, const PartitionSpec *node)
-{
-	WRITE_NODE_TYPE("PARTITIONBY");
-
-	WRITE_STRING_FIELD(strategy);
-	WRITE_NODE_FIELD(partParams);
-	WRITE_LOCATION_FIELD(location);
-}
-
-static void
 _outPartitionElem(StringInfo str, const PartitionElem *node)
 {
 	WRITE_NODE_TYPE("PARTITIONELEM");
@@ -3542,23 +3531,35 @@ _outPartitionElem(StringInfo str, const PartitionElem *node)
 }
 
 static void
+_outPartitionSpec(StringInfo str, const PartitionSpec *node)
+{
+	WRITE_NODE_TYPE("PARTITIONSPEC");
+
+	WRITE_STRING_FIELD(strategy);
+	WRITE_NODE_FIELD(partParams);
+	WRITE_LOCATION_FIELD(location);
+}
+
+static void
 _outPartitionBoundSpec(StringInfo str, const PartitionBoundSpec *node)
 {
-	WRITE_NODE_TYPE("PARTITIONBOUND");
+	WRITE_NODE_TYPE("PARTITIONBOUNDSPEC");
 
 	WRITE_CHAR_FIELD(strategy);
 	WRITE_NODE_FIELD(listdatums);
 	WRITE_NODE_FIELD(lowerdatums);
 	WRITE_NODE_FIELD(upperdatums);
+	WRITE_LOCATION_FIELD(location);
 }
 
 static void
 _outPartitionRangeDatum(StringInfo str, const PartitionRangeDatum *node)
 {
-	WRITE_NODE_TYPE("PARTRANGEDATUM");
+	WRITE_NODE_TYPE("PARTITIONRANGEDATUM");
 
 	WRITE_BOOL_FIELD(infinite);
 	WRITE_NODE_FIELD(value);
+	WRITE_LOCATION_FIELD(location);
 }
 
 /*
@@ -4188,11 +4189,11 @@ outNode(StringInfo str, const void *obj)
 			case T_TriggerTransition:
 				_outTriggerTransition(str, obj);
 				break;
-			case T_PartitionSpec:
-				_outPartitionSpec(str, obj);
-				break;
 			case T_PartitionElem:
 				_outPartitionElem(str, obj);
+				break;
+			case T_PartitionSpec:
+				_outPartitionSpec(str, obj);
 				break;
 			case T_PartitionBoundSpec:
 				_outPartitionBoundSpec(str, obj);

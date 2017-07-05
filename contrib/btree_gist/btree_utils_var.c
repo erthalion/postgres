@@ -25,7 +25,7 @@ typedef struct
 {
 	const gbtree_vinfo *tinfo;
 	Oid			collation;
-	FmgrInfo *flinfo;
+	FmgrInfo   *flinfo;
 } gbt_vsrt_arg;
 
 
@@ -72,7 +72,7 @@ gbt_var_key_readable(const GBT_VARKEY *k)
  * Create a leaf-entry to store in the index, from a single Datum.
  */
 static GBT_VARKEY *
-gbt_var_key_from_datum(const struct varlena * u)
+gbt_var_key_from_datum(const struct varlena *u)
 {
 	int32		lowersize = VARSIZE(u);
 	GBT_VARKEY *r;
@@ -488,7 +488,7 @@ gbt_var_picksplit(const GistEntryVector *entryvec, GIST_SPLITVEC *v,
 
 		cur = (char *) DatumGetPointer(entryvec->vector[i].key);
 		ro = gbt_var_key_readable((GBT_VARKEY *) cur);
-		if (ro.lower == ro.upper)		/* leaf */
+		if (ro.lower == ro.upper)	/* leaf */
 		{
 			sv[svcntr] = gbt_var_leaf2node((GBT_VARKEY *) cur, tinfo, flinfo);
 			arr[i].t = sv[svcntr];

@@ -315,5 +315,5 @@ page_checksum(PG_FUNCTION_ARGS)
 
 	page = (PageHeader) VARDATA(raw_page);
 
-	PG_RETURN_INT16(pg_checksum_page((char *)page, blkno));
+	PG_RETURN_INT16(pg_checksum_page((char *) page, blkno));
 }

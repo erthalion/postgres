@@ -129,7 +129,7 @@ BitmapHeapNext(BitmapHeapScanState *node)
 				node->prefetch_pages = 0;
 				node->prefetch_target = -1;
 			}
-#endif   /* USE_PREFETCH */
+#endif							/* USE_PREFETCH */
 		}
 		else
 		{
@@ -182,7 +182,7 @@ BitmapHeapNext(BitmapHeapScanState *node)
 				node->shared_prefetch_iterator =
 					tbm_attach_shared_iterate(dsa, pstate->prefetch_iterator);
 			}
-#endif   /* USE_PREFETCH */
+#endif							/* USE_PREFETCH */
 		}
 		node->initialized = true;
 	}
@@ -265,7 +265,7 @@ BitmapHeapNext(BitmapHeapScanState *node)
 					pstate->prefetch_target++;
 				SpinLockRelease(&pstate->mutex);
 			}
-#endif   /* USE_PREFETCH */
+#endif							/* USE_PREFETCH */
 		}
 
 		/*
@@ -506,14 +506,15 @@ BitmapAdjustPrefetchIterator(BitmapHeapScanState *node,
 			 * In case of shared mode, we can not ensure that the current
 			 * blockno of the main iterator and that of the prefetch iterator
 			 * are same.  It's possible that whatever blockno we are
-			 * prefetching will be processed by another process.  Therefore, we
-			 * don't validate the blockno here as we do in non-parallel case.
+			 * prefetching will be processed by another process.  Therefore,
+			 * we don't validate the blockno here as we do in non-parallel
+			 * case.
 			 */
 			if (prefetch_iterator)
 				tbm_shared_iterate(prefetch_iterator);
 		}
 	}
-#endif   /* USE_PREFETCH */
+#endif							/* USE_PREFETCH */
 }
 
 /*
@@ -557,7 +558,7 @@ BitmapAdjustPrefetchTarget(BitmapHeapScanState *node)
 			pstate->prefetch_target++;
 		SpinLockRelease(&pstate->mutex);
 	}
-#endif   /* USE_PREFETCH */
+#endif							/* USE_PREFETCH */
 }
 
 /*
@@ -633,7 +634,7 @@ BitmapPrefetch(BitmapHeapScanState *node, HeapScanDesc scan)
 			}
 		}
 	}
-#endif   /* USE_PREFETCH */
+#endif							/* USE_PREFETCH */
 }
 
 /*
@@ -1004,7 +1005,7 @@ ExecBitmapHeapInitializeWorker(BitmapHeapScanState *node, shm_toc *toc)
 	ParallelBitmapHeapState *pstate;
 	Snapshot	snapshot;
 
-	pstate = shm_toc_lookup(toc, node->ss.ps.plan->plan_node_id);
+	pstate = shm_toc_lookup(toc, node->ss.ps.plan->plan_node_id, false);
 	node->pstate = pstate;
 
 	snapshot = RestoreSnapshot(pstate->phs_snapshot_data);

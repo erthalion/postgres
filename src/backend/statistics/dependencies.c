@@ -44,24 +44,24 @@ typedef struct DependencyGeneratorData
 	int			current;		/* next dependency to return (index) */
 	AttrNumber	ndependencies;	/* number of dependencies generated */
 	AttrNumber *dependencies;	/* array of pre-generated dependencies	*/
-}	DependencyGeneratorData;
+} DependencyGeneratorData;
 
 typedef DependencyGeneratorData *DependencyGenerator;
 
 static void generate_dependencies_recurse(DependencyGenerator state,
-						   int index, AttrNumber start, AttrNumber *current);
+							  int index, AttrNumber start, AttrNumber *current);
 static void generate_dependencies(DependencyGenerator state);
 static DependencyGenerator DependencyGenerator_init(int n, int k);
 static void DependencyGenerator_free(DependencyGenerator state);
 static AttrNumber *DependencyGenerator_next(DependencyGenerator state);
 static double dependency_degree(int numrows, HeapTuple *rows, int k,
-			 AttrNumber *dependency, VacAttrStats **stats, Bitmapset *attrs);
+				  AttrNumber *dependency, VacAttrStats **stats, Bitmapset *attrs);
 static bool dependency_is_fully_matched(MVDependency *dependency,
 							Bitmapset *attnums);
 static bool dependency_implies_attribute(MVDependency *dependency,
 							 AttrNumber attnum);
 static bool dependency_is_compatible_clause(Node *clause, Index relid,
-							 AttrNumber *attnum);
+								AttrNumber *attnum);
 static MVDependency *find_strongest_dependency(StatisticExtInfo *stats,
 						  MVDependencies *dependencies,
 						  Bitmapset *attnums);
@@ -122,7 +122,7 @@ generate_dependencies_recurse(DependencyGenerator state, int index,
 			if (!match)
 			{
 				state->dependencies = (AttrNumber *) repalloc(state->dependencies,
-				 state->k * (state->ndependencies + 1) * sizeof(AttrNumber));
+															  state->k * (state->ndependencies + 1) * sizeof(AttrNumber));
 				memcpy(&state->dependencies[(state->k * state->ndependencies)],
 					   current, state->k * sizeof(AttrNumber));
 				state->ndependencies++;
@@ -308,7 +308,7 @@ dependency_degree(int numrows, HeapTuple *rows, int k, AttrNumber *dependency,
 		 * to the preceding one.
 		 */
 		if (i == numrows ||
-		multi_sort_compare_dims(0, k - 2, &items[i - 1], &items[i], mss) != 0)
+			multi_sort_compare_dims(0, k - 2, &items[i - 1], &items[i], mss) != 0)
 		{
 			/*
 			 * If no violations were found in the group then track the rows of
@@ -342,8 +342,8 @@ dependency_degree(int numrows, HeapTuple *rows, int k, AttrNumber *dependency,
  * detects functional dependencies between groups of columns
  *
  * Generates all possible subsets of columns (variations) and computes
- * the degree of validity for each one. For example with a statistic on
- * three columns (a,b,c) there are 9 possible dependencies
+ * the degree of validity for each one. For example when creating statistics
+ * on three columns (a,b,c) there are 9 possible dependencies
  *
  *	   two columns			  three columns
  *	   -----------			  -------------
@@ -383,8 +383,8 @@ statext_dependencies_build(int numrows, HeapTuple *rows, Bitmapset *attrs,
 	/*
 	 * We'll try build functional dependencies starting from the smallest ones
 	 * covering just 2 columns, to the largest ones, covering all columns
-	 * included in the statistics. We start from the smallest ones because we
-	 * want to be able to skip already implied ones.
+	 * included in the statistics object.  We start from the smallest ones
+	 * because we want to be able to skip already implied ones.
 	 */
 	for (k = 2; k <= numattrs; k++)
 	{
@@ -430,8 +430,8 @@ statext_dependencies_build(int numrows, HeapTuple *rows, Bitmapset *attrs,
 
 			dependencies->ndeps++;
 			dependencies = (MVDependencies *) repalloc(dependencies,
-											   offsetof(MVDependencies, deps)
-							   + dependencies->ndeps * sizeof(MVDependency));
+													   offsetof(MVDependencies, deps)
+													   + dependencies->ndeps * sizeof(MVDependency));
 
 			dependencies->deps[dependencies->ndeps - 1] = d;
 		}
@@ -451,7 +451,7 @@ statext_dependencies_build(int numrows, HeapTuple *rows, Bitmapset *attrs,
  * Serialize list of dependencies into a bytea value.
  */
 bytea *
-statext_dependencies_serialize(MVDependencies * dependencies)
+statext_dependencies_serialize(MVDependencies *dependencies)
 {
 	int			i;
 	bytea	   *output;
@@ -600,7 +600,7 @@ statext_dependencies_deserialize(bytea *data)
  *		attributes (assuming the clauses are suitable equality clauses)
  */
 static bool
-dependency_is_fully_matched(MVDependency * dependency, Bitmapset *attnums)
+dependency_is_fully_matched(MVDependency *dependency, Bitmapset *attnums)
 {
 	int			j;
 
@@ -633,18 +633,18 @@ dependency_implies_attribute(MVDependency *dependency, AttrNumber attnum)
 }
 
 /*
- * staext_dependencies_load
+ * statext_dependencies_load
  *		Load the functional dependencies for the indicated pg_statistic_ext tuple
  */
 MVDependencies *
-staext_dependencies_load(Oid mvoid)
+statext_dependencies_load(Oid mvoid)
 {
 	bool		isnull;
 	Datum		deps;
 	HeapTuple	htup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(mvoid));
 
 	if (!HeapTupleIsValid(htup))
-		elog(ERROR, "cache lookup failed for extended statistics %u", mvoid);
+		elog(ERROR, "cache lookup failed for statistics object %u", mvoid);
 
 	deps = SysCacheGetAttr(STATEXTOID, htup,
 						   Anum_pg_statistic_ext_stxdependencies, &isnull);
@@ -840,7 +840,7 @@ dependency_is_compatible_clause(Node *clause, Index relid, AttrNumber *attnum)
  * (see the comment in dependencies_clauselist_selectivity).
  */
 static MVDependency *
-find_strongest_dependency(StatisticExtInfo * stats, MVDependencies * dependencies,
+find_strongest_dependency(StatisticExtInfo *stats, MVDependencies *dependencies,
 						  Bitmapset *attnums)
 {
 	int			i;
@@ -883,7 +883,7 @@ find_strongest_dependency(StatisticExtInfo * stats, MVDependencies * dependencie
 		 * slightly more expensive than the previous checks.
 		 */
 		if (dependency_is_fully_matched(dependency, attnums))
-			strongest = dependency;		/* save new best match */
+			strongest = dependency; /* save new best match */
 	}
 
 	return strongest;
@@ -975,7 +975,7 @@ dependencies_clauselist_selectivity(PlannerInfo *root,
 		return 1.0;
 	}
 
-	/* find the best suited statistics for these attnums */
+	/* find the best suited statistics object for these attnums */
 	stat = choose_best_statistics(rel->statlist, clauses_attnums,
 								  STATS_EXT_DEPENDENCIES);
 
@@ -986,8 +986,8 @@ dependencies_clauselist_selectivity(PlannerInfo *root,
 		return 1.0;
 	}
 
-	/* load the dependency items stored in the statistics */
-	dependencies = staext_dependencies_load(stat->statOid);
+	/* load the dependency items stored in the statistics object */
+	dependencies = statext_dependencies_load(stat->statOid);
 
 	/*
 	 * Apply the dependencies recursively, starting with the widest/strongest

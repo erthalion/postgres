@@ -356,7 +356,7 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 				*pNumGroups = subpath->rows;
 			else
 				*pNumGroups = estimate_num_groups(subroot,
-								get_tlist_exprs(subquery->targetList, false),
+												  get_tlist_exprs(subquery->targetList, false),
 												  subpath->rows,
 												  NULL);
 		}
@@ -724,14 +724,14 @@ generate_nonunion_path(SetOperationStmt *op, PlannerInfo *root,
 	 */
 	use_hash = choose_hashed_setop(root, groupList, path,
 								   dNumGroups, dNumOutputRows,
-					   (op->op == SETOP_INTERSECT) ? "INTERSECT" : "EXCEPT");
+								   (op->op == SETOP_INTERSECT) ? "INTERSECT" : "EXCEPT");
 
 	if (!use_hash)
 		path = (Path *) create_sort_path(root,
 										 result_rel,
 										 path,
 										 make_pathkeys_for_sortclauses(root,
-																   groupList,
+																	   groupList,
 																	   tlist),
 										 -1.0);
 
@@ -887,7 +887,7 @@ make_union_unique(SetOperationStmt *op, Path *path, List *tlist,
 										 result_rel,
 										 path,
 										 make_pathkeys_for_sortclauses(root,
-																   groupList,
+																	   groupList,
 																	   tlist),
 										 -1.0);
 		/* We have to manually jam the right tlist into the path; ick */
@@ -1527,11 +1527,11 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 			if (childOID != parentOID)
 			{
 				childrte->selectedCols = translate_col_privs(rte->selectedCols,
-												   appinfo->translated_vars);
+															 appinfo->translated_vars);
 				childrte->insertedCols = translate_col_privs(rte->insertedCols,
-												   appinfo->translated_vars);
+															 appinfo->translated_vars);
 				childrte->updatedCols = translate_col_privs(rte->updatedCols,
-												   appinfo->translated_vars);
+															appinfo->translated_vars);
 			}
 		}
 		else
@@ -1555,9 +1555,10 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 			newrc->waitPolicy = oldrc->waitPolicy;
 
 			/*
-			 * We mark RowMarks for partitioned child tables as parent RowMarks
-			 * so that the executor ignores them (except their existence means
-			 * that the child tables be locked using appropriate mode).
+			 * We mark RowMarks for partitioned child tables as parent
+			 * RowMarks so that the executor ignores them (except their
+			 * existence means that the child tables be locked using
+			 * appropriate mode).
 			 */
 			newrc->isParent = (childrte->relkind == RELKIND_PARTITIONED_TABLE);
 
@@ -1593,8 +1594,8 @@ expand_inherited_rtentry(PlannerInfo *root, RangeTblEntry *rte, Index rti)
 	 * parent RT index to the list of RT indexes of its partitioned child
 	 * tables.  When creating an Append or a ModifyTable path for the parent,
 	 * we copy the child RT index list verbatim to the path so that it could
-	 * be carried over to the executor so that the latter could identify
-	 * the partitioned child tables.
+	 * be carried over to the executor so that the latter could identify the
+	 * partitioned child tables.
 	 */
 	if (partitioned_child_rels != NIL)
 	{
@@ -1739,7 +1740,7 @@ translate_col_privs(const Bitmapset *parent_privs,
 		if (bms_is_member(attno - FirstLowInvalidHeapAttributeNumber,
 						  parent_privs))
 			child_privs = bms_add_member(child_privs,
-								 attno - FirstLowInvalidHeapAttributeNumber);
+										 attno - FirstLowInvalidHeapAttributeNumber);
 	}
 
 	/* Check if parent has whole-row reference */
@@ -1759,7 +1760,7 @@ translate_col_privs(const Bitmapset *parent_privs,
 			bms_is_member(attno - FirstLowInvalidHeapAttributeNumber,
 						  parent_privs))
 			child_privs = bms_add_member(child_privs,
-						 var->varattno - FirstLowInvalidHeapAttributeNumber);
+										 var->varattno - FirstLowInvalidHeapAttributeNumber);
 	}
 
 	return child_privs;
@@ -1926,7 +1927,7 @@ adjust_appendrel_attrs_mutator(Node *node,
 		JoinExpr   *j;
 
 		j = (JoinExpr *) expression_tree_mutator(node,
-											  adjust_appendrel_attrs_mutator,
+												 adjust_appendrel_attrs_mutator,
 												 (void *) context);
 		/* now fix JoinExpr's rtindex (probably never happens) */
 		if (j->rtindex == appinfo->parent_relid)
@@ -1939,7 +1940,7 @@ adjust_appendrel_attrs_mutator(Node *node,
 		PlaceHolderVar *phv;
 
 		phv = (PlaceHolderVar *) expression_tree_mutator(node,
-											  adjust_appendrel_attrs_mutator,
+														 adjust_appendrel_attrs_mutator,
 														 (void *) context);
 		/* now fix PlaceHolderVar's relid sets */
 		if (phv->phlevelsup == 0)

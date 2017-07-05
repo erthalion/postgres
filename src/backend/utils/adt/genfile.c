@@ -60,7 +60,7 @@ convert_and_check_filename(text *arg)
 		if (path_contains_parent_reference(filename))
 			ereport(ERROR,
 					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-			(errmsg("reference to parent directory (\"..\") not allowed"))));
+					 (errmsg("reference to parent directory (\"..\") not allowed"))));
 
 		/*
 		 * Allow absolute paths if within DataDir or Log_directory, even
@@ -112,7 +112,7 @@ read_binary_file(const char *filename, int64 seek_offset, int64 bytes_to_read,
 				else
 					ereport(ERROR,
 							(errcode_for_file_access(),
-						errmsg("could not stat file \"%s\": %m", filename)));
+							 errmsg("could not stat file \"%s\": %m", filename)));
 			}
 
 			bytes_to_read = fst.st_size - seek_offset;
@@ -486,7 +486,7 @@ pg_ls_dir_files(FunctionCallInfo fcinfo, char *dir)
 	if (SRF_IS_FIRSTCALL())
 	{
 		MemoryContext oldcontext;
-		TupleDesc       tupdesc;
+		TupleDesc	tupdesc;
 
 		funcctx = SRF_FIRSTCALL_INIT();
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -523,7 +523,7 @@ pg_ls_dir_files(FunctionCallInfo fcinfo, char *dir)
 		Datum		values[3];
 		bool		nulls[3];
 		char		path[MAXPGPATH * 2];
-		struct		stat attrib;
+		struct stat attrib;
 		HeapTuple	tuple;
 
 		/* Skip hidden files */

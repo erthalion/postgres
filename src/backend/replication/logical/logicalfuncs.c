@@ -99,7 +99,7 @@ LogicalOutputWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xi
 
 	/* ick, but cstring_to_text_with_len works for bytea perfectly fine */
 	values[2] = PointerGetDatum(
-					cstring_to_text_with_len(ctx->out->data, ctx->out->len));
+								cstring_to_text_with_len(ctx->out->data, ctx->out->len));
 
 	tuplestore_putvalues(p->tupstore, p->tupdesc, values, nulls);
 	p->returned_rows++;
@@ -116,7 +116,7 @@ check_permissions(void)
 
 int
 logical_read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr,
-	int reqLen, XLogRecPtr targetRecPtr, char *cur_page, TimeLineID *pageTLI)
+							 int reqLen, XLogRecPtr targetRecPtr, char *cur_page, TimeLineID *pageTLI)
 {
 	return read_local_xlog_page(state, targetPagePtr, reqLen,
 								targetRecPtr, cur_page, pageTLI);
@@ -253,7 +253,7 @@ pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool confirm, bool bin
 									options,
 									logical_read_local_xlog_page,
 									LogicalOutputPrepareWrite,
-									LogicalOutputWrite);
+									LogicalOutputWrite, NULL);
 
 		MemoryContextSwitchTo(oldcontext);
 
@@ -328,17 +328,19 @@ pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool confirm, bool bin
 		if (ctx->reader->EndRecPtr != InvalidXLogRecPtr && confirm)
 		{
 			LogicalConfirmReceivedLocation(ctx->reader->EndRecPtr);
+
 			/*
 			 * If only the confirmed_flush_lsn has changed the slot won't get
-			 * marked as dirty by the above. Callers on the walsender interface
-			 * are expected to keep track of their own progress and don't need
-			 * it written out. But SQL-interface users cannot specify their own
-			 * start positions and it's harder for them to keep track of their
-			 * progress, so we should make more of an effort to save it for them.
+			 * marked as dirty by the above. Callers on the walsender
+			 * interface are expected to keep track of their own progress and
+			 * don't need it written out. But SQL-interface users cannot
+			 * specify their own start positions and it's harder for them to
+			 * keep track of their progress, so we should make more of an
+			 * effort to save it for them.
 			 *
-			 * Dirty the slot so it's written out at the next checkpoint. We'll
-			 * still lose its position on crash, as documented, but it's better
-			 * than always losing the position even on clean restart.
+			 * Dirty the slot so it's written out at the next checkpoint.
+			 * We'll still lose its position on crash, as documented, but it's
+			 * better than always losing the position even on clean restart.
 			 */
 			ReplicationSlotMarkDirty();
 		}

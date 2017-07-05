@@ -4,7 +4,7 @@ use warnings;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 17;
+use Test::More tests => 19;
 
 my $tempdir       = TestLib::tempdir;
 my $tempdir_short = TestLib::tempdir_short;
@@ -22,7 +22,7 @@ command_ok([ $ENV{PG_REGRESS}, '--config-auth', "$tempdir/data" ],
 	'configure authentication');
 open my $conf, '>>', "$tempdir/data/postgresql.conf";
 print $conf "fsync = off\n";
-if (! $windows_os)
+if (!$windows_os)
 {
 	print $conf "listen_addresses = ''\n";
 	print $conf "unix_socket_directories = '$tempdir_short'\n";
@@ -32,22 +32,23 @@ else
 	print $conf "listen_addresses = '127.0.0.1'\n";
 }
 close $conf;
-command_ok([ 'pg_ctl', 'start', '-D', "$tempdir/data" ],
-	'pg_ctl start');
+command_like([ 'pg_ctl', 'start', '-D', "$tempdir/data",
+	'-l', "$TestLib::log_path/001_start_stop_server.log" ],
+	qr/done.*server started/s, 'pg_ctl start');
 
 # sleep here is because Windows builds can't check postmaster.pid exactly,
 # so they may mistake a pre-existing postmaster.pid for one created by the
 # postmaster they start.  Waiting more than the 2 seconds slop time allowed
-# by test_postmaster_connection prevents that mistake.
+# by wait_for_postmaster() prevents that mistake.
 sleep 3 if ($windows_os);
 command_fails([ 'pg_ctl', 'start', '-D', "$tempdir/data" ],
 	'second pg_ctl start fails');
-command_ok([ 'pg_ctl', 'stop', '-D', "$tempdir/data" ],
-	'pg_ctl stop');
+command_ok([ 'pg_ctl', 'stop', '-D', "$tempdir/data" ], 'pg_ctl stop');
 command_fails([ 'pg_ctl', 'stop', '-D', "$tempdir/data" ],
 	'second pg_ctl stop fails');
 
-command_ok([ 'pg_ctl', 'restart', '-D', "$tempdir/data" ],
+command_ok(
+	[ 'pg_ctl', 'restart', '-D', "$tempdir/data" ],
 	'pg_ctl restart with server not running');
 command_ok([ 'pg_ctl', 'restart', '-D', "$tempdir/data" ],
 	'pg_ctl restart with server running');

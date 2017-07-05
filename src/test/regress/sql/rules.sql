@@ -903,6 +903,11 @@ create table fooview (x int, y text) partition by list (x);
 create rule "_RETURN" as on select to fooview do instead
   select 1 as x, 'aaa'::text as y;
 
+-- nor can one convert a partition to view
+create table fooview_part partition of fooview for values in (1);
+create rule "_RETURN" as on select to fooview_part do instead
+  select 1 as x, 'aaa'::text as y;
+
 --
 -- check for planner problems with complex inherited UPDATES
 --
@@ -1155,7 +1160,7 @@ SELECT pg_get_constraintdef(0);
 SELECT pg_get_functiondef(0);
 SELECT pg_get_indexdef(0);
 SELECT pg_get_ruledef(0);
-SELECT pg_get_statisticsextdef(0);
+SELECT pg_get_statisticsobjdef(0);
 SELECT pg_get_triggerdef(0);
 SELECT pg_get_viewdef(0);
 SELECT pg_get_function_arguments(0);

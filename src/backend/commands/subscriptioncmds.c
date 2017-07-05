@@ -33,6 +33,8 @@
 #include "commands/event_trigger.h"
 #include "commands/subscriptioncmds.h"
 
+#include "executor/executor.h"
+
 #include "nodes/makefuncs.h"
 
 #include "replication/logicallauncher.h"
@@ -62,12 +64,17 @@ static void
 parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 						   bool *enabled, bool *create_slot,
 						   bool *slot_name_given, char **slot_name,
-						   bool *copy_data, char **synchronous_commit)
+						   bool *copy_data, char **synchronous_commit,
+						   bool *refresh)
 {
 	ListCell   *lc;
 	bool		connect_given = false;
 	bool		create_slot_given = false;
 	bool		copy_data_given = false;
+	bool		refresh_given = false;
+
+	/* If connect is specified, the others also need to be. */
+	Assert(!connect || (enabled && create_slot && copy_data));
 
 	if (connect)
 		*connect = true;
@@ -87,13 +94,15 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 		*copy_data = true;
 	if (synchronous_commit)
 		*synchronous_commit = NULL;
+	if (refresh)
+		*refresh = true;
 
 	/* Parse options */
-	foreach (lc, options)
+	foreach(lc, options)
 	{
 		DefElem    *defel = (DefElem *) lfirst(lc);
 
-		if (strcmp(defel->defname, "noconnect") == 0 && connect)
+		if (strcmp(defel->defname, "connect") == 0 && connect)
 		{
 			if (connect_given)
 				ereport(ERROR,
@@ -101,7 +110,7 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 						 errmsg("conflicting or redundant options")));
 
 			connect_given = true;
-			*connect = !defGetBoolean(defel);
+			*connect = defGetBoolean(defel);
 		}
 		else if (strcmp(defel->defname, "enabled") == 0 && enabled)
 		{
@@ -113,17 +122,7 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 			*enabled_given = true;
 			*enabled = defGetBoolean(defel);
 		}
-		else if (strcmp(defel->defname, "disabled") == 0 && enabled)
-		{
-			if (*enabled_given)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-
-			*enabled_given = true;
-			*enabled = !defGetBoolean(defel);
-		}
-		else if (strcmp(defel->defname, "create slot") == 0 && create_slot)
+		else if (strcmp(defel->defname, "create_slot") == 0 && create_slot)
 		{
 			if (create_slot_given)
 				ereport(ERROR,
@@ -133,17 +132,7 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 			create_slot_given = true;
 			*create_slot = defGetBoolean(defel);
 		}
-		else if (strcmp(defel->defname, "nocreate slot") == 0 && create_slot)
-		{
-			if (create_slot_given)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-
-			create_slot_given = true;
-			*create_slot = !defGetBoolean(defel);
-		}
-		else if (strcmp(defel->defname, "slot name") == 0 && slot_name)
+		else if (strcmp(defel->defname, "slot_name") == 0 && slot_name)
 		{
 			if (*slot_name_given)
 				ereport(ERROR,
@@ -157,7 +146,7 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 			if (strcmp(*slot_name, "none") == 0)
 				*slot_name = NULL;
 		}
-		else if (strcmp(defel->defname, "copy data") == 0 && copy_data)
+		else if (strcmp(defel->defname, "copy_data") == 0 && copy_data)
 		{
 			if (copy_data_given)
 				ereport(ERROR,
@@ -166,16 +155,6 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 
 			copy_data_given = true;
 			*copy_data = defGetBoolean(defel);
-		}
-		else if (strcmp(defel->defname, "nocopy data") == 0 && copy_data)
-		{
-			if (copy_data_given)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-
-			copy_data_given = true;
-			*copy_data = !defGetBoolean(defel);
 		}
 		else if (strcmp(defel->defname, "synchronous_commit") == 0 &&
 				 synchronous_commit)
@@ -192,8 +171,20 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 									 PGC_BACKEND, PGC_S_TEST, GUC_ACTION_SET,
 									 false, 0, false);
 		}
+		else if (strcmp(defel->defname, "refresh") == 0 && refresh)
+		{
+			if (refresh_given)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options")));
+
+			refresh_given = true;
+			*refresh = defGetBoolean(defel);
+		}
 		else
-			elog(ERROR, "unrecognized option: %s", defel->defname);
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					 errmsg("unrecognized subscription parameter: %s", defel->defname)));
 	}
 
 	/*
@@ -206,17 +197,17 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 		if (enabled && *enabled_given && *enabled)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("noconnect and enabled are mutually exclusive options")));
+					 errmsg("connect = false and enabled = true are mutually exclusive options")));
 
 		if (create_slot && create_slot_given && *create_slot)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("noconnect and create slot are mutually exclusive options")));
+					 errmsg("connect = false and create_slot = true are mutually exclusive options")));
 
 		if (copy_data && copy_data_given && *copy_data)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("noconnect and copy data are mutually exclusive options")));
+					 errmsg("connect = false and copy_data = true are mutually exclusive options")));
 
 		/* Change the defaults of other options. */
 		*enabled = false;
@@ -225,20 +216,30 @@ parse_subscription_options(List *options, bool *connect, bool *enabled_given,
 	}
 
 	/*
-	 * Do additional checking for disallowed combination when
-	 * slot_name = NONE was used.
+	 * Do additional checking for disallowed combination when slot_name = NONE
+	 * was used.
 	 */
 	if (slot_name && *slot_name_given && !*slot_name)
 	{
 		if (enabled && *enabled_given && *enabled)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("slot_name = NONE and enabled are mutually exclusive options")));
+					 errmsg("slot_name = NONE and enabled = true are mutually exclusive options")));
 
 		if (create_slot && create_slot_given && *create_slot)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("slot_name = NONE and create slot are mutually exclusive options")));
+					 errmsg("slot_name = NONE and create_slot = true are mutually exclusive options")));
+
+		if (enabled && !*enabled_given && *enabled)
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					 errmsg("subscription with slot_name = NONE must also set enabled = false")));
+
+		if (create_slot && !create_slot_given && *create_slot)
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					 errmsg("subscription with slot_name = NONE must also set create_slot = false")));
 	}
 }
 
@@ -323,11 +324,13 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 
 	/*
 	 * Parse and check options.
+	 *
 	 * Connection and publication should not be specified here.
 	 */
 	parse_subscription_options(stmt->options, &connect, &enabled_given,
 							   &enabled, &create_slot, &slotname_given,
-							   &slotname, &copy_data, &synchronous_commit);
+							   &slotname, &copy_data, &synchronous_commit,
+							   NULL);
 
 	/*
 	 * Since creating a replication slot is not transactional, rolling back
@@ -336,7 +339,7 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 	 * replication slot.
 	 */
 	if (create_slot)
-		PreventTransactionChain(isTopLevel, "CREATE SUBSCRIPTION ... CREATE SLOT");
+		PreventTransactionChain(isTopLevel, "CREATE SUBSCRIPTION ... WITH (create_slot = true)");
 
 	if (!superuser())
 		ereport(ERROR,
@@ -391,7 +394,7 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 	values[Anum_pg_subscription_subsynccommit - 1] =
 		CStringGetTextDatum(synchronous_commit);
 	values[Anum_pg_subscription_subpublications - 1] =
-		 publicationListToArray(publications);
+		publicationListToArray(publications);
 
 	tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
@@ -410,12 +413,12 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 	 */
 	if (connect)
 	{
-		XLogRecPtr			lsn;
-		char			   *err;
-		WalReceiverConn	   *wrconn;
-		List			   *tables;
-		ListCell		   *lc;
-		char				table_state;
+		XLogRecPtr	lsn;
+		char	   *err;
+		WalReceiverConn *wrconn;
+		List	   *tables;
+		ListCell   *lc;
+		char		table_state;
 
 		/* Try to connect to the publisher. */
 		wrconn = walrcv_connect(conninfo, true, stmt->subname, &err);
@@ -436,24 +439,25 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 			 * info.
 			 */
 			tables = fetch_table_list(wrconn, publications);
-			foreach (lc, tables)
+			foreach(lc, tables)
 			{
 				RangeVar   *rv = (RangeVar *) lfirst(lc);
 				Oid			relid;
 
 				relid = RangeVarGetRelid(rv, AccessShareLock, false);
 
+				/* Check for supported relkind. */
+				CheckSubscriptionRelkind(get_rel_relkind(relid),
+										 rv->schemaname, rv->relname);
+
 				SetSubscriptionRelState(subid, relid, table_state,
-										InvalidXLogRecPtr);
+										InvalidXLogRecPtr, false);
 			}
 
-			ereport(NOTICE,
-					(errmsg("synchronized table states")));
-
 			/*
-			 * If requested, create permanent slot for the subscription.
-			 * We won't use the initial snapshot for anything, so no need
-			 * to export it.
+			 * If requested, create permanent slot for the subscription. We
+			 * won't use the initial snapshot for anything, so no need to
+			 * export it.
 			 */
 			if (create_slot)
 			{
@@ -498,7 +502,7 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 static void
 AlterSubscription_refresh(Subscription *sub, bool copy_data)
 {
-	char		   *err;
+	char	   *err;
 	List	   *pubrel_names;
 	List	   *subrel_states;
 	Oid		   *subrel_local_oids;
@@ -525,36 +529,41 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
 	subrel_states = GetSubscriptionRelations(sub->oid);
 
 	/*
-	 * Build qsorted array of local table oids for faster lookup.
-	 * This can potentially contain all tables in the database so
-	 * speed of lookup is important.
+	 * Build qsorted array of local table oids for faster lookup. This can
+	 * potentially contain all tables in the database so speed of lookup is
+	 * important.
 	 */
 	subrel_local_oids = palloc(list_length(subrel_states) * sizeof(Oid));
 	off = 0;
 	foreach(lc, subrel_states)
 	{
 		SubscriptionRelState *relstate = (SubscriptionRelState *) lfirst(lc);
+
 		subrel_local_oids[off++] = relstate->relid;
 	}
 	qsort(subrel_local_oids, list_length(subrel_states),
 		  sizeof(Oid), oid_cmp);
 
 	/*
-	 * Walk over the remote tables and try to match them to locally
-	 * known tables. If the table is not known locally create a new state
-	 * for it.
+	 * Walk over the remote tables and try to match them to locally known
+	 * tables. If the table is not known locally create a new state for it.
 	 *
 	 * Also builds array of local oids of remote tables for the next step.
 	 */
 	off = 0;
 	pubrel_local_oids = palloc(list_length(pubrel_names) * sizeof(Oid));
 
-	foreach (lc, pubrel_names)
+	foreach(lc, pubrel_names)
 	{
 		RangeVar   *rv = (RangeVar *) lfirst(lc);
 		Oid			relid;
 
 		relid = RangeVarGetRelid(rv, AccessShareLock, false);
+
+		/* Check for supported relkind. */
+		CheckSubscriptionRelkind(get_rel_relkind(relid),
+								 rv->schemaname, rv->relname);
+
 		pubrel_local_oids[off++] = relid;
 
 		if (!bsearch(&relid, subrel_local_oids,
@@ -562,7 +571,7 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
 		{
 			SetSubscriptionRelState(sub->oid, relid,
 									copy_data ? SUBREL_STATE_INIT : SUBREL_STATE_READY,
-									InvalidXLogRecPtr);
+									InvalidXLogRecPtr, false);
 			ereport(NOTICE,
 					(errmsg("added subscription for table %s.%s",
 							quote_identifier(rv->schemaname),
@@ -571,22 +580,24 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
 	}
 
 	/*
-	 * Next remove state for tables we should not care about anymore using
-	 * the data we collected above
+	 * Next remove state for tables we should not care about anymore using the
+	 * data we collected above
 	 */
 	qsort(pubrel_local_oids, list_length(pubrel_names),
 		  sizeof(Oid), oid_cmp);
 
 	for (off = 0; off < list_length(subrel_states); off++)
 	{
-		Oid	relid = subrel_local_oids[off];
+		Oid			relid = subrel_local_oids[off];
 
 		if (!bsearch(&relid, pubrel_local_oids,
 					 list_length(pubrel_names), sizeof(Oid), oid_cmp))
 		{
-			char   *namespace;
+			char	   *namespace;
 
 			RemoveSubscriptionRel(sub->oid, relid);
+
+			logicalrep_worker_stop(sub->oid, relid);
 
 			namespace = get_namespace_name(get_rel_namespace(relid));
 			ereport(NOTICE,
@@ -611,7 +622,7 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 	HeapTuple	tup;
 	Oid			subid;
 	bool		update_tuple = false;
-	Subscription   *sub;
+	Subscription *sub;
 
 	rel = heap_open(SubscriptionRelationId, RowExclusiveLock);
 
@@ -633,6 +644,9 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 	subid = HeapTupleGetOid(tup);
 	sub = GetSubscription(subid, false);
 
+	/* Lock the subscription so nobody else can do anything with it. */
+	LockSharedObject(SubscriptionRelationId, subid, 0, AccessExclusiveLock);
+
 	/* Form a new tuple. */
 	memset(values, 0, sizeof(values));
 	memset(nulls, false, sizeof(nulls));
@@ -648,7 +662,7 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 
 				parse_subscription_options(stmt->options, NULL, NULL, NULL,
 										   NULL, &slotname_given, &slotname,
-										   NULL, &synchronous_commit);
+										   NULL, &synchronous_commit, NULL);
 
 				if (slotname_given)
 				{
@@ -659,7 +673,7 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 
 					if (slotname)
 						values[Anum_pg_subscription_subslotname - 1] =
-						DirectFunctionCall1(namein, CStringGetDatum(slotname));
+							DirectFunctionCall1(namein, CStringGetDatum(slotname));
 					else
 						nulls[Anum_pg_subscription_subslotname - 1] = true;
 					replaces[Anum_pg_subscription_subslotname - 1] = true;
@@ -678,12 +692,12 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 
 		case ALTER_SUBSCRIPTION_ENABLED:
 			{
-				bool enabled,
-					 enabled_given;
+				bool		enabled,
+							enabled_given;
 
 				parse_subscription_options(stmt->options, NULL,
 										   &enabled_given, &enabled, NULL,
-										   NULL, NULL, NULL, NULL);
+										   NULL, NULL, NULL, NULL, NULL);
 				Assert(enabled_given);
 
 				if (!sub->slotname && enabled)
@@ -715,27 +729,28 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 			break;
 
 		case ALTER_SUBSCRIPTION_PUBLICATION:
-		case ALTER_SUBSCRIPTION_PUBLICATION_REFRESH:
 			{
-				bool			copy_data;
+				bool		copy_data;
+				bool		refresh;
 
 				parse_subscription_options(stmt->options, NULL, NULL, NULL,
 										   NULL, NULL, NULL, &copy_data,
-										   NULL);
+										   NULL, &refresh);
 
 				values[Anum_pg_subscription_subpublications - 1] =
-					 publicationListToArray(stmt->publication);
+					publicationListToArray(stmt->publication);
 				replaces[Anum_pg_subscription_subpublications - 1] = true;
 
 				update_tuple = true;
 
 				/* Refresh if user asked us to. */
-				if (stmt->kind == ALTER_SUBSCRIPTION_PUBLICATION_REFRESH)
+				if (refresh)
 				{
 					if (!sub->enabled)
 						ereport(ERROR,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("ALTER SUBSCRIPTION ... REFRESH is not allowed for disabled subscriptions")));
+								 errmsg("ALTER SUBSCRIPTION with refresh is not allowed for disabled subscriptions"),
+								 errhint("Use ALTER SUBSCRIPTION ... SET PUBLICATION ... WITH (refresh = false).")));
 
 					/* Make sure refresh sees the new list of publications. */
 					sub->publications = stmt->publication;
@@ -748,7 +763,7 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 
 		case ALTER_SUBSCRIPTION_REFRESH:
 			{
-				bool			copy_data;
+				bool		copy_data;
 
 				if (!sub->enabled)
 					ereport(ERROR,
@@ -757,7 +772,7 @@ AlterSubscription(AlterSubscriptionStmt *stmt)
 
 				parse_subscription_options(stmt->options, NULL, NULL, NULL,
 										   NULL, NULL, NULL, &copy_data,
-										   NULL);
+										   NULL, NULL);
 
 				AlterSubscription_refresh(sub, copy_data);
 
@@ -806,14 +821,13 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 	char	   *slotname;
 	char		originname[NAMEDATALEN];
 	char	   *err = NULL;
-	RepOriginId	originid;
-	WalReceiverConn	   *wrconn = NULL;
-	StringInfoData		cmd;
+	RepOriginId originid;
+	WalReceiverConn *wrconn = NULL;
+	StringInfoData cmd;
 
 	/*
-	 * Lock pg_subscription with AccessExclusiveLock to ensure
-	 * that the launcher doesn't restart new worker during dropping
-	 * the subscription
+	 * Lock pg_subscription with AccessExclusiveLock to ensure that the
+	 * launcher doesn't restart new worker during dropping the subscription
 	 */
 	rel = heap_open(SubscriptionRelationId, AccessExclusiveLock);
 
@@ -848,8 +862,8 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 	InvokeObjectDropHook(SubscriptionRelationId, subid, 0);
 
 	/*
-	 * Lock the subscription so nobody else can do anything with it
-	 * (including the replication workers).
+	 * Lock the subscription so nobody else can do anything with it (including
+	 * the replication workers).
 	 */
 	LockSharedObject(SubscriptionRelationId, subid, 0, AccessExclusiveLock);
 
@@ -910,7 +924,10 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 	if (originid != InvalidRepOriginId)
 		replorigin_drop(originid);
 
-	/* If there is no slot associated with the subscription, we can finish here. */
+	/*
+	 * If there is no slot associated with the subscription, we can finish
+	 * here.
+	 */
 	if (!slotname)
 	{
 		heap_close(rel, NoLock);
@@ -918,8 +935,8 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 	}
 
 	/*
-	 * Otherwise drop the replication slot at the publisher node using
-	 * the replication connection.
+	 * Otherwise drop the replication slot at the publisher node using the
+	 * replication connection.
 	 */
 	load_file("libpqwalreceiver", false);
 
@@ -932,12 +949,13 @@ DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 				(errmsg("could not connect to publisher when attempting to "
 						"drop the replication slot \"%s\"", slotname),
 				 errdetail("The error was: %s", err),
-				 errhint("Use ALTER SUBSCRIPTION ... WITH (slot_name = NONE) "
+				 errhint("Use ALTER SUBSCRIPTION ... SET (slot_name = NONE) "
 						 "to disassociate the subscription from the slot.")));
 
 	PG_TRY();
 	{
-		WalRcvExecResult   *res;
+		WalRcvExecResult *res;
+
 		res = walrcv_exec(wrconn, cmd.data, 0, NULL);
 
 		if (res->status != WALRCV_OK_COMMAND)
@@ -988,9 +1006,9 @@ AlterSubscriptionOwner_internal(Relation rel, HeapTuple tup, Oid newOwnerId)
 	if (!superuser_arg(newOwnerId))
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-		  errmsg("permission denied to change owner of subscription \"%s\"",
-				 NameStr(form->subname)),
-			 errhint("The owner of a subscription must be a superuser.")));
+				 errmsg("permission denied to change owner of subscription \"%s\"",
+						NameStr(form->subname)),
+				 errhint("The owner of a subscription must be a superuser.")));
 
 	form->subowner = newOwnerId;
 	CatalogTupleUpdate(rel, &tup->t_self, tup);
@@ -1070,24 +1088,24 @@ AlterSubscriptionOwner_oid(Oid subid, Oid newOwnerId)
 static List *
 fetch_table_list(WalReceiverConn *wrconn, List *publications)
 {
-	WalRcvExecResult   *res;
-	StringInfoData		cmd;
-	TupleTableSlot	   *slot;
-	Oid					tableRow[2] = {TEXTOID, TEXTOID};
-	ListCell		   *lc;
-	bool				first;
-	List			   *tablelist = NIL;
+	WalRcvExecResult *res;
+	StringInfoData cmd;
+	TupleTableSlot *slot;
+	Oid			tableRow[2] = {TEXTOID, TEXTOID};
+	ListCell   *lc;
+	bool		first;
+	List	   *tablelist = NIL;
 
 	Assert(list_length(publications) > 0);
 
 	initStringInfo(&cmd);
 	appendStringInfo(&cmd, "SELECT DISTINCT t.schemaname, t.tablename\n"
-						   "  FROM pg_catalog.pg_publication_tables t\n"
-						   " WHERE t.pubname IN (");
+					 "  FROM pg_catalog.pg_publication_tables t\n"
+					 " WHERE t.pubname IN (");
 	first = true;
-	foreach (lc, publications)
+	foreach(lc, publications)
 	{
-		char *pubname = strVal(lfirst(lc));
+		char	   *pubname = strVal(lfirst(lc));
 
 		if (first)
 			first = false;
