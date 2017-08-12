@@ -722,10 +722,16 @@ check_new_partition_bound(char *relname, Relation parent,
 				 */
 				if (partition_rbound_cmp(key, lower->datums, lower->kind, true,
 										 upper) >= 0)
+				{
 					ereport(ERROR,
 							(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-							 errmsg("cannot create range partition with empty range"),
-							 parser_errposition(pstate, spec->location)));
+							 errmsg("empty range bound specified for partition \"%s\"",
+									relname),
+							 errdetail("Specified lower bound %s is greater than or equal to upper bound %s.",
+								get_range_partbound_string(spec->lowerdatums),
+								get_range_partbound_string(spec->upperdatums)),
+								parser_errposition(pstate, spec->location)));
+				}
 
 				if (partdesc->nparts > 0)
 				{
@@ -898,16 +904,20 @@ get_qual_from_partbound(Relation rel, Relation parent,
  * We must allow for cases where physical attnos of a partition can be
  * different from the parent's.
  *
+ * If found_whole_row is not NULL, *found_whole_row returns whether a
+ * whole-row variable was found in the input expression.
+ *
  * Note: this will work on any node tree, so really the argument and result
  * should be declared "Node *".  But a substantial majority of the callers
  * are working on Lists, so it's less messy to do the casts internally.
  */
 List *
 map_partition_varattnos(List *expr, int target_varno,
-						Relation partrel, Relation parent)
+						Relation partrel, Relation parent,
+						bool *found_whole_row)
 {
 	AttrNumber *part_attnos;
-	bool		found_whole_row;
+	bool		my_found_whole_row;
 
 	if (expr == NIL)
 		return NIL;
@@ -919,10 +929,10 @@ map_partition_varattnos(List *expr, int target_varno,
 										target_varno, 0,
 										part_attnos,
 										RelationGetDescr(parent)->natts,
-										&found_whole_row);
-	/* There can never be a whole-row reference here */
+										RelationGetForm(partrel)->reltype,
+										&my_found_whole_row);
 	if (found_whole_row)
-		elog(ERROR, "unexpected whole-row reference found in partition key");
+		*found_whole_row = my_found_whole_row;
 
 	return expr;
 }
@@ -1783,6 +1793,7 @@ generate_partition_qual(Relation rel)
 	List	   *my_qual = NIL,
 			   *result = NIL;
 	Relation	parent;
+	bool		found_whole_row;
 
 	/* Guard against stack overflow due to overly deep partition tree */
 	check_stack_depth();
@@ -1825,7 +1836,11 @@ generate_partition_qual(Relation rel)
 	 * in it to bear this relation's attnos. It's safe to assume varno = 1
 	 * here.
 	 */
-	result = map_partition_varattnos(result, 1, rel, parent);
+	result = map_partition_varattnos(result, 1, rel, parent,
+									 &found_whole_row);
+	/* There can never be a whole-row reference here */
+	if (found_whole_row)
+		elog(ERROR, "unexpected whole-row reference found in partition key");
 
 	/* Save a copy in the relcache */
 	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
@@ -2128,7 +2143,7 @@ qsort_partition_rbound_cmp(const void *a, const void *b, void *arg)
  * partition_rbound_cmp
  *
  * Return for two range bounds whether the 1st one (specified in datum1,
- * content1, and lower1) is <, =, or > the bound specified in *b2.
+ * kind1, and lower1) is <, =, or > the bound specified in *b2.
  *
  * Note that if the values of the two range bounds compare equal, then we take
  * into account whether they are upper or lower bounds, and an upper bound is

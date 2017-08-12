@@ -165,6 +165,7 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 	Oid			existing_relid;
 	ParseCallbackState pcbstate;
 	bool		like_found = false;
+	bool		is_foreign_table = IsA(stmt, CreateForeignTableStmt);
 
 	/*
 	 * We must not scribble on the passed-in CreateStmt, so copy it.  (This is
@@ -330,7 +331,7 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 	/*
 	 * Postprocess check constraints.
 	 */
-	transformCheckConstraints(&cxt, true);
+	transformCheckConstraints(&cxt, !is_foreign_table ? true : false);
 
 	/*
 	 * Output results.
@@ -1107,7 +1108,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 			ccbin_node = map_variable_attnos(stringToNode(ccbin),
 											 1, 0,
 											 attmap, tupleDesc->natts,
-											 &found_whole_row);
+											 InvalidOid, &found_whole_row);
 
 			/*
 			 * We reject whole-row variables because the whole point of LIKE
@@ -1463,7 +1464,7 @@ generateClonedIndexStmt(CreateStmtContext *cxt, Relation source_idx,
 			indexkey = map_variable_attnos(indexkey,
 										   1, 0,
 										   attmap, attmap_length,
-										   &found_whole_row);
+										   InvalidOid, &found_whole_row);
 
 			/* As in transformTableLikeClause, reject whole-row variables */
 			if (found_whole_row)
@@ -1539,7 +1540,7 @@ generateClonedIndexStmt(CreateStmtContext *cxt, Relation source_idx,
 		pred_tree = map_variable_attnos(pred_tree,
 										1, 0,
 										attmap, attmap_length,
-										&found_whole_row);
+										InvalidOid, &found_whole_row);
 
 		/* As in transformTableLikeClause, reject whole-row variables */
 		if (found_whole_row)
@@ -2129,9 +2130,9 @@ transformCheckConstraints(CreateStmtContext *cxt, bool skipValidation)
 		return;
 
 	/*
-	 * If creating a new table, we can safely skip validation of check
-	 * constraints, and nonetheless mark them valid.  (This will override any
-	 * user-supplied NOT VALID flag.)
+	 * If creating a new table (but not a foreign table), we can safely skip
+	 * validation of check constraints, and nonetheless mark them valid.
+	 * (This will override any user-supplied NOT VALID flag.)
 	 */
 	if (skipValidation)
 	{
