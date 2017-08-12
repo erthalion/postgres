@@ -1433,6 +1433,7 @@ BeginCopy(ParseState *pstate,
 						num_partitions;
 
 			ExecSetupPartitionTupleRouting(rel,
+										   1,
 										   &partition_dispatch_info,
 										   &partitions,
 										   &partition_tupconv_maps,
@@ -2915,7 +2916,7 @@ CopyFromInsertBatch(CopyState cstate, EState *estate, CommandId mycid,
 									  estate, false, NULL, NIL);
 			ExecARInsertTriggers(estate, resultRelInfo,
 								 bufferedTuples[i],
-								 recheckIndexes, NULL);
+								 recheckIndexes, cstate->transition_capture);
 			list_free(recheckIndexes);
 		}
 	}

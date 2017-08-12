@@ -86,7 +86,8 @@
 #define READ_CHAR_FIELD(fldname) \
 	token = pg_strtok(&length);		/* skip :fldname */ \
 	token = pg_strtok(&length);		/* get field value */ \
-	local_node->fldname = token[0]
+	/* avoid overhead of calling debackslash() for one char */ \
+	local_node->fldname = (length == 0) ? '\0' : (token[0] == '\\' ? token[1] : token[0])
 
 /* Read an enumerated-type field that was written as an integer code */
 #define READ_ENUM_FIELD(fldname, enumtype) \
@@ -1199,6 +1200,20 @@ _readCurrentOfExpr(void)
 	READ_UINT_FIELD(cvarno);
 	READ_STRING_FIELD(cursor_name);
 	READ_INT_FIELD(cursor_param);
+
+	READ_DONE();
+}
+
+/*
+ * _readNextValueExpr
+ */
+static NextValueExpr *
+_readNextValueExpr(void)
+{
+	READ_LOCALS(NextValueExpr);
+
+	READ_OID_FIELD(seqid);
+	READ_OID_FIELD(typeId);
 
 	READ_DONE();
 }
@@ -2391,7 +2406,7 @@ _readPartitionRangeDatum(void)
 {
 	READ_LOCALS(PartitionRangeDatum);
 
-	READ_BOOL_FIELD(infinite);
+	READ_ENUM_FIELD(kind, PartitionRangeDatumKind);
 	READ_NODE_FIELD(value);
 	READ_LOCATION_FIELD(location);
 
@@ -2518,6 +2533,8 @@ parseNodeString(void)
 		return_value = _readSetToDefault();
 	else if (MATCH("CURRENTOFEXPR", 13))
 		return_value = _readCurrentOfExpr();
+	else if (MATCH("NEXTVALUEEXPR", 13))
+		return_value = _readNextValueExpr();
 	else if (MATCH("INFERENCEELEM", 13))
 		return_value = _readInferenceElem();
 	else if (MATCH("TARGETENTRY", 11))
