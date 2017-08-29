@@ -71,8 +71,9 @@ typedef struct PartitionDispatchData
 typedef struct PartitionDispatchData *PartitionDispatch;
 
 extern void RelationBuildPartitionDesc(Relation relation);
-extern bool partition_bounds_equal(PartitionKey key,
-					   PartitionBoundInfo p1, PartitionBoundInfo p2);
+extern bool partition_bounds_equal(int partnatts, int16 *parttyplen,
+					   bool *parttypbyval, PartitionBoundInfo b1,
+					   PartitionBoundInfo b2);
 
 extern void check_new_partition_bound(char *relname, Relation parent,
 						  PartitionBoundSpec *spec);
@@ -87,8 +88,7 @@ extern Expr *get_partition_qual_relid(Oid relid);
 
 /* For tuple routing */
 extern PartitionDispatch *RelationGetPartitionDispatchInfo(Relation rel,
-								 int lockmode, int *num_parted,
-								 List **leaf_part_oids);
+								 int *num_parted, List **leaf_part_oids);
 extern void FormPartitionKeyDatum(PartitionDispatch pd,
 					  TupleTableSlot *slot,
 					  EState *estate,

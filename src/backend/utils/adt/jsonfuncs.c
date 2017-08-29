@@ -3147,7 +3147,7 @@ populate_record(TupleDesc tupdesc,
 
 	for (i = 0; i < ncolumns; ++i)
 	{
-		Form_pg_attribute att = tupdesc->attrs[i];
+		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
 		char	   *colname = NameStr(att->attname);
 		JsValue		field = {0};
 		bool		found;

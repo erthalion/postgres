@@ -95,7 +95,8 @@ ExecCheckPlanOutput(Relation resultRel, List *targetList)
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
 					 errmsg("table row type and query-specified row type do not match"),
 					 errdetail("Query has too many columns.")));
-		attr = resultDesc->attrs[attno++];
+		attr = TupleDescAttr(resultDesc, attno);
+		attno++;
 
 		if (!attr->attisdropped)
 		{
@@ -1469,7 +1470,7 @@ static void
 ExecSetupTransitionCaptureState(ModifyTableState *mtstate, EState *estate)
 {
 	ResultRelInfo *targetRelInfo = getASTriggerResultRelInfo(mtstate);
-	int		i;
+	int			i;
 
 	/* Check for transition tables on the directly targeted relation. */
 	mtstate->mt_transition_capture =
@@ -1483,7 +1484,7 @@ ExecSetupTransitionCaptureState(ModifyTableState *mtstate, EState *estate)
 	if (mtstate->mt_transition_capture != NULL)
 	{
 		ResultRelInfo *resultRelInfos;
-		int		numResultRelInfos;
+		int			numResultRelInfos;
 
 		/* Find the set of partitions so that we can find their TupleDescs. */
 		if (mtstate->mt_partition_dispatch_info != NULL)
@@ -1919,6 +1920,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 
 		ExecSetupPartitionTupleRouting(rel,
 									   node->nominalRelation,
+									   estate,
 									   &partition_dispatch_info,
 									   &partitions,
 									   &partition_tupconv_maps,
@@ -2254,8 +2256,8 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 					else if (relkind == RELKIND_FOREIGN_TABLE)
 					{
 						/*
-						 * When there is a row-level trigger, there should be a
-						 * wholerow attribute.
+						 * When there is a row-level trigger, there should be
+						 * a wholerow attribute.
 						 */
 						j->jf_junkAttNo = ExecFindJunkAttribute(j, "wholerow");
 					}

@@ -2375,6 +2375,7 @@ AlterDomainNotNull(List *names, bool notNull)
 				for (i = 0; i < rtc->natts; i++)
 				{
 					int			attnum = rtc->atts[i];
+					Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
 
 					if (heap_attisnull(tuple, attnum))
 					{
@@ -2389,7 +2390,7 @@ AlterDomainNotNull(List *names, bool notNull)
 						ereport(ERROR,
 								(errcode(ERRCODE_NOT_NULL_VIOLATION),
 								 errmsg("column \"%s\" of table \"%s\" contains null values",
-										NameStr(tupdesc->attrs[attnum - 1]->attname),
+										NameStr(attr->attname),
 										RelationGetRelationName(testrel)),
 								 errtablecol(testrel, attnum)));
 					}
@@ -2773,6 +2774,7 @@ validateDomainConstraint(Oid domainoid, char *ccbin)
 				Datum		d;
 				bool		isNull;
 				Datum		conResult;
+				Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
 
 				d = heap_getattr(tuple, attnum, tupdesc, &isNull);
 
@@ -2796,7 +2798,7 @@ validateDomainConstraint(Oid domainoid, char *ccbin)
 					ereport(ERROR,
 							(errcode(ERRCODE_CHECK_VIOLATION),
 							 errmsg("column \"%s\" of table \"%s\" contains values that violate the new constraint",
-									NameStr(tupdesc->attrs[attnum - 1]->attname),
+									NameStr(attr->attname),
 									RelationGetRelationName(testrel)),
 							 errtablecol(testrel, attnum)));
 				}
@@ -2981,7 +2983,7 @@ get_rels_with_domain(Oid domainOid, LOCKMODE lockmode)
 		 */
 		if (pg_depend->objsubid > RelationGetNumberOfAttributes(rtc->rel))
 			continue;
-		pg_att = rtc->rel->rd_att->attrs[pg_depend->objsubid - 1];
+		pg_att = TupleDescAttr(rtc->rel->rd_att, pg_depend->objsubid - 1);
 		if (pg_att->attisdropped || pg_att->atttypid != domainOid)
 			continue;
 

@@ -1047,7 +1047,7 @@ transformOnConflictClause(ParseState *pstate,
 		 */
 		for (attno = 0; attno < targetrel->rd_rel->relnatts; attno++)
 		{
-			Form_pg_attribute attr = targetrel->rd_att->attrs[attno];
+			Form_pg_attribute attr = TupleDescAttr(targetrel->rd_att, attno);
 			char	   *name;
 
 			if (attr->attisdropped)

@@ -452,6 +452,9 @@ typedef struct EState
 	ResultRelInfo *es_root_result_relations;	/* array of ResultRelInfos */
 	int			es_num_root_result_relations;	/* length of the array */
 
+	/* Info about leaf partitions of partitioned table(s) for insert queries: */
+	List	   *es_leaf_result_relations;	/* List of ResultRelInfos */
+
 	/* Stuff used for firing triggers: */
 	List	   *es_trig_target_relations;	/* trigger-only ResultRelInfos */
 	TupleTableSlot *es_trig_tuple_slot; /* for trigger output tuples */
@@ -979,9 +982,9 @@ typedef struct ModifyTableState
 	/* Per partition tuple conversion map */
 	TupleTableSlot *mt_partition_tuple_slot;
 	struct TransitionCaptureState *mt_transition_capture;
-									/* controls transition table population */
+	/* controls transition table population */
 	TupleConversionMap **mt_transition_tupconv_maps;
-									/* Per plan/partition tuple conversion */
+	/* Per plan/partition tuple conversion */
 } ModifyTableState;
 
 /* ----------------
@@ -1727,6 +1730,16 @@ typedef struct MaterialState
 } MaterialState;
 
 /* ----------------
+ *	 Shared memory container for per-worker sort information
+ * ----------------
+ */
+typedef struct SharedSortInfo
+{
+	int			num_workers;
+	TuplesortInstrumentation sinstrument[FLEXIBLE_ARRAY_MEMBER];
+} SharedSortInfo;
+
+/* ----------------
  *	 SortState information
  * ----------------
  */
@@ -1740,6 +1753,8 @@ typedef struct SortState
 	bool		bounded_Done;	/* value of bounded we did the sort with */
 	int64		bound_Done;		/* value of bound we did the sort with */
 	void	   *tuplesortstate; /* private state of tuplesort.c */
+	bool		am_worker;		/* are we a worker? */
+	SharedSortInfo *shared_info;	/* one entry per worker */
 } SortState;
 
 /* ---------------------
@@ -1915,6 +1930,7 @@ typedef struct GatherState
 	struct TupleQueueReader **reader;
 	TupleTableSlot *funnel_slot;
 	bool		need_to_scan_locally;
+	int64		tuples_needed;	/* tuple bound, see ExecSetTupleBound */
 } GatherState;
 
 /* ----------------
@@ -1940,6 +1956,7 @@ typedef struct GatherMergeState
 	struct binaryheap *gm_heap; /* binary heap of slot indices */
 	bool		gm_initialized; /* gather merge initilized ? */
 	bool		need_to_scan_locally;
+	int64		tuples_needed;	/* tuple bound, see ExecSetTupleBound */
 	int			gm_nkeys;
 	SortSupport gm_sortkeys;	/* array of length ms_nkeys */
 	struct GMReaderTupleBuffer *gm_tuple_buffers;	/* tuple buffer per reader */
