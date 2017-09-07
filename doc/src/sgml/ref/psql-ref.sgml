@@ -1950,6 +1950,25 @@ Tue Oct 26 21:40:57 CEST 1999
 
 
       <varlistentry>
+        <term><literal>\gdesc</literal></term>
+
+        <listitem>
+        <para>
+         Shows the description (that is, the column names and data types)
+         of the result of the current query buffer.  The query is not
+         actually executed; however, if it contains some type of syntax
+         error, that error will be reported in the normal way.
+        </para>
+
+        <para>
+         If the current query buffer is empty, the most recently sent query
+         is described instead.
+        </para>
+        </listitem>
+      </varlistentry>
+
+
+      <varlistentry>
         <term><literal>\gexec</literal></term>
 
         <listitem>
@@ -2665,10 +2684,10 @@ lo_import 152801
           <listitem>
           <para>
           Controls use of a pager program for query and <application>psql</>
-          help output. If the environment variable <envar>PAGER</envar>
-          is set, the output is piped to the specified program.
-          Otherwise a platform-dependent default (such as
-          <filename>more</filename>) is used.
+          help output.  If the environment variable <envar>PSQL_PAGER</envar>
+          or <envar>PAGER</envar> is set, the output is piped to the
+          specified program.  Otherwise a platform-dependent default program
+          (such as <filename>more</filename>) is used.
           </para>
 
           <para>
@@ -3671,6 +3690,21 @@ bar
       </varlistentry>
 
       <varlistentry>
+        <term><varname>SERVER_VERSION_NAME</varname></term>
+        <term><varname>SERVER_VERSION_NUM</varname></term>
+        <listitem>
+        <para>
+        The server's version number as a string, for
+        example <literal>9.6.2</>, <literal>10.1</> or <literal>11beta1</>,
+        and in numeric form, for
+        example <literal>90602</> or <literal>100001</>.
+        These are set every time you connect to a database
+        (including program start-up), but can be changed or unset.
+        </para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>SHOW_CONTEXT</varname></term>
         <listitem>
         <para>
@@ -3733,10 +3767,15 @@ bar
 
       <varlistentry>
         <term><varname>VERSION</varname></term>
+        <term><varname>VERSION_NAME</varname></term>
+        <term><varname>VERSION_NUM</varname></term>
         <listitem>
         <para>
-        This variable is set at program start-up to
-        reflect <application>psql</>'s version.  It can be changed or unset.
+        These variables are set at program start-up to reflect
+        <application>psql</>'s version, respectively as a verbose string,
+        a short string (e.g., <literal>9.6.2</>, <literal>10.1</>,
+        or <literal>11beta1</>), and a number (e.g., <literal>90602</>
+        or <literal>100001</>).  They can be changed or unset.
         </para>
         </listitem>
       </varlistentry>
@@ -4087,21 +4126,6 @@ $endif
    </varlistentry>
 
    <varlistentry>
-    <term><envar>PAGER</envar></term>
-
-    <listitem>
-     <para>
-      If the query results do not fit on the screen, they are piped
-      through this command.  Typical values are
-      <literal>more</literal> or <literal>less</literal>.  The default
-      is platform-dependent.  Use of the pager can be disabled by setting
-      <envar>PAGER</envar> to empty, or by using pager-related options of
-      the <command>\pset</command> command.
-     </para>
-    </listitem>
-   </varlistentry>
-
-   <varlistentry>
     <term><envar>PGDATABASE</envar></term>
     <term><envar>PGHOST</envar></term>
     <term><envar>PGPORT</envar></term>
@@ -4125,11 +4149,8 @@ $endif
       and <command>\ev</command> commands.
       These variables are examined in the order listed;
       the first that is set is used.
-     </para>
-
-     <para>
-      The built-in default editors are <filename>vi</filename> on Unix
-      systems and <filename>notepad.exe</filename> on Windows systems.
+      If none of them is set, the default is to use <filename>vi</filename>
+      on Unix systems or <filename>notepad.exe</filename> on Windows systems.
      </para>
     </listitem>
    </varlistentry>
@@ -4169,6 +4190,27 @@ PSQL_EDITOR_LINENUMBER_ARG='--line '
      <para>
       Alternative location for the command history file. Tilde (<literal>~</literal>) expansion is performed.
      </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><envar>PSQL_PAGER</envar></term>
+    <term><envar>PAGER</envar></term>
+
+    <listitem>
+     <para>
+      If a query's results do not fit on the screen, they are piped
+      through this command. Typical values are <literal>more</literal>
+      or <literal>less</literal>.
+      Use of the pager can be disabled by setting <envar>PSQL_PAGER</envar>
+      or <envar>PAGER</envar> to an empty string, or by adjusting the
+      pager-related options of the <command>\pset</command> command.
+      These variables are examined in the order listed;
+      the first that is set is used.
+      If none of them is set, the default is to use <literal>more</> on most
+      platforms, but <literal>less</> on Cygwin.
+     </para>
+
     </listitem>
    </varlistentry>
 
