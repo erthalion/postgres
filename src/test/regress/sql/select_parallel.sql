@@ -65,6 +65,26 @@ explain (costs off)
 	select  count(*) from tenk1 where thousand > 95;
 select  count(*) from tenk1 where thousand > 95;
 
+-- test rescan cases too
+set enable_material = false;
+
+explain (costs off)
+select * from
+  (select count(unique1) from tenk1 where hundred > 10) ss
+  right join (values (1),(2),(3)) v(x) on true;
+select * from
+  (select count(unique1) from tenk1 where hundred > 10) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+explain (costs off)
+select * from
+  (select count(*) from tenk1 where thousand > 99) ss
+  right join (values (1),(2),(3)) v(x) on true;
+select * from
+  (select count(*) from tenk1 where thousand > 99) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+reset enable_material;
 reset enable_seqscan;
 reset enable_bitmapscan;
 
@@ -117,6 +137,22 @@ explain (costs off)
    select count(*) from tenk1 group by twenty;
 
 select count(*) from tenk1 group by twenty;
+
+--test rescan behavior of gather merge
+set enable_material = false;
+
+explain (costs off)
+select * from
+  (select string4, count(unique2)
+   from tenk1 group by string4 order by string4) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+select * from
+  (select string4, count(unique2)
+   from tenk1 group by string4 order by string4) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+reset enable_material;
 
 reset enable_hashagg;
 
