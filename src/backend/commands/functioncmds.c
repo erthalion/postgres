@@ -600,6 +600,7 @@ update_proconfig_value(ArrayType *a, List *set_items)
 /*
  * Dissect the list of options assembled in gram.y into function
  * attributes.
+ * AAAAAAAAAAA
  */
 static void
 compute_attributes_sql_style(ParseState *pstate,
@@ -608,6 +609,7 @@ compute_attributes_sql_style(ParseState *pstate,
 							 char **language,
 							 Node **transform,
 							 bool *windowfunc_p,
+							 Node **depends_on,
 							 char *volatility_p,
 							 bool *strict_p,
 							 bool *security_definer,
@@ -622,6 +624,7 @@ compute_attributes_sql_style(ParseState *pstate,
 	DefElem    *language_item = NULL;
 	DefElem    *transform_item = NULL;
 	DefElem    *windowfunc_item = NULL;
+	DefElem    *depends_item = NULL;
 	DefElem    *volatility_item = NULL;
 	DefElem    *strict_item = NULL;
 	DefElem    *security_item = NULL;
@@ -634,6 +637,11 @@ compute_attributes_sql_style(ParseState *pstate,
 	foreach(option, options)
 	{
 		DefElem    *defel = (DefElem *) lfirst(option);
+
+		ereport(INFO,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("FUNCTION OPTIONS %s", defel->defname),
+				 parser_errposition(pstate, defel->location)));
 
 		if (strcmp(defel->defname, "as") == 0)
 		{
@@ -685,6 +693,15 @@ compute_attributes_sql_style(ParseState *pstate,
 			/* recognized common option */
 			continue;
 		}
+		else if (strcmp(defel->defname, "depends") == 0)
+		{
+			if (depends_item)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options"),
+						 parser_errposition(pstate, defel->location)));
+			depends_item = defel;
+		}
 		else
 			elog(ERROR, "option \"%s\" not recognized",
 				 defel->defname);
@@ -716,6 +733,8 @@ compute_attributes_sql_style(ParseState *pstate,
 		*transform = transform_item->arg;
 	if (windowfunc_item)
 		*windowfunc_p = intVal(windowfunc_item->arg);
+	if (depends_item)
+		*depends_on = depends_item->arg;
 	if (volatility_item)
 		*volatility_p = interpret_func_volatility(volatility_item);
 	if (strict_item)
@@ -868,6 +887,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	Oid			languageOid;
 	Oid			languageValidator;
 	Node	   *transformDefElem = NULL;
+	Node	   *dependsOnDefElem = NULL;
 	char	   *funcname;
 	Oid			namespaceId;
 	AclResult	aclresult;
@@ -918,7 +938,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	compute_attributes_sql_style(pstate,
 								 stmt->options,
 								 &as_clause, &language, &transformDefElem,
-								 &isWindowFunc, &volatility,
+								 &isWindowFunc, &dependsOnDefElem, &volatility,
 								 &isStrict, &security, &isLeakProof,
 								 &proconfig, &procost, &prorows, &parallel);
 
@@ -981,6 +1001,31 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 			get_transform_oid(typeid, languageOid, false);
 			trftypes_list = lappend_oid(trftypes_list, typeid);
 		}
+	}
+
+	if (dependsOnDefElem)
+	{
+		ereport(INFO,
+			(errcode(ERRCODE_SYNTAX_ERROR),
+			 errmsg("DEPENDS ON FIRST")));
+
+		ListCell   *lc;
+
+		/*foreach(lc, castNode(List, dependsOnDefElem))*/
+		/*{*/
+			/*ereport(INFO,*/
+				/*(errcode(ERRCODE_SYNTAX_ERROR),*/
+				 /*errmsg("DEPENDS ON")));*/
+
+			/*Oid			typeid = typenameTypeId(NULL,*/
+												/*lfirst_node(TypeName, lc));*/
+			/*Oid			elt = get_base_element_type(typeid);*/
+
+			/*typeid = elt ? elt : typeid;*/
+
+			/*get_transform_oid(typeid, languageOid, false);*/
+			/*trftypes_list = lappend_oid(trftypes_list, typeid);*/
+		/*}*/
 	}
 
 	/*
