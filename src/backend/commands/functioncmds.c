@@ -1011,21 +1011,18 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 
 		ListCell   *lc;
 
-		/*foreach(lc, castNode(List, dependsOnDefElem))*/
-		/*{*/
-			/*ereport(INFO,*/
-				/*(errcode(ERRCODE_SYNTAX_ERROR),*/
-				 /*errmsg("DEPENDS ON")));*/
+		foreach(lc, castNode(List, dependsOnDefElem))
+		{
+			DefElem    *defel = (DefElem *) lfirst(lc);
+			Value	   *func = (Value *) defel->arg;
+			Oid		   dependency = InvalidOid;
 
-			/*Oid			typeid = typenameTypeId(NULL,*/
-												/*lfirst_node(TypeName, lc));*/
-			/*Oid			elt = get_base_element_type(typeid);*/
+			ereport(INFO,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("DEPENDS ON %s", strVal(func))));
 
-			/*typeid = elt ? elt : typeid;*/
-
-			/*get_transform_oid(typeid, languageOid, false);*/
-			/*trftypes_list = lappend_oid(trftypes_list, typeid);*/
-		/*}*/
+			dependency = DirectFunctionCall1(to_regproc, CStringGetTextDatum(strVal(func)));
+		}
 	}
 
 	/*

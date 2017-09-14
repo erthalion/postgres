@@ -7683,7 +7683,7 @@ createfunc_opt_item:
 				{
 					$$ = makeDefElem("window", (Node *)makeInteger(TRUE), @1);
 				}
-			| DEPENDS ON depends_on_func_list
+			| DEPENDS depends_on_func_list
 				{
 					$$ = makeDefElem("depends", (Node *)$2, @1);
 				}
@@ -7712,14 +7712,9 @@ depends_on_func_list:	func_elem					           { $$ = list_make1($1); }
 func_elem:
 			type_function_name
 				{
-					$$ = makeDefElem("as", (Node *)makeString($1), @1);
+					$$ = makeDefElem("func_name", (Node *)makeString($1), @1);
 				}
 		;
-
-/*depends_on_func_list:*/
-            /*func_list                            { $$ = list_make1($1); }*/
-            /*| depends_on_func_list ',' func_list { $$ = lappend($1, $3); }*/
-        /*;*/
 
 opt_definition:
 			WITH definition							{ $$ = $2; }
