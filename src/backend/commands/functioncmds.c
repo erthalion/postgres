@@ -1132,31 +1132,31 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	 * so, go ahead and create the function.
 	 */
 	result = ProcedureCreate(funcname,
-						     namespaceId,
-						     stmt->replace,
-						     returnsSet,
-						     prorettype,
-						     GetUserId(),
-						     languageOid,
-						     languageValidator,
-						     prosrc_str,	/* converted to text later */
-						     probin_str,	/* converted to text later */
-						     false,	/* not an aggregate */
-						     isWindowFunc,
-						     security,
-						     isLeakProof,
-						     isStrict,
-						     volatility,
-						     parallel,
-						     parameterTypes,
-						     PointerGetDatum(allParameterTypes),
-						     PointerGetDatum(parameterModes),
-						     PointerGetDatum(parameterNames),
-						     parameterDefaults,
-						     PointerGetDatum(trftypes),
-						     PointerGetDatum(proconfig),
-						     procost,
-						     prorows);
+													 namespaceId,
+													 stmt->replace,
+													 returnsSet,
+													 prorettype,
+													 GetUserId(),
+													 languageOid,
+													 languageValidator,
+													 prosrc_str,	/* converted to text later */
+													 probin_str,	/* converted to text later */
+													 false,	/* not an aggregate */
+													 isWindowFunc,
+													 security,
+													 isLeakProof,
+													 isStrict,
+													 volatility,
+													 parallel,
+													 parameterTypes,
+													 PointerGetDatum(allParameterTypes),
+													 PointerGetDatum(parameterModes),
+													 PointerGetDatum(parameterNames),
+													 parameterDefaults,
+													 PointerGetDatum(trftypes),
+													 PointerGetDatum(proconfig),
+													 procost,
+													 prorows);
 
 
 	/*

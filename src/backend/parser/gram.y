@@ -7701,13 +7701,13 @@ func_as:	Sconst						{ $$ = list_make1(makeString($1)); }
 		;
 
 transform_type_list:
-                       FOR TYPE_P Typename { $$ = list_make1($3); }
-                       | transform_type_list ',' FOR TYPE_P Typename { $$ = lappend($1, $5); }
-               ;
+											 FOR TYPE_P Typename { $$ = list_make1($3); }
+											 | transform_type_list ',' FOR TYPE_P Typename { $$ = lappend($1, $5); }
+							 ;
 
-depends_on_func_list:	ON func_elem					       { $$ = list_make1($2); }
-                        | depends_on_func_list ',' func_elem   { $$ = lappend($1, $3); }
-               ;
+depends_on_func_list:	ON func_elem													 { $$ = list_make1($2); }
+											 | depends_on_func_list ',' func_elem   { $$ = lappend($1, $3); }
+							 ;
 
 func_elem:
 			type_function_name
