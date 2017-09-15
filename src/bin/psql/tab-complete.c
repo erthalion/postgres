@@ -1433,7 +1433,7 @@ psql_completion(const char *text, int start, int end)
 		"\\e", "\\echo", "\\ef", "\\elif", "\\else", "\\encoding",
 		"\\endif", "\\errverbose", "\\ev",
 		"\\f",
-		"\\g", "\\gexec", "\\gset", "\\gx",
+		"\\g", "\\gdesc", "\\gexec", "\\gset", "\\gx",
 		"\\h", "\\help", "\\H",
 		"\\i", "\\if", "\\ir",
 		"\\l", "\\lo_import", "\\lo_export", "\\lo_list", "\\lo_unlink",
@@ -1644,7 +1644,10 @@ psql_completion(const char *text, int start, int end)
 								   "UNION SELECT 'ALL IN TABLESPACE'");
 	/* ALTER INDEX <name> */
 	else if (Matches3("ALTER", "INDEX", MatchAny))
-		COMPLETE_WITH_LIST4("OWNER TO", "RENAME TO", "SET", "RESET");
+		COMPLETE_WITH_LIST5("ALTER COLUMN", "OWNER TO", "RENAME TO", "SET", "RESET");
+	/* ALTER INDEX <name> ALTER COLUMN <colnum> */
+	else if (Matches6("ALTER", "INDEX", MatchAny, "ALTER", "COLUMN", MatchAny))
+		COMPLETE_WITH_CONST("SET STATISTICS");
 	/* ALTER INDEX <name> SET */
 	else if (Matches4("ALTER", "INDEX", MatchAny, "SET"))
 		COMPLETE_WITH_LIST2("(", "TABLESPACE");

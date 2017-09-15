@@ -3848,7 +3848,7 @@ SCRAM-SHA-256$<replaceable>&lt;iteration count&gt;</>:<replaceable>&lt;salt&gt;<
   <para>
    The catalog <structname>pg_inherits</> records information about
    table inheritance hierarchies.  There is one entry for each direct
-   child table in the database.  (Indirect inheritance can be determined
+   parent-child table relationship in the database.  (Indirect inheritance can be determined
    by following chains of entries.)
   </para>
 
@@ -5385,7 +5385,7 @@ SCRAM-SHA-256$<replaceable>&lt;iteration count&gt;</>:<replaceable>&lt;salt&gt;<
 
      <row>
       <entry><structfield>pubname</structfield></entry>
-      <entry><type>Name</type></entry>
+      <entry><type>name</type></entry>
       <entry></entry>
       <entry>Name of the publication</entry>
      </row>

@@ -2223,7 +2223,9 @@ PGresult *PQexec(PGconn *conn, const char *command);
     <function>PQexec</> call are processed in a single transaction, unless
     there are explicit <command>BEGIN</command>/<command>COMMIT</command>
     commands included in the query string to divide it into multiple
-    transactions.  Note however that the returned
+    transactions.  (See <xref linkend="protocol-flow-multi-statement">
+    for more details about how the server handles multi-query strings.)
+    Note however that the returned
     <structname>PGresult</structname> structure describes only the result
     of the last command executed from the string.  Should one of the
     commands fail, processing of the string stops with it and the returned
@@ -7638,8 +7640,8 @@ ldap://ldap.acme.com/cn=dbserver,cn=hosts?pgconnectinfo?base?(objectclass=*)
    certificate of the signing authority to the <filename>postgresql.crt</>
    file, then its parent authority's certificate, and so on up to a certificate
    authority, <quote>root</> or <quote>intermediate</>, that is trusted by
-   the server, i.e. signed by a certificate in the server's
-   <filename>root.crt</filename> file.
+   the server, i.e. signed by a certificate in the server's root CA file
+   (<xref linkend="guc-ssl-ca-file">).
   </para>
 
   <para>
