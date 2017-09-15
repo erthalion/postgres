@@ -915,6 +915,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	List	   *as_clause;
 	char		parallel;
 	ObjectAddress result;
+	ListCell   *lc;
 
 	/* Convert list of names to a name and namespace */
 	namespaceId = QualifiedNameGetCreationNamespace(stmt->funcname,
@@ -1008,17 +1009,12 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 
 	if (dependsOnDefElem)
 	{
-		ereport(INFO,
-			(errcode(ERRCODE_SYNTAX_ERROR),
-			 errmsg("DEPENDS ON FIRST")));
-
 		ListCell   *lc;
 
 		foreach(lc, castNode(List, dependsOnDefElem))
 		{
 			DefElem    *defel = (DefElem *) lfirst(lc);
 			Value	   *func = (Value *) defel->arg;
-			/*Oid		   dependency = InvalidOid;*/
 			List	   *names;
 			FuncCandidateList clist;
 
@@ -1031,12 +1027,8 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 
 			if (clist == NULL || clist->next != NULL)
 				ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("NO FUNCTION %s", strVal(func))));
-
-			ereport(INFO,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("DEPENDS ON %s, OID %d", strVal(func), clist->oid)));
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("Function %s does not exist", strVal(func))));
 
 			dependencies = lappend_oid(dependencies, clist->oid);
 		}
@@ -1140,47 +1132,48 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	 * so, go ahead and create the function.
 	 */
 	result = ProcedureCreate(funcname,
-						   namespaceId,
-						   stmt->replace,
-						   returnsSet,
-						   prorettype,
-						   GetUserId(),
-						   languageOid,
-						   languageValidator,
-						   prosrc_str,	/* converted to text later */
-						   probin_str,	/* converted to text later */
-						   false,	/* not an aggregate */
-						   isWindowFunc,
-						   security,
-						   isLeakProof,
-						   isStrict,
-						   volatility,
-						   parallel,
-						   parameterTypes,
-						   PointerGetDatum(allParameterTypes),
-						   PointerGetDatum(parameterModes),
-						   PointerGetDatum(parameterNames),
-						   parameterDefaults,
-						   PointerGetDatum(trftypes),
-						   PointerGetDatum(proconfig),
-						   procost,
-						   prorows);
+						     namespaceId,
+						     stmt->replace,
+						     returnsSet,
+						     prorettype,
+						     GetUserId(),
+						     languageOid,
+						     languageValidator,
+						     prosrc_str,	/* converted to text later */
+						     probin_str,	/* converted to text later */
+						     false,	/* not an aggregate */
+						     isWindowFunc,
+						     security,
+						     isLeakProof,
+						     isStrict,
+						     volatility,
+						     parallel,
+						     parameterTypes,
+						     PointerGetDatum(allParameterTypes),
+						     PointerGetDatum(parameterModes),
+						     PointerGetDatum(parameterNames),
+						     parameterDefaults,
+						     PointerGetDatum(trftypes),
+						     PointerGetDatum(proconfig),
+						     procost,
+						     prorows);
 
-	ListCell   *lc;
 
+	/*
+	 * Dependencies already verified, so for every dependent function
+	 * we can create an internal dependency record to prevent them
+	 * from being deleted.
+	 */
 	foreach(lc, dependencies)
 	{
 		ObjectAddress dependencyAddress;
 
 		dependencyAddress.classId = ProcedureRelationId;
 		dependencyAddress.objectId = lfirst_oid(lc);
+		/* no subitems, since it's a function */
 		dependencyAddress.objectSubId = 0;
 
 		recordDependencyOn(&dependencyAddress, &result, DEPENDENCY_INTERNAL);
-
-		ereport(INFO,
-			(errcode(ERRCODE_SYNTAX_ERROR),
-			 errmsg("CHECK DEPS %d", lfirst_oid(lc))));
 	}
 
 	return result;
