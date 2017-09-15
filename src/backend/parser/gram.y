@@ -7705,7 +7705,7 @@ transform_type_list:
                        | transform_type_list ',' FOR TYPE_P Typename { $$ = lappend($1, $5); }
                ;
 
-depends_on_func_list:	func_elem					           { $$ = list_make1($1); }
+depends_on_func_list:	ON func_elem					       { $$ = list_make1($2); }
                         | depends_on_func_list ',' func_elem   { $$ = lappend($1, $3); }
                ;
 

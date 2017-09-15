@@ -64,6 +64,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/regproc.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 
@@ -896,6 +897,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	ArrayType  *parameterModes;
 	ArrayType  *parameterNames;
 	List	   *parameterDefaults;
+	List	   *dependencies = NIL;
 	Oid			variadicArgType;
 	List	   *trftypes_list = NIL;
 	ArrayType  *trftypes;
@@ -912,6 +914,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	Form_pg_language languageStruct;
 	List	   *as_clause;
 	char		parallel;
+	ObjectAddress result;
 
 	/* Convert list of names to a name and namespace */
 	namespaceId = QualifiedNameGetCreationNamespace(stmt->funcname,
@@ -1015,13 +1018,27 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 		{
 			DefElem    *defel = (DefElem *) lfirst(lc);
 			Value	   *func = (Value *) defel->arg;
-			Oid		   dependency = InvalidOid;
+			/*Oid		   dependency = InvalidOid;*/
+			List	   *names;
+			FuncCandidateList clist;
+
+			/*
+			 * Parse the name into components and see if it matches any pg_proc
+			 * entries in the current search path.
+			 */
+			names = stringToQualifiedNameList(strVal(func));
+			clist = FuncnameGetCandidates(names, -1, NIL, false, false, true);
+
+			if (clist == NULL || clist->next != NULL)
+				ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("NO FUNCTION %s", strVal(func))));
 
 			ereport(INFO,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("DEPENDS ON %s", strVal(func))));
+				 errmsg("DEPENDS ON %s, OID %d", strVal(func), clist->oid)));
 
-			dependency = DirectFunctionCall1(to_regproc, CStringGetTextDatum(strVal(func)));
+			dependencies = lappend_oid(dependencies, clist->oid);
 		}
 	}
 
@@ -1122,7 +1139,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 	 * And now that we have all the parameters, and know we're permitted to do
 	 * so, go ahead and create the function.
 	 */
-	return ProcedureCreate(funcname,
+	result = ProcedureCreate(funcname,
 						   namespaceId,
 						   stmt->replace,
 						   returnsSet,
@@ -1148,6 +1165,25 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 						   PointerGetDatum(proconfig),
 						   procost,
 						   prorows);
+
+	ListCell   *lc;
+
+	foreach(lc, dependencies)
+	{
+		ObjectAddress dependencyAddress;
+
+		dependencyAddress.classId = ProcedureRelationId;
+		dependencyAddress.objectId = lfirst_oid(lc);
+		dependencyAddress.objectSubId = 0;
+
+		recordDependencyOn(&dependencyAddress, &result, DEPENDENCY_INTERNAL);
+
+		ereport(INFO,
+			(errcode(ERRCODE_SYNTAX_ERROR),
+			 errmsg("CHECK DEPS %d", lfirst_oid(lc))));
+	}
+
+	return result;
 }
 
 /*
