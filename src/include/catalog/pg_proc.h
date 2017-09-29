@@ -5465,16 +5465,16 @@ DESCR("pg_controldata init state information as a function");
 /* type subscripting support */
 DATA(insert OID = 4001 (  jsonb_subscript_parse PGNSP PGUID 12 1 0 0 0 f f f f t f s s 3 0 "2281" "16 2281 2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscript_parse _null_ _null_ _null_ ));
 DESCR("Jsonb subscripting logic");
-DATA(insert OID = 4002 (  jsonb_subscripting_fetch PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "3802" "3802 2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscripting_fetch _null_ _null_ _null_ ));
+DATA(insert OID = 4002 (  jsonb_subscript_fetch PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "3802" "3802 2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscript_fetch _null_ _null_ _null_ ));
 DESCR("Jsonb subscripting logic");
-DATA(insert OID = 4003 (  jsonb_subscripting_assign PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "3802" "3802 2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscripting_assign _null_ _null_ _null_ ));
+DATA(insert OID = 4003 (  jsonb_subscript_assign PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "3802" "3802 2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscript_assign _null_ _null_ _null_ ));
 DESCR("Jsonb subscripting logic");
 
 DATA(insert OID = 4004 (  array_subscript_parse PGNSP PGUID 12 1 0 0 0 f f f f t f s s 3 0 "2281" "16 2281 2281" _null_ _null_ _null_ _null_ _null_ array_subscript_parse _null_ _null_ _null_ ));
 DESCR("Array subscripting logic");
-DATA(insert OID = 4005 (  array_subscripting_fetch PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "2283" "2277 2281" _null_ _null_ _null_ _null_ _null_ array_subscripting_fetch _null_ _null_ _null_ ));
+DATA(insert OID = 4005 (  array_subscript_fetch PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "2283" "2277 2281" _null_ _null_ _null_ _null_ _null_ array_subscript_fetch _null_ _null_ _null_ ));
 DESCR("Array subscripting logic");
-DATA(insert OID = 4006 (  array_subscripting_assign PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "2277" "2277 2281" _null_ _null_ _null_ _null_ _null_ array_subscripting_assign _null_ _null_ _null_ ));
+DATA(insert OID = 4006 (  array_subscript_assign PGNSP PGUID 12 1 0 0 0 f f f f t f s s 2 0 "2277" "2277 2281" _null_ _null_ _null_ _null_ _null_ array_subscript_assign _null_ _null_ _null_ ));
 DESCR("Array subscripting logic");
 
 /* collation management functions */

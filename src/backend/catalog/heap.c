@@ -981,7 +981,9 @@ AddNewRelationType(const char *typeName,
 				   0,			/* array dimensions for typBaseType */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* rowtypes never have a collation */
-				   InvalidOid);	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsassign - none */
+				   InvalidOid);	/* typsubsfetch - none */
 }
 
 /* --------------------------------
@@ -1252,7 +1254,9 @@ heap_create_with_catalog(const char *relname,
 				   0,			/* array dimensions for typBaseType */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* rowtypes never have a collation */
-				   F_ARRAY_SUBSCRIPT_PARSE);	/* array implementation */
+				   F_ARRAY_SUBSCRIPT_PARSE,
+				   F_ARRAY_SUBSCRIPT_ASSIGN,
+				   F_ARRAY_SUBSCRIPT_FETCH);	/* array implementation */
 
 		pfree(relarrayname);
 	}

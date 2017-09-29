@@ -4824,7 +4824,7 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
  * value will be returned.
  */
 Datum
-jsonb_subscripting_fetch(PG_FUNCTION_ARGS)
+jsonb_subscript_fetch(PG_FUNCTION_ARGS)
 {
 	Datum					containerSource = PG_GETARG_DATUM(0);
 	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -4845,7 +4845,7 @@ jsonb_subscripting_fetch(PG_FUNCTION_ARGS)
  * value will be returned.
  */
 Datum
-jsonb_subscripting_assign(PG_FUNCTION_ARGS)
+jsonb_subscript_assign(PG_FUNCTION_ARGS)
 {
 	Datum						containerSource = PG_GETARG_DATUM(0);
 	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -4899,8 +4899,10 @@ Datum
 jsonb_subscript_parse(PG_FUNCTION_ARGS)
 {
 	bool				isAssignment = PG_GETARG_BOOL(0);
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
+	RegProcedure		subsassign = PG_GETARG_OID(1);
+	RegProcedure		subsfetch = PG_GETARG_OID(2);
+	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(3);
+	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(4);
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
 
@@ -4939,9 +4941,9 @@ jsonb_subscript_parse(PG_FUNCTION_ARGS)
 
 	sbsref->refupperindexpr = upperIndexpr;
 	if (isAssignment)
-		sbsref->refevalfunc = F_JSONB_SUBSCRIPTING_ASSIGN;
+		sbsref->refevalfunc = subsassign;
 	else
-		sbsref->refevalfunc = F_JSONB_SUBSCRIPTING_FETCH;
+		sbsref->refevalfunc = subsfetch;
 
 	PG_RETURN_POINTER(sbsref);
 }

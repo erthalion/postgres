@@ -6518,7 +6518,7 @@ width_bucket_array_variable(Datum operand,
  * value will be returned.
  */
 Datum
-array_subscripting_assign(PG_FUNCTION_ARGS)
+array_subscript_assign(PG_FUNCTION_ARGS)
 {
 	Datum						containerSource = PG_GETARG_DATUM(0);
 	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -6583,7 +6583,7 @@ array_subscripting_assign(PG_FUNCTION_ARGS)
 }
 
 Datum
-array_subscripting_fetch(PG_FUNCTION_ARGS)
+array_subscript_fetch(PG_FUNCTION_ARGS)
 {
 	Datum							containerSource = PG_GETARG_DATUM(0);
 	ExprEvalStep					*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -6636,8 +6636,10 @@ Datum
 array_subscript_parse(PG_FUNCTION_ARGS)
 {
 	bool				isAssignment = PG_GETARG_BOOL(0);
-	SubscriptingRef		*sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState			*pstate = (ParseState *) PG_GETARG_POINTER(2);
+	RegProcedure		subsassign = PG_GETARG_OID(1);
+	RegProcedure		subsfetch = PG_GETARG_OID(2);
+	SubscriptingRef		*sbsref = (SubscriptingRef *) PG_GETARG_POINTER(3);
+	ParseState			*pstate = (ParseState *) PG_GETARG_POINTER(4);
 	Node				*node = (Node *) sbsref;
 	Oid					array_type = sbsref->refcontainertype;
 	int32				array_typ_mode = (int32) sbsref->reftypmod;
@@ -6774,12 +6776,12 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 
 	}
 
-	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPTING_FETCH;
+	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_FETCH;
 
 	if (isAssignment)
-		sbsref->refevalfunc = F_ARRAY_SUBSCRIPTING_ASSIGN;
+		sbsref->refevalfunc = subsassign;
 	else
-		sbsref->refevalfunc = F_ARRAY_SUBSCRIPTING_FETCH;
+		sbsref->refevalfunc = subsfetch;
 
 	PG_RETURN_POINTER(sbsref);
 }

@@ -119,6 +119,8 @@ TypeShellMake(const char *typeName, Oid typeNamespace, Oid ownerId)
 	values[Anum_pg_type_typndims - 1] = Int32GetDatum(0);
 	values[Anum_pg_type_typcollation - 1] = ObjectIdGetDatum(InvalidOid);
 	values[Anum_pg_type_typsubsparse - 1] = ObjectIdGetDatum(InvalidOid);
+	values[Anum_pg_type_typsubsassign - 1] = ObjectIdGetDatum(InvalidOid);
+	values[Anum_pg_type_typsubsfetch - 1] = ObjectIdGetDatum(InvalidOid);
 	nulls[Anum_pg_type_typdefaultbin - 1] = true;
 	nulls[Anum_pg_type_typdefault - 1] = true;
 	nulls[Anum_pg_type_typacl - 1] = true;
@@ -163,6 +165,8 @@ TypeShellMake(const char *typeName, Oid typeNamespace, Oid ownerId)
 								 InvalidOid,
 								 InvalidOid,
 								 false,
+								 InvalidOid,
+								 InvalidOid,
 								 InvalidOid,
 								 InvalidOid,
 								 InvalidOid,
@@ -225,7 +229,9 @@ TypeCreate(Oid newTypeOid,
 		   int32 typNDims,		/* Array dimensions for baseType */
 		   bool typeNotNull,
 		   Oid typeCollation,
-		   Oid subscriptingProcedure)
+		   Oid subscriptingParseProcedure,
+		   Oid subscriptingAssignProcedure,
+		   Oid subscriptingFetchProcedure)
 {
 	Relation	pg_type_desc;
 	Oid			typeObjectId;
@@ -365,7 +371,9 @@ TypeCreate(Oid newTypeOid,
 	values[Anum_pg_type_typtypmod - 1] = Int32GetDatum(typeMod);
 	values[Anum_pg_type_typndims - 1] = Int32GetDatum(typNDims);
 	values[Anum_pg_type_typcollation - 1] = ObjectIdGetDatum(typeCollation);
-	values[Anum_pg_type_typsubsparse - 1] = ObjectIdGetDatum(subscriptingProcedure);
+	values[Anum_pg_type_typsubsparse - 1] = ObjectIdGetDatum(subscriptingParseProcedure);
+	values[Anum_pg_type_typsubsassign - 1] = ObjectIdGetDatum(subscriptingAssignProcedure);
+	values[Anum_pg_type_typsubsfetch - 1] = ObjectIdGetDatum(subscriptingFetchProcedure);
 
 	/*
 	 * initialize the default binary value for this type.  Check for nulls of
@@ -483,7 +491,9 @@ TypeCreate(Oid newTypeOid,
 								 isImplicitArray,
 								 baseType,
 								 typeCollation,
-								 subscriptingProcedure,
+								 subscriptingParseProcedure,
+								 subscriptingAssignProcedure,
+								 subscriptingFetchProcedure,
 								 (defaultTypeBin ?
 								  stringToNode(defaultTypeBin) :
 								  NULL),
@@ -530,7 +540,9 @@ GenerateTypeDependencies(Oid typeNamespace,
 						 bool isImplicitArray,
 						 Oid baseType,
 						 Oid typeCollation,
-						 Oid subscriptingProcedure,
+						 Oid subscriptingParseProcedure,
+						 Oid subscriptingAssignProcedure,
+						 Oid subscriptingFetchProcedure,
 						 Node *defaultExpr,
 						 bool rebuild)
 {
@@ -684,10 +696,26 @@ GenerateTypeDependencies(Oid typeNamespace,
 	if (defaultExpr)
 		recordDependencyOnExpr(&myself, defaultExpr, NIL, DEPENDENCY_NORMAL);
 
-	if (OidIsValid(subscriptingProcedure))
+	if (OidIsValid(subscriptingParseProcedure))
 	{
 		referenced.classId = ProcedureRelationId;
-		referenced.objectId = subscriptingProcedure;
+		referenced.objectId = subscriptingParseProcedure;
+		referenced.objectSubId = 0;
+		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+	}
+
+	if (OidIsValid(subscriptingAssignProcedure))
+	{
+		referenced.classId = ProcedureRelationId;
+		referenced.objectId = subscriptingAssignProcedure;
+		referenced.objectSubId = 0;
+		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+	}
+
+	if (OidIsValid(subscriptingFetchProcedure))
+	{
+		referenced.classId = ProcedureRelationId;
+		referenced.objectId = subscriptingFetchProcedure;
 		referenced.objectSubId = 0;
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}

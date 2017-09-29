@@ -3092,19 +3092,22 @@ get_range_subtype(Oid rangeOid)
 /*
  * get_typsubsparse
  *
- *		Given the type OID, return the type's typsubsparse procedure, if any.
+ *		Given the type OID, return the type's subscripting procedures, if any,
+ *		through pointers in arguments.
  */
-RegProcedure
-get_typsubsparse(Oid typid)
+void
+get_typsubsprocs(Oid typid, RegProcedure *parse,
+				 RegProcedure *assign, RegProcedure *fetch)
 {
 	HeapTuple		tp;
-	RegProcedure	result = InvalidOid;
 
 	tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
 	if (HeapTupleIsValid(tp))
 	{
-		result = ((Form_pg_type) GETSTRUCT(tp))->typsubsparse;
+		*parse = ((Form_pg_type) GETSTRUCT(tp))->typsubsparse;
+		*assign = ((Form_pg_type) GETSTRUCT(tp))->typsubsassign;
+		*fetch = ((Form_pg_type) GETSTRUCT(tp))->typsubsfetch;
+
 		ReleaseSysCache(tp);
 	}
-	return result;
 }

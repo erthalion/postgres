@@ -312,7 +312,8 @@ transformContainerSubscripts(ParseState *pstate,
 	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
-	RegProcedure		typsubsparse = get_typsubsparse(containerType);
+	RegProcedure		typsubsparse, typsubsassign, typsubsfetch = InvalidOid;
+	get_typsubsprocs(containerType, &typsubsparse, &typsubsassign, &typsubsfetch);
 
 	if (!OidIsValid(typsubsparse))
 		ereport(ERROR,
@@ -385,7 +386,9 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	return (Node *) OidFunctionCall3(typsubsparse,
+	return (Node *) OidFunctionCall5(typsubsparse,
+									 ObjectIdGetDatum(typsubsassign),
+									 ObjectIdGetDatum(typsubsfetch),
 									 BoolGetDatum(assignFrom != NULL),
 									 PointerGetDatum(sbsref),
 									 PointerGetDatum(pstate));
