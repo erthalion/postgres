@@ -49,7 +49,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
   { <replaceable class="PARAMETER">column_name</replaceable> [ WITH OPTIONS ] [ <replaceable class="PARAMETER">column_constraint</replaceable> [ ... ] ]
     | <replaceable>table_constraint</replaceable> }
     [, ... ]
-) ] FOR VALUES <replaceable class="PARAMETER">partition_bound_spec</replaceable>
+) ] { FOR VALUES <replaceable class="PARAMETER">partition_bound_spec</replaceable> | DEFAULT }
 [ PARTITION BY { RANGE | LIST } ( { <replaceable class="parameter">column_name</replaceable> | ( <replaceable class="parameter">expression</replaceable> ) } [ COLLATE <replaceable class="parameter">collation</replaceable> ] [ <replaceable class="parameter">opclass</replaceable> ] [, ... ] ) ]
 [ WITH ( <replaceable class="PARAMETER">storage_parameter</replaceable> [= <replaceable class="PARAMETER">value</replaceable>] [, ... ] ) | WITH OIDS | WITHOUT OIDS ]
 [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
@@ -250,11 +250,13 @@ FROM ( { <replaceable class="PARAMETER">numeric_literal</replaceable> | <replace
    </varlistentry>
 
    <varlistentry id="SQL-CREATETABLE-PARTITION">
-    <term><literal>PARTITION OF <replaceable class="PARAMETER">parent_table</replaceable> FOR VALUES <replaceable class="PARAMETER">partition_bound_spec</replaceable></literal></term>
+    <term><literal>PARTITION OF <replaceable class="PARAMETER">parent_table</replaceable> { FOR VALUES <replaceable class="PARAMETER">partition_bound_spec</replaceable> | DEFAULT }</literal></term>
     <listitem>
      <para>
       Creates the table as a <firstterm>partition</firstterm> of the specified
-      parent table.
+      parent table. The table can be created either as a partition for specific
+      values using <literal>FOR VALUES</literal> or as a default partition
+      using <literal>DEFAULT</literal>.
      </para>
 
      <para>
@@ -322,11 +324,10 @@ FROM ( { <replaceable class="PARAMETER">numeric_literal</replaceable> | <replace
      </para>
 
      <para>
-      Note that any values after <literal>MINVALUE</> or
-      <literal>MAXVALUE</> in a partition bound are ignored; so the bound
-      <literal>(10, MINVALUE, 0)</> is equivalent to
-      <literal>(10, MINVALUE, 10)</> and <literal>(10, MINVALUE, MINVALUE)</>
-      and <literal>(10, MINVALUE, MAXVALUE)</>.
+      Note that if <literal>MINVALUE</> or <literal>MAXVALUE</> is used for
+      one column of a partitioning bound, the same value must be used for all
+      subsequent columns.  For example, <literal>(10, MINVALUE, 0)</> is not
+      a valid bound; you should write <literal>(10, MINVALUE, MINVALUE)</>.
      </para>
 
      <para>
@@ -340,6 +341,26 @@ FROM ( { <replaceable class="PARAMETER">numeric_literal</replaceable> | <replace
       less than any other value, including "minus infinity". Thus the range
       <literal>FROM ('infinity') TO (MAXVALUE)</> is not an empty range; it
       allows precisely one value to be stored &mdash; "infinity".
+     </para>
+
+     <para>
+      If <literal>DEFAULT</literal> is specified, the table will be
+      created as a default partition of the parent table. The parent can
+      either be a list or range partitioned table. A partition key value
+      not fitting into any other partition of the given parent will be
+      routed to the default partition. There can be only one default
+      partition for a given parent table.
+     </para>
+
+     <para>
+      When a table has an existing <literal>DEFAULT</literal> partition and
+      a new partition is added to it, the existing default partition must
+      be scanned to verify that it does not contain any rows which properly
+      belong in the new partition.  If the default partition contains a
+      large number of rows, this may be slow.  The scan will be skipped if
+      the default partition is a foreign table or if it has a constraint which
+      proves that it cannot contain rows which should be placed in the new
+      partition.
      </para>
 
      <para>
@@ -1643,7 +1664,7 @@ CREATE TABLE measurement_y2016m07
 <programlisting>
 CREATE TABLE measurement_ym_older
     PARTITION OF measurement_year_month
-    FOR VALUES FROM (MINVALUE, 0) TO (2016, 11);
+    FOR VALUES FROM (MINVALUE, MINVALUE) TO (2016, 11);
 
 CREATE TABLE measurement_ym_y2016m11
     PARTITION OF measurement_year_month
@@ -1678,6 +1699,13 @@ CREATE TABLE cities_ab
 
 CREATE TABLE cities_ab_10000_to_100000
     PARTITION OF cities_ab FOR VALUES FROM (10000) TO (100000);
+</programlisting></para>
+
+  <para>
+   Create a default partition:
+<programlisting>
+CREATE TABLE cities_partdef
+    PARTITION OF cities DEFAULT;
 </programlisting></para>
  </refsect1>
 

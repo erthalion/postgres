@@ -572,6 +572,24 @@ select \if false \\ (bogus \else \\ 42 \endif \\ forty_two;
 	\echo 'should print #8-1'
 \endif
 
+-- :{?...} defined variable test
+\set i 1
+\if :{?i}
+  \echo '#9-1 ok, variable i is defined'
+\else
+  \echo 'should not print #9-2'
+\endif
+
+\if :{?no_such_variable}
+  \echo 'should not print #10-1'
+\else
+  \echo '#10-2 ok, variable no_such_variable is not defined'
+\endif
+
+SELECT :{?i} AS i_is_defined;
+
+SELECT NOT :{?no_such_var} AS no_such_var_is_not_defined;
+
 -- SHOW_CONTEXT
 
 \set SHOW_CONTEXT never
@@ -606,3 +624,67 @@ UNION SELECT 5
 ORDER BY 1;
 \r
 \p
+
+-- tests for special result variables
+
+-- working query, 2 rows selected
+SELECT 1 AS stuff UNION SELECT 2;
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+
+-- syntax error
+SELECT 1 UNION;
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+\echo 'last error message:' :LAST_ERROR_MESSAGE
+\echo 'last error code:' :LAST_ERROR_SQLSTATE
+
+-- empty query
+;
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+-- must have kept previous values
+\echo 'last error message:' :LAST_ERROR_MESSAGE
+\echo 'last error code:' :LAST_ERROR_SQLSTATE
+
+-- other query error
+DROP TABLE this_table_does_not_exist;
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+\echo 'last error message:' :LAST_ERROR_MESSAGE
+\echo 'last error code:' :LAST_ERROR_SQLSTATE
+
+-- working \gdesc
+SELECT 3 AS three, 4 AS four \gdesc
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+
+-- \gdesc with an error
+SELECT 4 AS \gdesc
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+\echo 'last error message:' :LAST_ERROR_MESSAGE
+\echo 'last error code:' :LAST_ERROR_SQLSTATE
+
+-- check row count for a cursor-fetched query
+\set FETCH_COUNT 10
+select unique2 from tenk1 order by unique2 limit 19;
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+
+-- cursor-fetched query with an error after the first group
+select 1/(15-unique2) from tenk1 order by unique2 limit 19;
+\echo 'error:' :ERROR
+\echo 'error code:' :SQLSTATE
+\echo 'number of rows:' :ROW_COUNT
+\echo 'last error message:' :LAST_ERROR_MESSAGE
+\echo 'last error code:' :LAST_ERROR_SQLSTATE
+
+\unset FETCH_COUNT

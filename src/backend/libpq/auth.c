@@ -2394,6 +2394,39 @@ InitializeLDAPConnection(Port *port, LDAP **ldap)
 	return STATUS_OK;
 }
 
+/* Placeholders recognized by FormatSearchFilter.  For now just one. */
+#define LPH_USERNAME "$username"
+#define LPH_USERNAME_LEN (sizeof(LPH_USERNAME) - 1)
+
+/* Not all LDAP implementations define this. */
+#ifndef LDAP_NO_ATTRS
+#define LDAP_NO_ATTRS "1.1"
+#endif
+
+/*
+ * Return a newly allocated C string copied from "pattern" with all
+ * occurrences of the placeholder "$username" replaced with "user_name".
+ */
+static char *
+FormatSearchFilter(const char *pattern, const char *user_name)
+{
+	StringInfoData output;
+
+	initStringInfo(&output);
+	while (*pattern != '\0')
+	{
+		if (strncmp(pattern, LPH_USERNAME, LPH_USERNAME_LEN) == 0)
+		{
+			appendStringInfoString(&output, user_name);
+			pattern += LPH_USERNAME_LEN;
+		}
+		else
+			appendStringInfoChar(&output, *pattern++);
+	}
+
+	return output.data;
+}
+
 /*
  * Perform LDAP authentication
  */
@@ -2437,7 +2470,7 @@ CheckLDAPAuth(Port *port)
 		char	   *filter;
 		LDAPMessage *search_message;
 		LDAPMessage *entry;
-		char	   *attributes[2];
+		char	   *attributes[] = { LDAP_NO_ATTRS, NULL };
 		char	   *dn;
 		char	   *c;
 		int			count;
@@ -2479,13 +2512,13 @@ CheckLDAPAuth(Port *port)
 			return STATUS_ERROR;
 		}
 
-		/* Fetch just one attribute, else *all* attributes are returned */
-		attributes[0] = port->hba->ldapsearchattribute ? port->hba->ldapsearchattribute : "uid";
-		attributes[1] = NULL;
-
-		filter = psprintf("(%s=%s)",
-						  attributes[0],
-						  port->user_name);
+		/* Build a custom filter or a single attribute filter? */
+		if (port->hba->ldapsearchfilter)
+			filter = FormatSearchFilter(port->hba->ldapsearchfilter, port->user_name);
+		else if (port->hba->ldapsearchattribute)
+			filter = psprintf("(%s=%s)", port->hba->ldapsearchattribute, port->user_name);
+		else
+			filter = psprintf("(uid=%s)", port->user_name);
 
 		r = ldap_search_s(ldap,
 						  port->hba->ldapbasedn,

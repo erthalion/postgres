@@ -85,7 +85,7 @@
 #ssl_key_file = 'server.key'
 #ssl_ca_file = ''
 #ssl_crl_file = ''
-#password_encryption = md5		# md5, scram-sha-256, or plain
+#password_encryption = md5		# md5 or scram-sha-256
 #db_user_namespace = off
 #row_security = on
 
@@ -234,7 +234,7 @@
 
 #max_wal_senders = 10		# max number of walsender processes
 				# (change requires restart)
-#wal_keep_segments = 0		# in logfile segments, 16MB each; 0 disables
+#wal_keep_segments = 0		# in logfile segments; 0 disables
 #wal_sender_timeout = 60s	# in milliseconds; 0 disables
 
 #max_replication_slots = 10	# max number of replication slots
