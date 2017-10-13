@@ -467,6 +467,7 @@ LaunchParallelWorkers(ParallelContext *pcxt)
 	memset(&worker, 0, sizeof(worker));
 	snprintf(worker.bgw_name, BGW_MAXLEN, "parallel worker for PID %d",
 			 MyProcPid);
+	snprintf(worker.bgw_type, BGW_MAXLEN, "parallel worker");
 	worker.bgw_flags =
 		BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION
 		| BGWORKER_CLASS_PARALLEL;
@@ -1029,8 +1030,8 @@ ParallelWorkerMain(Datum main_arg)
 	 * in this case.
 	 */
 	pq_beginmessage(&msgbuf, 'K');
-	pq_sendint(&msgbuf, (int32) MyProcPid, sizeof(int32));
-	pq_sendint(&msgbuf, (int32) MyCancelKey, sizeof(int32));
+	pq_sendint32(&msgbuf, (int32) MyProcPid);
+	pq_sendint32(&msgbuf, (int32) MyCancelKey);
 	pq_endmessage(&msgbuf);
 
 	/*

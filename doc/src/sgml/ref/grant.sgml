@@ -23,70 +23,70 @@ PostgreSQL documentation
 <synopsis>
 GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGER }
     [, ...] | ALL [ PRIVILEGES ] }
-    ON { [ TABLE ] <replaceable class="PARAMETER">table_name</replaceable> [, ...]
-         | ALL TABLES IN SCHEMA <replaceable class="PARAMETER">schema_name</replaceable> [, ...] }
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    ON { [ TABLE ] <replaceable class="parameter">table_name</replaceable> [, ...]
+         | ALL TABLES IN SCHEMA <replaceable class="parameter">schema_name</replaceable> [, ...] }
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
-GRANT { { SELECT | INSERT | UPDATE | REFERENCES } ( <replaceable class="PARAMETER">column_name</replaceable> [, ...] )
-    [, ...] | ALL [ PRIVILEGES ] ( <replaceable class="PARAMETER">column_name</replaceable> [, ...] ) }
-    ON [ TABLE ] <replaceable class="PARAMETER">table_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+GRANT { { SELECT | INSERT | UPDATE | REFERENCES } ( <replaceable class="parameter">column_name</replaceable> [, ...] )
+    [, ...] | ALL [ PRIVILEGES ] ( <replaceable class="parameter">column_name</replaceable> [, ...] ) }
+    ON [ TABLE ] <replaceable class="parameter">table_name</replaceable> [, ...]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { { USAGE | SELECT | UPDATE }
     [, ...] | ALL [ PRIVILEGES ] }
-    ON { SEQUENCE <replaceable class="PARAMETER">sequence_name</replaceable> [, ...]
-         | ALL SEQUENCES IN SCHEMA <replaceable class="PARAMETER">schema_name</replaceable> [, ...] }
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    ON { SEQUENCE <replaceable class="parameter">sequence_name</replaceable> [, ...]
+         | ALL SEQUENCES IN SCHEMA <replaceable class="parameter">schema_name</replaceable> [, ...] }
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { { CREATE | CONNECT | TEMPORARY | TEMP } [, ...] | ALL [ PRIVILEGES ] }
     ON DATABASE <replaceable>database_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON DOMAIN <replaceable>domain_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON FOREIGN DATA WRAPPER <replaceable>fdw_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON FOREIGN SERVER <replaceable>server_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { EXECUTE | ALL [ PRIVILEGES ] }
     ON { FUNCTION <replaceable>function_name</replaceable> [ ( [ [ <replaceable class="parameter">argmode</replaceable> ] [ <replaceable class="parameter">arg_name</replaceable> ] <replaceable class="parameter">arg_type</replaceable> [, ...] ] ) ] [, ...]
-         | ALL FUNCTIONS IN SCHEMA <replaceable class="PARAMETER">schema_name</replaceable> [, ...] }
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+         | ALL FUNCTIONS IN SCHEMA <replaceable class="parameter">schema_name</replaceable> [, ...] }
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON LANGUAGE <replaceable>lang_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
-    ON LARGE OBJECT <replaceable class="PARAMETER">loid</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    ON LARGE OBJECT <replaceable class="parameter">loid</replaceable> [, ...]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { { CREATE | USAGE } [, ...] | ALL [ PRIVILEGES ] }
     ON SCHEMA <replaceable>schema_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { CREATE | ALL [ PRIVILEGES ] }
     ON TABLESPACE <replaceable>tablespace_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
 GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON TYPE <replaceable>type_name</replaceable> [, ...]
-    TO <replaceable class="PARAMETER">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
+    TO <replaceable class="parameter">role_specification</replaceable> [, ...] [ WITH GRANT OPTION ]
 
-<phrase>where <replaceable class="PARAMETER">role_specification</replaceable> can be:</phrase>
+<phrase>where <replaceable class="parameter">role_specification</replaceable> can be:</phrase>
 
-    [ GROUP ] <replaceable class="PARAMETER">role_name</replaceable>
+    [ GROUP ] <replaceable class="parameter">role_name</replaceable>
   | PUBLIC
   | CURRENT_USER
   | SESSION_USER
 
-GRANT <replaceable class="PARAMETER">role_name</replaceable> [, ...] TO <replaceable class="PARAMETER">role_name</replaceable> [, ...] [ WITH ADMIN OPTION ]
+GRANT <replaceable class="parameter">role_name</replaceable> [, ...] TO <replaceable class="parameter">role_name</replaceable> [, ...] [ WITH ADMIN OPTION ]
 </synopsis>
  </refsynopsisdiv>
 
@@ -156,12 +156,22 @@ GRANT <replaceable class="PARAMETER">role_name</replaceable> [, ...] TO <replace
   <para>
    PostgreSQL grants default privileges on some types of objects to
    <literal>PUBLIC</literal>.  No privileges are granted to
-   <literal>PUBLIC</literal> by default on tables,
-   columns, schemas or tablespaces. For other types, the default privileges
+   <literal>PUBLIC</literal> by default on
+   tables,
+   table columns,
+   sequences,
+   foreign data wrappers,
+   foreign servers,
+   large objects,
+   schemas,
+   or tablespaces.
+   For other types of objects, the default privileges
    granted to <literal>PUBLIC</literal> are as follows:
-   <literal>CONNECT</literal> and <literal>CREATE TEMP TABLE</literal> for
-   databases; <literal>EXECUTE</literal> privilege for functions; and
-   <literal>USAGE</literal> privilege for languages.
+   <literal>CONNECT</literal> and <literal>TEMPORARY</literal> (create
+   temporary tables) privileges for databases;
+   <literal>EXECUTE</literal> privilege for functions; and
+   <literal>USAGE</literal> privilege for languages and data types
+   (including domains).
    The object owner can, of course, <command>REVOKE</command>
    both default and  expressly granted privileges. (For maximum
    security, issue the <command>REVOKE</> in the same transaction that

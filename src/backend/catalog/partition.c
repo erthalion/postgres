@@ -702,6 +702,74 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
 }
 
 /*
+ * Return a copy of given PartitionBoundInfo structure. The data types of bounds
+ * are described by given partition key specificiation.
+ */
+extern PartitionBoundInfo
+partition_bounds_copy(PartitionBoundInfo src,
+					  PartitionKey key)
+{
+	PartitionBoundInfo	dest;
+	int		i;
+	int		ndatums;
+	int		partnatts;
+	int		num_indexes;
+
+	dest = (PartitionBoundInfo) palloc(sizeof(PartitionBoundInfoData));
+
+	dest->strategy = src->strategy;
+	ndatums = dest->ndatums = src->ndatums;
+	partnatts = key->partnatts;
+
+	/* Range partitioned table has an extra index. */
+	num_indexes = key->strategy == PARTITION_STRATEGY_RANGE ? ndatums + 1 : ndatums;
+
+	/* List partitioned tables have only a single partition key. */
+	Assert(key->strategy != PARTITION_STRATEGY_LIST || partnatts == 1);
+
+	dest->datums = (Datum **) palloc(sizeof(Datum *) * ndatums);
+
+	if (src->kind != NULL)
+	{
+		dest->kind = (PartitionRangeDatumKind **) palloc(ndatums *
+												sizeof(PartitionRangeDatumKind *));
+		for (i = 0; i < ndatums; i++)
+		{
+			dest->kind[i] = (PartitionRangeDatumKind *) palloc(partnatts *
+												sizeof(PartitionRangeDatumKind));
+
+			memcpy(dest->kind[i], src->kind[i],
+				   sizeof(PartitionRangeDatumKind) * key->partnatts);
+		}
+	}
+	else
+		dest->kind = NULL;
+
+	for (i = 0; i < ndatums; i++)
+	{
+		int		j;
+		dest->datums[i] = (Datum *) palloc(sizeof(Datum) * partnatts);
+
+		for (j = 0; j < partnatts; j++)
+		{
+			if (dest->kind == NULL ||
+				dest->kind[i][j] == PARTITION_RANGE_DATUM_VALUE)
+				dest->datums[i][j] = datumCopy(src->datums[i][j],
+											   key->parttypbyval[j],
+											   key->parttyplen[j]);
+		}
+	}
+
+	dest->indexes = (int *) palloc(sizeof(int) * num_indexes);
+	memcpy(dest->indexes, src->indexes, sizeof(int) * num_indexes);
+
+	dest->null_index = src->null_index;
+	dest->default_index = src->default_index;
+
+	return dest;
+}
+
+/*
  * check_new_partition_bound
  *
  * Checks if the new partition's bound overlaps any of the existing partitions
@@ -920,7 +988,7 @@ check_default_allows_bound(Relation parent, Relation default_rel,
 	if (PartConstraintImpliedByRelConstraint(default_rel, def_part_constraints))
 	{
 		ereport(INFO,
-				(errmsg("partition constraint for table \"%s\" is implied by existing constraints",
+				(errmsg("updated partition constraint for default partition \"%s\" is implied by existing constraints",
 						RelationGetRelationName(default_rel))));
 		return;
 	}
@@ -953,7 +1021,25 @@ check_default_allows_bound(Relation parent, Relation default_rel,
 
 		/* Lock already taken above. */
 		if (part_relid != RelationGetRelid(default_rel))
+		{
 			part_rel = heap_open(part_relid, NoLock);
+
+			/*
+			 * If the partition constraints on default partition child imply
+			 * that it will not contain any row that would belong to the new
+			 * partition, we can avoid scanning the child table.
+			 */
+			if (PartConstraintImpliedByRelConstraint(part_rel,
+													 def_part_constraints))
+			{
+				ereport(INFO,
+						(errmsg("updated partition constraint for default partition \"%s\" is implied by existing constraints",
+								RelationGetRelationName(part_rel))));
+
+				heap_close(part_rel, NoLock);
+				continue;
+			}
+		}
 		else
 			part_rel = default_rel;
 
@@ -1236,7 +1322,7 @@ RelationGetPartitionDispatchInfo(Relation rel,
  * get_partition_dispatch_recurse
  *		Recursively expand partition tree rooted at rel
  *
- * As the partition tree is expanded in a depth-first manner, we mantain two
+ * As the partition tree is expanded in a depth-first manner, we maintain two
  * global lists: of PartitionDispatch objects corresponding to partitioned
  * tables in *pds and of the leaf partition OIDs in *leaf_part_oids.
  *
