@@ -275,7 +275,7 @@ typedef FormData_pg_type *Form_pg_type;
 #define Anum_pg_type_typsubsparse		28
 #define Anum_pg_type_typsubsassign		29
 #define Anum_pg_type_typsubsfetch		30
-#define Anum_pg_type_typdefaultbin		30
+#define Anum_pg_type_typdefaultbin		31
 #define Anum_pg_type_typdefault			32
 #define Anum_pg_type_typacl				33
 
