@@ -387,9 +387,9 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refexpr = (Expr *) containerBase;
 
 	return (Node *) OidFunctionCall5(typsubsparse,
+									 BoolGetDatum(assignFrom != NULL),
 									 ObjectIdGetDatum(typsubsassign),
 									 ObjectIdGetDatum(typsubsfetch),
-									 BoolGetDatum(assignFrom != NULL),
 									 PointerGetDatum(sbsref),
 									 PointerGetDatum(pstate));
 }
