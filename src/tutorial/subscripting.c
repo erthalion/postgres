@@ -26,9 +26,9 @@ typedef struct Custom
 }	Custom;
 
 PG_FUNCTION_INFO_V1(custom_in);
-PG_FUNCTION_INFO_V1(custom_subscript_parse);
+PG_FUNCTION_INFO_V1(custom_subscripting_parse);
 PG_FUNCTION_INFO_V1(custom_subscripting_assign);
-PG_FUNCTION_INFO_V1(custom_subscripting_extract);
+PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
 
 /*****************************************************************************
  * Input/Output functions
@@ -95,7 +95,7 @@ custom_subscripting_assign(PG_FUNCTION_ARGS)
 
 
 Datum
-custom_subscripting_extract(PG_FUNCTION_ARGS)
+custom_subscripting_fetch(PG_FUNCTION_ARGS)
 {
 	Custom					*containerSource = (Custom *) PG_GETARG_DATUM(0);
 	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -115,7 +115,7 @@ custom_subscripting_extract(PG_FUNCTION_ARGS)
 }
 
 Datum
-custom_subscript_parse(PG_FUNCTION_ARGS)
+custom_subscripting_parse(PG_FUNCTION_ARGS)
 {
 	bool				isAssignment = PG_GETARG_BOOL(0);
 	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
@@ -123,7 +123,7 @@ custom_subscript_parse(PG_FUNCTION_ARGS)
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
 	Datum				assign_proc = CStringGetTextDatum("custom_subscripting_assign");
-	Datum				extract_proc = CStringGetTextDatum("custom_subscripting_extract");
+	Datum				fetch_proc = CStringGetTextDatum("custom_subscripting_fetch");
 
 	if (sbsref->reflowerindexpr != NIL)
 		ereport(ERROR,
@@ -166,7 +166,7 @@ custom_subscript_parse(PG_FUNCTION_ARGS)
 	if (isAssignment)
 		sbsref->refevalfunc = DirectFunctionCall1(to_regproc, assign_proc);
 	else
-		sbsref->refevalfunc = DirectFunctionCall1(to_regproc, extract_proc);
+		sbsref->refevalfunc = DirectFunctionCall1(to_regproc, fetch_proc);
 
 	PG_RETURN_POINTER(sbsref);
 }
