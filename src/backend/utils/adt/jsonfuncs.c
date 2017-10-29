@@ -37,7 +37,6 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
-#include "parser/parse_node.h"
 
 /* Operations available for setPath */
 #define JB_PATH_CREATE					0x0001
