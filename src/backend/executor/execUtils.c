@@ -156,6 +156,8 @@ CreateExecutorState(void)
 	estate->es_epqScanDone = NULL;
 	estate->es_sourceText = NULL;
 
+	estate->es_use_parallel_mode = false;
+
 	/*
 	 * Return the executor state structure
 	 */
@@ -813,7 +815,7 @@ ShutdownExprContext(ExprContext *econtext, bool isCommit)
 	{
 		econtext->ecxt_callbacks = ecxt_callback->next;
 		if (isCommit)
-			(*ecxt_callback->function) (ecxt_callback->arg);
+			ecxt_callback->function(ecxt_callback->arg);
 		pfree(ecxt_callback);
 	}
 

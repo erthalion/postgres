@@ -39,6 +39,12 @@ explain (costs off)
 	select  sum(parallel_restricted(unique1)) from tenk1
 	group by(parallel_restricted(unique1));
 
+-- test prepared statement
+prepare tenk1_count(integer) As select  count((unique1)) from tenk1 where hundred > $1;
+explain (costs off) execute tenk1_count(1);
+execute tenk1_count(1);
+deallocate tenk1_count;
+
 -- test parallel plans for queries containing un-correlated subplans.
 alter table tenk2 set (parallel_workers = 0);
 explain (costs off)
@@ -65,6 +71,26 @@ explain (costs off)
 	select  count(*) from tenk1 where thousand > 95;
 select  count(*) from tenk1 where thousand > 95;
 
+-- test rescan cases too
+set enable_material = false;
+
+explain (costs off)
+select * from
+  (select count(unique1) from tenk1 where hundred > 10) ss
+  right join (values (1),(2),(3)) v(x) on true;
+select * from
+  (select count(unique1) from tenk1 where hundred > 10) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+explain (costs off)
+select * from
+  (select count(*) from tenk1 where thousand > 99) ss
+  right join (values (1),(2),(3)) v(x) on true;
+select * from
+  (select count(*) from tenk1 where thousand > 99) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+reset enable_material;
 reset enable_seqscan;
 reset enable_bitmapscan;
 
@@ -118,6 +144,22 @@ explain (costs off)
 
 select count(*) from tenk1 group by twenty;
 
+--test rescan behavior of gather merge
+set enable_material = false;
+
+explain (costs off)
+select * from
+  (select string4, count(unique2)
+   from tenk1 group by string4 order by string4) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+select * from
+  (select string4, count(unique2)
+   from tenk1 group by string4 order by string4) ss
+  right join (values (1),(2),(3)) v(x) on true;
+
+reset enable_material;
+
 reset enable_hashagg;
 
 -- gather merge test with a LIMIT
@@ -158,6 +200,17 @@ SET LOCAL force_parallel_mode = 1;
 SELECT make_record(x) FROM (SELECT generate_series(1, 5) x) ss ORDER BY x;
 ROLLBACK TO SAVEPOINT settings;
 DROP function make_record(n int);
+
+-- test the sanity of parallel query after the active role is dropped.
+drop role if exists regress_parallel_worker;
+create role regress_parallel_worker;
+set role regress_parallel_worker;
+reset session authorization;
+drop role regress_parallel_worker;
+set force_parallel_mode = 1;
+select count(*) from tenk1;
+reset force_parallel_mode;
+reset role;
 
 -- to increase the parallel query test coverage
 SAVEPOINT settings;

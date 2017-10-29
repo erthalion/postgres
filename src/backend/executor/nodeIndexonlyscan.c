@@ -25,6 +25,7 @@
  *						parallel index-only scan
  *		ExecIndexOnlyScanInitializeDSM	initialize DSM for parallel
  *						index-only scan
+ *		ExecIndexOnlyScanReInitializeDSM	reinitialize DSM for fresh scan
  *		ExecIndexOnlyScanInitializeWorker attach to DSM info in parallel worker
  */
 #include "postgres.h"
@@ -336,16 +337,6 @@ ExecIndexOnlyScan(PlanState *pstate)
 void
 ExecReScanIndexOnlyScan(IndexOnlyScanState *node)
 {
-	bool		reset_parallel_scan = true;
-
-	/*
-	 * If we are here to just update the scan keys, then don't reset parallel
-	 * scan. For detailed reason behind this look in the comments for
-	 * ExecReScanIndexScan.
-	 */
-	if (node->ioss_NumRuntimeKeys != 0 && !node->ioss_RuntimeKeysReady)
-		reset_parallel_scan = false;
-
 	/*
 	 * If we are doing runtime key calculations (ie, any of the index key
 	 * values weren't simple Consts), compute the new key values.  But first,
@@ -366,15 +357,10 @@ ExecReScanIndexOnlyScan(IndexOnlyScanState *node)
 
 	/* reset index scan */
 	if (node->ioss_ScanDesc)
-	{
-
 		index_rescan(node->ioss_ScanDesc,
 					 node->ioss_ScanKeys, node->ioss_NumScanKeys,
 					 node->ioss_OrderByKeys, node->ioss_NumOrderByKeys);
 
-		if (reset_parallel_scan && node->ioss_ScanDesc->parallel_scan)
-			index_parallelrescan(node->ioss_ScanDesc);
-	}
 	ExecScanReScan(&node->ss);
 }
 
@@ -618,7 +604,8 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 /* ----------------------------------------------------------------
  *		ExecIndexOnlyScanEstimate
  *
- *	estimates the space required to serialize index-only scan node.
+ *		Compute the amount of space we'll need in the parallel
+ *		query DSM, and inform pcxt->estimator about our needs.
  * ----------------------------------------------------------------
  */
 void
@@ -669,6 +656,19 @@ ExecIndexOnlyScanInitializeDSM(IndexOnlyScanState *node,
 		index_rescan(node->ioss_ScanDesc,
 					 node->ioss_ScanKeys, node->ioss_NumScanKeys,
 					 node->ioss_OrderByKeys, node->ioss_NumOrderByKeys);
+}
+
+/* ----------------------------------------------------------------
+ *		ExecIndexOnlyScanReInitializeDSM
+ *
+ *		Reset shared state before beginning a fresh scan.
+ * ----------------------------------------------------------------
+ */
+void
+ExecIndexOnlyScanReInitializeDSM(IndexOnlyScanState *node,
+								 ParallelContext *pcxt)
+{
+	index_parallelrescan(node->ioss_ScanDesc);
 }
 
 /* ----------------------------------------------------------------
