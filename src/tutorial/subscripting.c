@@ -118,10 +118,8 @@ Datum
 custom_subscripting_parse(PG_FUNCTION_ARGS)
 {
 	bool				isAssignment = PG_GETARG_BOOL(0);
-	RegProcedure		subsassign = PG_GETARG_OID(1);
-	RegProcedure		subsfetch = PG_GETARG_OID(2);
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(3);
-	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(4);
+	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
+	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
 
@@ -163,6 +161,5 @@ custom_subscripting_parse(PG_FUNCTION_ARGS)
 	sbsref->refupperindexpr = upperIndexpr;
 	sbsref->refelemtype = INT4OID;
 
-	sbsref->refevalfunc = (isAssignment) ? subsassign : subsfetch;
 	PG_RETURN_POINTER(sbsref);
 }

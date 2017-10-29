@@ -375,7 +375,12 @@ transformContainerSubscripts(ParseState *pstate,
 	 */
 	sbsref = (SubscriptingRef *) makeNode(SubscriptingRef);
 	if (assignFrom != NULL)
+	{
 		sbsref->refassgnexpr = (Expr *) assignFrom;
+		sbsref->refevalfunc = typsubsassign;
+	}
+	else
+		sbsref->refevalfunc = typsubsfetch;
 
 	sbsref->refcontainertype = containerType;
 	sbsref->refelemtype = elementType;
@@ -386,10 +391,8 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	return (Node *) OidFunctionCall5(typsubsparse,
+	return (Node *) OidFunctionCall3(typsubsparse,
 									 BoolGetDatum(assignFrom != NULL),
-									 ObjectIdGetDatum(typsubsassign),
-									 ObjectIdGetDatum(typsubsfetch),
 									 PointerGetDatum(sbsref),
 									 PointerGetDatum(pstate));
 }
