@@ -3,7 +3,7 @@ doc/src/sgml/ref/alter_publication.sgml
 PostgreSQL documentation
 -->
 
-<refentry id="SQL-ALTERPUBLICATION">
+<refentry id="sql-alterpublication">
  <indexterm zone="sql-alterpublication">
   <primary>ALTER PUBLICATION</primary>
  </indexterm>
@@ -87,10 +87,10 @@ ALTER PUBLICATION <replaceable class="parameter">name</replaceable> RENAME TO <r
     <term><replaceable class="parameter">table_name</replaceable></term>
     <listitem>
      <para>
-      Name of an existing table.  If <literal>ONLY</> is specified before the
-      table name, only that table is affected.  If <literal>ONLY</> is not
+      Name of an existing table.  If <literal>ONLY</literal> is specified before the
+      table name, only that table is affected.  If <literal>ONLY</literal> is not
       specified, the table and all its descendant tables (if any) are
-      affected.  Optionally, <literal>*</> can be specified after the table
+      affected.  Optionally, <literal>*</literal> can be specified after the table
       name to explicitly indicate that descendant tables are included.
      </para>
     </listitem>
@@ -101,7 +101,7 @@ ALTER PUBLICATION <replaceable class="parameter">name</replaceable> RENAME TO <r
     <listitem>
      <para>
       This clause alters publication parameters originally set by
-      <xref linkend="SQL-CREATEPUBLICATION">.  See there for more information.
+      <xref linkend="sql-createpublication">.  See there for more information.
      </para>
     </listitem>
    </varlistentry>
@@ -147,7 +147,7 @@ ALTER PUBLICATION mypublication ADD TABLE users, departments;
   <title>Compatibility</title>
 
   <para>
-   <command>ALTER PUBLICATION</command> is a <productname>PostgreSQL</>
+   <command>ALTER PUBLICATION</command> is a <productname>PostgreSQL</productname>
    extension.
   </para>
  </refsect1>

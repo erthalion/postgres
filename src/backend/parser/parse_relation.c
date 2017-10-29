@@ -1160,18 +1160,12 @@ parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockmode)
 		else
 		{
 			/*
-			 * An unqualified name might be a named ephemeral relation.
-			 */
-			if (get_visible_ENR_metadata(pstate->p_queryEnv, relation->relname))
-				rel = NULL;
-
-			/*
 			 * An unqualified name might have been meant as a reference to
 			 * some not-yet-in-scope CTE.  The bare "does not exist" message
 			 * has proven remarkably unhelpful for figuring out such problems,
 			 * so we take pains to offer a specific hint.
 			 */
-			else if (isFutureCTE(pstate, relation->relname))
+			if (isFutureCTE(pstate, relation->relname))
 				ereport(ERROR,
 						(errcode(ERRCODE_UNDEFINED_TABLE),
 						 errmsg("relation \"%s\" does not exist",
@@ -1502,7 +1496,8 @@ addRangeTableEntryForFunction(ParseState *pstate,
 						 parser_errposition(pstate, exprLocation(funcexpr))));
 		}
 
-		if (functypclass == TYPEFUNC_COMPOSITE)
+		if (functypclass == TYPEFUNC_COMPOSITE ||
+			functypclass == TYPEFUNC_COMPOSITE_DOMAIN)
 		{
 			/* Composite data type, e.g. a table's row type */
 			Assert(tupdesc);
@@ -2210,13 +2205,22 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 					varattno++;
 					Assert(varattno == te->resno);
 
+					/*
+					 * In scenarios where columns have been added to a view
+					 * since the outer query was originally parsed, there can
+					 * be more items in the subquery tlist than the outer
+					 * query expects.  We should ignore such extra column(s)
+					 * --- compare the behavior for composite-returning
+					 * functions, in the RTE_FUNCTION case below.
+					 */
+					if (!aliasp_item)
+						break;
+
 					if (colnames)
 					{
-						/* Assume there is one alias per target item */
 						char	   *label = strVal(lfirst(aliasp_item));
 
 						*colnames = lappend(*colnames, makeString(pstrdup(label)));
-						aliasp_item = lnext(aliasp_item);
 					}
 
 					if (colvars)
@@ -2232,6 +2236,8 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 
 						*colvars = lappend(*colvars, varnode);
 					}
+
+					aliasp_item = lnext(aliasp_item);
 				}
 			}
 			break;
@@ -2251,7 +2257,8 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 					functypclass = get_expr_result_type(rtfunc->funcexpr,
 														&funcrettype,
 														&tupdesc);
-					if (functypclass == TYPEFUNC_COMPOSITE)
+					if (functypclass == TYPEFUNC_COMPOSITE ||
+						functypclass == TYPEFUNC_COMPOSITE_DOMAIN)
 					{
 						/* Composite data type, e.g. a table's row type */
 						Assert(tupdesc);
@@ -2771,7 +2778,8 @@ get_rte_attribute_type(RangeTblEntry *rte, AttrNumber attnum,
 															&funcrettype,
 															&tupdesc);
 
-						if (functypclass == TYPEFUNC_COMPOSITE)
+						if (functypclass == TYPEFUNC_COMPOSITE ||
+							functypclass == TYPEFUNC_COMPOSITE_DOMAIN)
 						{
 							/* Composite data type, e.g. a table's row type */
 							Form_pg_attribute att_tup;
@@ -2972,14 +2980,11 @@ get_rte_attribute_is_dropped(RangeTblEntry *rte, AttrNumber attnum)
 					if (attnum > atts_done &&
 						attnum <= atts_done + rtfunc->funccolcount)
 					{
-						TypeFuncClass functypclass;
-						Oid			funcrettype;
 						TupleDesc	tupdesc;
 
-						functypclass = get_expr_result_type(rtfunc->funcexpr,
-															&funcrettype,
-															&tupdesc);
-						if (functypclass == TYPEFUNC_COMPOSITE)
+						tupdesc = get_expr_result_tupdesc(rtfunc->funcexpr,
+														  true);
+						if (tupdesc)
 						{
 							/* Composite data type, e.g. a table's row type */
 							Form_pg_attribute att_tup;

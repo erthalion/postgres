@@ -507,6 +507,8 @@ typedef struct EState
 	bool	   *es_epqTupleSet; /* true if EPQ tuple is provided */
 	bool	   *es_epqScanDone; /* true if EPQ tuple has been fetched */
 
+	bool		es_use_parallel_mode; /* can we use parallel workers? */
+
 	/* The per-query shared memory area to use for parallel execution. */
 	struct dsa_area *es_query_dsa;
 } EState;
@@ -1830,10 +1832,8 @@ typedef struct AggState
 	int			num_hashes;
 	AggStatePerHash perhash;
 	AggStatePerGroup *hash_pergroup;	/* array of per-group pointers */
-	/* support for evaluation of agg inputs */
-	TupleTableSlot *evalslot;	/* slot for agg inputs */
-	ProjectionInfo *evalproj;	/* projection machinery */
-	TupleDesc	evaldesc;		/* descriptor of input tuples */
+	/* support for evaluation of agg input expressions: */
+	ProjectionInfo *combinedproj;	/* projection machinery */
 } AggState;
 
 /* ----------------

@@ -3,7 +3,7 @@ doc/src/sgml/ref/create_policy.sgml
 PostgreSQL documentation
 -->
 
-<refentry id="SQL-CREATEPOLICY">
+<refentry id="sql-createpolicy">
  <indexterm zone="sql-createpolicy">
   <primary>CREATE POLICY</primary>
  </indexterm>
@@ -88,7 +88,7 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
 
   <para>
    If row-level security is enabled for a table, but no applicable policies
-   exist, a <quote>default deny</> policy is assumed, so that no rows will
+   exist, a <quote>default deny</quote> policy is assumed, so that no rows will
    be visible or updatable.
   </para>
  </refsect1>
@@ -188,9 +188,9 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
       to queries that refer to the table if row level security is enabled.
       Rows for which the expression returns true will be visible.  Any
       rows for which the expression returns false or null will not be
-      visible to the user (in a <command>SELECT</>), and will not be
-      available for modification (in an <command>UPDATE</>
-      or <command>DELETE</>).  Such rows are silently suppressed; no error
+      visible to the user (in a <command>SELECT</command>), and will not be
+      available for modification (in an <command>UPDATE</command>
+      or <command>DELETE</command>).  Such rows are silently suppressed; no error
       is reported.
      </para>
     </listitem>
@@ -222,8 +222,8 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
 
    <variablelist>
 
-     <varlistentry id="SQL-CREATEPOLICY-ALL">
-      <term><literal>ALL</></term>
+     <varlistentry id="sql-createpolicy-all">
+      <term><literal>ALL</literal></term>
       <listitem>
        <para>
          Using <literal>ALL</literal> for a policy means that it will apply
@@ -253,8 +253,8 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
       </listitem>
      </varlistentry>
 
-     <varlistentry id="SQL-CREATEPOLICY-SELECT">
-      <term><literal>SELECT</></term>
+     <varlistentry id="sql-createpolicy-select">
+      <term><literal>SELECT</literal></term>
       <listitem>
        <para>
          Using <literal>SELECT</literal> for a policy means that it will apply
@@ -273,8 +273,8 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
       </listitem>
      </varlistentry>
 
-     <varlistentry id="SQL-CREATEPOLICY-INSERT">
-      <term><literal>INSERT</></term>
+     <varlistentry id="sql-createpolicy-insert">
+      <term><literal>INSERT</literal></term>
       <listitem>
        <para>
          Using <literal>INSERT</literal> for a policy means that it will apply
@@ -294,8 +294,8 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
       </listitem>
      </varlistentry>
 
-     <varlistentry id="SQL-CREATEPOLICY-UPDATE">
-      <term><literal>UPDATE</></term>
+     <varlistentry id="sql-createpolicy-update">
+      <term><literal>UPDATE</literal></term>
       <listitem>
        <para>
          Using <literal>UPDATE</literal> for a policy means that it will apply
@@ -347,14 +347,14 @@ CREATE POLICY <replaceable class="parameter">name</replaceable> ON <replaceable 
          Note, however, that unlike a standalone <literal>UPDATE</literal>
          command, if the existing row does not pass the
          <literal>USING</literal> expressions, an error will be thrown (the
-         <literal>UPDATE</literal> path will <emphasis>never</> be silently
+         <literal>UPDATE</literal> path will <emphasis>never</emphasis> be silently
          avoided).
        </para>
       </listitem>
      </varlistentry>
 
-     <varlistentry id="SQL-CREATEPOLICY-DELETE">
-      <term><literal>DELETE</></term>
+     <varlistentry id="sql-createpolicy-delete">
+      <term><literal>DELETE</literal></term>
       <listitem>
        <para>
          Using <literal>DELETE</literal> for a policy means that it will apply

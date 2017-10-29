@@ -3,7 +3,7 @@ doc/src/sgml/ref/drop_database.sgml
 PostgreSQL documentation
 -->
 
-<refentry id="SQL-DROPDATABASE">
+<refentry id="sql-dropdatabase">
  <indexterm zone="sql-dropdatabase">
   <primary>DROP DATABASE</primary>
  </indexterm>
@@ -71,7 +71,7 @@ DROP DATABASE [ IF EXISTS ] <replaceable class="parameter">name</replaceable>
   <title>Notes</title>
 
    <para>
-    <command>DROP DATABASE</> cannot be executed inside a transaction
+    <command>DROP DATABASE</command> cannot be executed inside a transaction
     block.
    </para>
 

@@ -3,7 +3,7 @@ doc/src/sgml/ref/commit_prepared.sgml
 PostgreSQL documentation
 -->
 
-<refentry id="SQL-COMMIT-PREPARED">
+<refentry id="sql-commit-prepared">
  <indexterm zone="sql-commit-prepared">
   <primary>COMMIT PREPARED</primary>
  </indexterm>
@@ -75,7 +75,7 @@ COMMIT PREPARED <replaceable class="parameter">transaction_id</replaceable>
   <title id="sql-commit-prepared-examples-title">Examples</title>
   <para>
    Commit the transaction identified by the transaction
-   identifier <literal>foobar</>:
+   identifier <literal>foobar</literal>:
 
 <programlisting>
 COMMIT PREPARED 'foobar';
