@@ -5028,7 +5028,6 @@ jsonb_subscript_assign(PG_FUNCTION_ARGS)
 Datum
 jsonb_subscript_parse(PG_FUNCTION_ARGS)
 {
-	bool				isAssignment = PG_GETARG_BOOL(0);
 	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
 	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
 	List			   *upperIndexpr = NIL;
