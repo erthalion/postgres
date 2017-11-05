@@ -330,6 +330,21 @@ TypeCreate(Oid newTypeOid,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("fixed-size types must have storage PLAIN")));
 
+	/* Prevent incomplete subscripting procedures */
+	if (OidIsValid(subscriptingParseProcedure) &&
+			(!OidIsValid(subscriptingAssignProcedure) ||
+			 !OidIsValid(subscriptingFetchProcedure)))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("for custom subscripting logic all parse,fetch,assign procedures must be provided")));
+
+	if (!OidIsValid(subscriptingParseProcedure) &&
+			(OidIsValid(subscriptingAssignProcedure) ||
+			 OidIsValid(subscriptingFetchProcedure)))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("for custom subscripting logic all parse,fetch,assign procedures must be provided")));
+
 	/*
 	 * initialize arrays needed for heap_form_tuple or heap_modify_tuple
 	 */
