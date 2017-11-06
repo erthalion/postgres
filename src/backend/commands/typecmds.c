@@ -172,9 +172,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 	Oid			resulttype;
 	ListCell   *pl;
 	ObjectAddress address;
-	Oid			subscriptingParseOid,
-				subscriptingAssignOid,
-				subscriptingFetchOid = InvalidOid;
+	Oid			subscriptingParseOid = InvalidOid;
+	Oid			subscriptingAssignOid = InvalidOid;
+	Oid			subscriptingFetchOid = InvalidOid;
 
 	/*
 	 * As of Postgres 8.4, we require superuser privilege to create a base

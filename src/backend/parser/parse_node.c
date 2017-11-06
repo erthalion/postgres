@@ -312,7 +312,9 @@ transformContainerSubscripts(ParseState *pstate,
 	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
-	RegProcedure		typsubsparse, typsubsassign, typsubsfetch = InvalidOid;
+	RegProcedure		typsubsparse = InvalidOid;
+	RegProcedure		typsubsassign = InvalidOid;
+	RegProcedure		typsubsfetch = InvalidOid;
 	get_typsubsprocs(containerType, &typsubsparse, &typsubsassign, &typsubsfetch);
 
 	if (!OidIsValid(typsubsparse))
