@@ -422,6 +422,14 @@ foreign_expr_walker(Node *node,
 					return false;
 
 				/*
+				 * If function used by the subscripting expression is not
+				 * shippable, it can't be sent to remote because it might have
+				 * incompatible semantics on remote side.
+				 */
+				if (!is_shippable(ar->refevalfunc, ProcedureRelationId, fpinfo))
+					return false;
+
+				/*
 				 * Array subscripting should yield same collation as input,
 				 * but for safety use same logic as for function nodes.
 				 */
