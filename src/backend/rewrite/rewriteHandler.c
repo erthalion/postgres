@@ -1051,11 +1051,9 @@ process_matched_tle(TargetEntry *src_tle,
 	}
 	else if (IsA(src_expr, SubscriptingRef))
 	{
-		NodeTag sbstag = nodeTag(src_expr);
-		Size nodeSize = sizeof(SubscriptingRef);
-		SubscriptingRef *sbsref = (SubscriptingRef *) newNode(nodeSize, sbstag);
+		SubscriptingRef *sbsref = makeNode(SubscriptingRef);
 
-		memcpy(sbsref, src_expr, nodeSize);
+		memcpy(sbsref, src_expr, sizeof(SubscriptingRef));
 		sbsref->refexpr = (Expr *) prior_expr;
 		newexpr = (Node *) sbsref;
 	}
