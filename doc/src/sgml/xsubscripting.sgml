@@ -7,10 +7,10 @@
     <primary>custom subscripting</primary>
   </indexterm>
   <para>
-  When you define a new base type, you can also specify a custom procedure
-  to handle subscripting expressions. It should contain logic for verification
-  and decide which function must be used for evaluation of this expression.
-  For instance:
+  When you define a new base type, you can also specify a custom procedures to
+  handle subscripting expressions. They must contain logic for verification and
+  evaluation of this expression, i.e. fetching or updating some data in this
+  data type. For instance:
 </para>
 <programlisting><![CDATA[
 typedef struct Custom
@@ -19,50 +19,56 @@ typedef struct Custom
     int second;
 }   Custom;
 
-Datum
-custom_subscripting_extract(PG_FUNCTION_ARGS)
-{
-    Custom                      *result = (Custom *) sbsdata->containerSource;
-    ExprEvalStep                *step = (ExprEvalStep *) PG_GETARG_POINTER(1);
+PG_FUNCTION_INFO_V1(custom_subscripting_parse);
+PG_FUNCTION_INFO_V1(custom_subscripting_assign);
+PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
 
-    // Some assign logic based on sbsdata
+Datum
+custom_subscripting_parse(PG_FUNCTION_ARGS)
+{
+	bool				isAssignment = PG_GETARG_BOOL(0);
+	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
+	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
+
+    // Some verifications or type coersion
+	PG_RETURN_POINTER(sbsref);
 }
 
 Datum
 custom_subscripting_assign(PG_FUNCTION_ARGS)
 {
-    Custom                  *containerSource = (Custom *) PG_GETARG_DATUM(0);
-    ExprEvalStep            *step = (ExprEvalStep *) PG_GETARG_POINTER(1);
+	Custom						*containerSource = (Custom *) PG_GETARG_DATUM(0);
+	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
 
     // Some extraction logic based on sbsdata
+	PG_RETURN_POINTER(containerSource);
 }
 
-PG_FUNCTION_INFO_V1(custom_subscripting);
-
 Datum
-custom_subscript_parse(PG_FUNCTION_ARGS)
+custom_subscripting_fetch(PG_FUNCTION_ARGS)
 {
-    bool                isAssignment = PG_GETARG_BOOL(0);
-    SubscriptingRef    *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(0);
-    Datum               assign_proc = CStringGetTextDatum("custom_subscripting_assign");
-    Datum               extract_proc = CStringGetTextDatum("custom_subscripting_extract");
+	Custom					*containerSource = (Custom *) PG_GETARG_DATUM(0);
+	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
 
-    // Some verifications or type coersion
-
-    if (isAssignment)
-        sbsref->refevalfunc = DirectFunctionCall1(to_regproc, assign_proc);
-    else
-        sbsref->refevalfunc = DirectFunctionCall1(to_regproc, extract_proc);
-
-    PG_RETURN_POINTER(sbsref);
+    // Some fetch logic based on sbsdata
 }]]>
 </programlisting>
 
 <para>
-    Then you can define a subscripting procedure and a custom data type:
+    Then you can define a subscripting procedures and a custom data type:
 </para>
 <programlisting>
-CREATE FUNCTION custom_subscript_parse(internal)
+CREATE FUNCTION custom_subscripting_parse(internal)
+    RETURNS internal
+    AS '<replaceable>filename</replaceable>'
+    LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION custom_subscripting_assign(internal)
+    RETURNS internal
+    AS '<replaceable>filename</replaceable>'
+    LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION custom_subscripting_fetch(internal)
     RETURNS internal
     AS '<replaceable>filename</replaceable>'
     LANGUAGE C IMMUTABLE STRICT;
@@ -71,7 +77,9 @@ CREATE TYPE custom (
    internallength = 4,
    input = custom_in,
    output = custom_out,
-   subscripting = custom_subscript_parse
+   subscripting_parse = custom_subscripting_parse,
+   subscripting_fetch = custom_subscripting_fetch,
+   subscripting_assign = custom_subscripting_assign
 );
 </programlisting>
 

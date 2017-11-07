@@ -54,7 +54,9 @@ CREATE TYPE <replaceable class="parameter">name</replaceable> (
     [ , ELEMENT = <replaceable class="parameter">element</replaceable> ]
     [ , DELIMITER = <replaceable class="parameter">delimiter</replaceable> ]
     [ , COLLATABLE = <replaceable class="parameter">collatable</replaceable> ]
-    [ , SUBSCRIPTING = <replaceable class="parameter">subscripting_function</replaceable> ]
+    [ , SUBSCRIPTING_PARSE = <replaceable class="parameter">subscripting_parse_function</replaceable> ]
+    [ , SUBSCRIPTING_ASSIGN = <replaceable class="parameter">subscripting_assign_function</replaceable> ]
+    [ , SUBSCRIPTING_FETCH = <replaceable class="parameter">subscripting_fetch_function</replaceable> ]
 )
 
 CREATE TYPE <replaceable class="parameter">name</replaceable>
@@ -196,7 +198,9 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    <replaceable class="parameter">type_modifier_input_function</replaceable>,
    <replaceable class="parameter">type_modifier_output_function</replaceable> and
    <replaceable class="parameter">analyze_function</replaceable>,
-   <replaceable class="parameter">subscripting_function</replaceable>
+   <replaceable class="parameter">subscripting_parse_function</replaceable>
+   <replaceable class="parameter">subscripting_assign_function</replaceable>
+   <replaceable class="parameter">subscripting_fetch_function</replaceable>
    are optional.  Generally these functions have to be coded in C
    or another low-level language.
   </para>
@@ -456,18 +460,26 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
 
   <para>
    The optional
-   <replaceable class="parameter">subscripting_function</replaceable>
+   <replaceable class="parameter">subscripting_parse_function</replaceable>,
+   <replaceable class="parameter">subscripting_assign_function</replaceable>
+   <replaceable class="parameter">subscripting_fetch_function</replaceable>
    contains type-specific logic for subscripting of the data type.
-   By default, there is no such function, which means that the data
-   type doesn't support subscripting. The subscripting function must be
+   By default, there are no such functions provided, which means that the data
+   type doesn't support subscripting. The subscripting functions must be
    declared to take a single argument of type <type>internal</type>, and return
    a <type>internal</type> result. There are two examples of implementation for
-   subscripting function in case of array
-   (<replaceable class="parameter">array_subscripting</replaceable>)
+   subscripting functions in case of array
+   (<replaceable class="parameter">array_subscripting_parse</replaceable>,
+    <replaceable class="parameter">array_subscripting_assign</replaceable>,
+    <replaceable class="parameter">array_subscripting_fetch</replaceable>)
    and jsonb
-   (<replaceable class="parameter">jsonb_subscripting</replaceable>)
+   (<replaceable class="parameter">jsonb_subscripting_parse</replaceable>,
+    <replaceable class="parameter">jsonb_subscripting_assign</replaceable>,
+    <replaceable class="parameter">jsonb_subscripting_fetch</replaceable>)
    types in <filename>src/backend/utils/adt/arrayfuncs.c</filename> and
    <filename>src/backend/utils/adt/jsonfuncs.c</filename> corresponding.
+   Note, that it is not allowed to have just some of them - if the data type
+   supports subscripting, all of them must be provided.
   </para>
   </refsect2>
 
@@ -786,11 +798,31 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    </varlistentry>
 
    <varlistentry>
-    <term><replaceable class="parameter">subscripting_function</replaceable></term>
+    <term><replaceable class="parameter">subscripting_parse_function</replaceable></term>
+    <listitem>
+     <para>
+      The name of a function that contains type-specific subscripting parsing
+      and validation logic for the data type.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><replaceable class="parameter">subscripting_assign_function</replaceable></term>
     <listitem>
      <para>
       The name of a function that contains type-specific subscripting logic for
-      the data type.
+      fetching an element from the data type.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><replaceable class="parameter">subscripting_fetch_function</replaceable></term>
+    <listitem>
+     <para>
+      The name of a function that contains type-specific subscripting logic for
+      updating an element in the data type.
      </para>
     </listitem>
    </varlistentry>

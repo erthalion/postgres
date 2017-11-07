@@ -26,6 +26,7 @@ typedef struct Custom
 }	Custom;
 
 PG_FUNCTION_INFO_V1(custom_in);
+PG_FUNCTION_INFO_V1(custom_out);
 PG_FUNCTION_INFO_V1(custom_subscripting_parse);
 PG_FUNCTION_INFO_V1(custom_subscripting_assign);
 PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
@@ -54,8 +55,6 @@ custom_in(PG_FUNCTION_ARGS)
 	result->second = secondValue;
 	PG_RETURN_POINTER(result);
 }
-
-PG_FUNCTION_INFO_V1(custom_out);
 
 Datum
 custom_out(PG_FUNCTION_ARGS)
