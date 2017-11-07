@@ -460,14 +460,14 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    contains type-specific logic for subscripting of the data type.
    By default, there is no such function, which means that the data
    type doesn't support subscripting. The subscripting function must be
-   declared to take a single argument of type <type>internal</>, and return
-   a <type>internal</> result. There are two examples of implementation for
+   declared to take a single argument of type <type>internal</type>, and return
+   a <type>internal</type> result. There are two examples of implementation for
    subscripting function in case of array
    (<replaceable class="parameter">array_subscripting</replaceable>)
    and jsonb
    (<replaceable class="parameter">jsonb_subscripting</replaceable>)
-   types in <filename>src/backend/utils/adt/arrayfuncs.c</> and
-   <filename>src/backend/utils/adt/jsonfuncs.c</> corresponding.
+   types in <filename>src/backend/utils/adt/arrayfuncs.c</filename> and
+   <filename>src/backend/utils/adt/jsonfuncs.c</filename> corresponding.
   </para>
   </refsect2>
 
