@@ -26,29 +26,29 @@ PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
 Datum
 custom_subscripting_parse(PG_FUNCTION_ARGS)
 {
-	bool				isAssignment = PG_GETARG_BOOL(0);
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
+    bool                isAssignment = PG_GETARG_BOOL(0);
+    SubscriptingRef     *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
+    ParseState          *pstate = (ParseState *) PG_GETARG_POINTER(2);
 
     // Some verifications or type coersion
-	PG_RETURN_POINTER(sbsref);
+    PG_RETURN_POINTER(sbsref);
 }
 
 Datum
 custom_subscripting_assign(PG_FUNCTION_ARGS)
 {
-	Custom						*containerSource = (Custom *) PG_GETARG_DATUM(0);
-	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
+    Custom          *containerSource = (Custom *) PG_GETARG_DATUM(0);
+    ExprEvalStep    *step = (ExprEvalStep *) PG_GETARG_POINTER(1);
 
     // Some extraction logic based on sbsdata
-	PG_RETURN_POINTER(containerSource);
+    PG_RETURN_POINTER(containerSource);
 }
 
 Datum
 custom_subscripting_fetch(PG_FUNCTION_ARGS)
 {
-	Custom					*containerSource = (Custom *) PG_GETARG_DATUM(0);
-	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
+    Custom          *containerSource = (Custom *) PG_GETARG_DATUM(0);
+    ExprEvalStep    *step = (ExprEvalStep *) PG_GETARG_POINTER(1);
 
     // Some fetch logic based on sbsdata
 }]]>
