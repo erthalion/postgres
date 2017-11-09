@@ -155,6 +155,26 @@ custom_subscripting_parse(PG_FUNCTION_ARGS)
 					 parser_errposition(pstate, exprLocation(subexpr))));
 
 		upperIndexpr = lappend(upperIndexpr, subexpr);
+
+		if (isAssignment)
+		{
+			Node *assignExpr = (Node *) sbsref->refassgnexpr;
+			Node *new_from;
+
+			new_from = coerce_to_target_type(pstate,
+					assignExpr, exprType(assignExpr),
+					INT4OID, -1,
+					COERCION_ASSIGNMENT,
+					COERCE_IMPLICIT_CAST,
+					-1);
+			if (new_from == NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
+						 errmsg("custom assignment requires int type"),
+						 errhint("You will need to rewrite or cast the expression."),
+						 parser_errposition(pstate, exprLocation(assignExpr))));
+			sbsref->refassgnexpr = (Expr *)new_from;
+		}
 	}
 
 	sbsref->refupperindexpr = upperIndexpr;
