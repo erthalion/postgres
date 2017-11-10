@@ -4985,13 +4985,11 @@ jsonb_subscript_assign(PG_FUNCTION_ARGS)
 	bool						eisnull = sbstate->replacenull;
 
 	/*
-	 * For an assignment to a fixed-length array type, both the original
-	 * array and the value to be assigned into it must be non-NULL, else
-	 * we punt and return the original array.
+	 * both the original jsonb and the value to be assigned into it must be
+	 * non-NULL, else we punt and return the original array.
 	 */
-	if (sbstate->refattrlength > 0)	/* fixed-length array? */
-		if (eisnull || *is_null)
-			return containerSource;
+	if (eisnull || *is_null)
+		return containerSource;
 
 	/*
 	 * For assignment to varlena arrays, we handle a NULL original array
