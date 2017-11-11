@@ -1147,7 +1147,7 @@ to_jsonb(PG_FUNCTION_ARGS)
 {
 	Datum		val = PG_GETARG_DATUM(0);
 	Oid			val_type = get_fn_expr_argtype(fcinfo->flinfo, 0);
-	JsonbValue *res = to_jsonb_worker(val, val_type);
+	JsonbValue *res = to_jsonb_worker(val, val_type, false);
 	PG_RETURN_POINTER(JsonbValueToJsonb(res));
 }
 
@@ -1157,7 +1157,7 @@ to_jsonb(PG_FUNCTION_ARGS)
  * jsonb subscripting)
  */
 JsonbValue *
-to_jsonb_worker(Datum source, Oid source_type)
+to_jsonb_worker(Datum source, Oid source_type, bool is_null)
 {
 	JsonbInState		result;
 	JsonbTypeCategory	tcategory;
@@ -1173,7 +1173,7 @@ to_jsonb_worker(Datum source, Oid source_type)
 
 	memset(&result, 0, sizeof(JsonbInState));
 
-	datum_to_jsonb(source, false, &result, tcategory, outfuncoid, false);
+	datum_to_jsonb(source, is_null, &result, tcategory, outfuncoid, false);
 	return result.res;
 }
 

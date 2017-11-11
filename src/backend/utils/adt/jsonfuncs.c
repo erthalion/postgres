@@ -466,7 +466,7 @@ static JsonbValue *findJsonbValueFromContainerLen(JsonbContainer *container,
 static JsonbValue *IteratorConcat(JsonbIterator **it1, JsonbIterator **it2,
 			   JsonbParseState **state);
 static Datum jsonb_set_element(Datum datum, Datum *path, int path_len,
-							   Datum sourceData, Oid source_type);
+							   Datum sourceData, Oid source_type, bool is_null);
 static Datum jsonb_get_element(Jsonb *jb, Datum *path, int npath,
 							   bool *isnull, bool as_text);
 static JsonbValue *setPath(JsonbIterator **it, Datum *path_elems,
@@ -1581,7 +1581,7 @@ jsonb_get_element(Jsonb *jb, Datum *path, int npath, bool *isnull, bool as_text)
 
 Datum
 jsonb_set_element(Datum jsonbdatum, Datum *path, int path_len,
-				  Datum sourceData, Oid source_type)
+				  Datum sourceData, Oid source_type, bool is_null)
 {
 	Jsonb			   *jb = DatumGetJsonbP(jsonbdatum);
 	JsonbValue		   *newval,
@@ -1590,7 +1590,7 @@ jsonb_set_element(Datum jsonbdatum, Datum *path, int path_len,
 	JsonbIterator 	   *it;
 	bool			   *path_nulls = palloc0(path_len * sizeof(bool));
 
-	newval = to_jsonb_worker(sourceData, source_type);
+	newval = to_jsonb_worker(sourceData, source_type, is_null);
 
 	if (newval->type == jbvArray && newval->val.array.rawScalar)
 		*newval = newval->val.array.elems[0];
@@ -4985,30 +4985,18 @@ jsonb_subscript_assign(PG_FUNCTION_ARGS)
 	bool						eisnull = sbstate->replacenull;
 
 	/*
-	 * both the original jsonb and the value to be assigned into it must be
-	 * non-NULL, else we punt and return the original array.
-	 */
-	if (eisnull || *is_null)
-		return containerSource;
-
-	/*
-	 * For assignment to varlena arrays, we handle a NULL original array
-	 * by substituting an empty (zero-dimensional) array; insertion of the
-	 * new element will result in a singleton array value.  It does not
-	 * matter whether the new element is NULL.
+	 * the original jsonb must be non-NULL, else we punt and return the
+	 * original array.
 	 */
 	if (*is_null)
-	{
-		containerSource =
-			PointerGetDatum(construct_empty_array(sbstate->refelemtype));
-		*is_null = false;
-	}
+		return containerSource;
 
 	return jsonb_set_element(containerSource,
 							 sbstate->upper,
 							 sbstate->numupper,
 							 sbstate->replacevalue,
-							 sbstate->refelemtype);
+							 sbstate->refelemtype,
+							 sbstate->replacenull);
 }
 
 /*

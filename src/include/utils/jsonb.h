@@ -380,6 +380,6 @@ extern char *JsonbToCString(StringInfo out, JsonbContainer *in,
 extern char *JsonbToCStringIndent(StringInfo out, JsonbContainer *in,
 					 int estimated_len);
 
-extern JsonbValue *to_jsonb_worker(Datum source, Oid source_type);
+extern JsonbValue *to_jsonb_worker(Datum source, Oid source_type, bool is_null);
 
 #endif							/* __JSONB_H__ */
