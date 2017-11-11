@@ -196,10 +196,10 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    <replaceable class="parameter">receive_function</replaceable>,
    <replaceable class="parameter">send_function</replaceable>,
    <replaceable class="parameter">type_modifier_input_function</replaceable>,
-   <replaceable class="parameter">type_modifier_output_function</replaceable> and
+   <replaceable class="parameter">type_modifier_output_function</replaceable>,
    <replaceable class="parameter">analyze_function</replaceable>,
-   <replaceable class="parameter">subscripting_parse_function</replaceable>
-   <replaceable class="parameter">subscripting_assign_function</replaceable>
+   <replaceable class="parameter">subscripting_parse_function</replaceable>,
+   <replaceable class="parameter">subscripting_assign_function</replaceable> and
    <replaceable class="parameter">subscripting_fetch_function</replaceable>
    are optional.  Generally these functions have to be coded in C
    or another low-level language.
@@ -461,9 +461,9 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
   <para>
    The optional
    <replaceable class="parameter">subscripting_parse_function</replaceable>,
-   <replaceable class="parameter">subscripting_assign_function</replaceable>
+   <replaceable class="parameter">subscripting_assign_function</replaceable>,
    <replaceable class="parameter">subscripting_fetch_function</replaceable>
-   contains type-specific logic for subscripting of the data type.
+   contain type-specific logic for subscripting of the data type.
    By default, there are no such functions provided, which means that the data
    type doesn't support subscripting. The subscripting functions must be
    declared to take a single argument of type <type>internal</type>, and return
@@ -812,7 +812,7 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
     <listitem>
      <para>
       The name of a function that contains type-specific subscripting logic for
-      fetching an element from the data type.
+      updating an element in the data type.
      </para>
     </listitem>
    </varlistentry>
@@ -822,7 +822,7 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
     <listitem>
      <para>
       The name of a function that contains type-specific subscripting logic for
-      updating an element in the data type.
+      fetching an element from the data type.
      </para>
     </listitem>
    </varlistentry>
