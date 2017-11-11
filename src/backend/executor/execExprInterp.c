@@ -2662,7 +2662,7 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 		if (arefstate->isassignment)
 			ereport(ERROR,
 					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-					 errmsg("array subscript in assignment must not be null")));
+					 errmsg("subscript in assignment must not be null")));
 		*op->resnull = true;
 		return false;
 	}

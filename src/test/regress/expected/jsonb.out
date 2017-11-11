@@ -4114,6 +4114,12 @@ select ('123'::jsonb)[0];
  
 (1 row)
 
+select ('123'::jsonb)[NULL];
+ jsonb 
+-------
+ 
+(1 row)
+
 select ('{"a": 1}'::jsonb)['a'];
  jsonb 
 -------
@@ -4127,6 +4133,12 @@ select ('{"a": 1}'::jsonb)[0];
 (1 row)
 
 select ('{"a": 1}'::jsonb)['not_exist'];
+ jsonb 
+-------
+ 
+(1 row)
+
+select ('{"a": 1}'::jsonb)[NULL];
  jsonb 
 -------
  
@@ -4308,6 +4320,17 @@ select * from test_jsonb_subscript where test_json['key'] = '"wrong_value"';
  id | test_json 
 ----+-----------
 (0 rows)
+
+-- NULL
+update test_jsonb_subscript set test_json[NULL] = 1;
+ERROR:  subscript in assignment must not be null
+update test_jsonb_subscript set test_json['another_key'] = NULL;
+select * from test_jsonb_subscript;
+ id |                       test_json                       
+----+-------------------------------------------------------
+  1 | {"a": [1, 2, 3], "another_key": null}
+  2 | {"a": [1, 2, 3], "key": "value", "another_key": null}
+(2 rows)
 
 -- jsonb to tsvector
 select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb);

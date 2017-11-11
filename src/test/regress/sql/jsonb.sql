@@ -1083,9 +1083,11 @@ select jsonb_insert('{"a": {"b": "value"}}', '{a, b}', '"new_value"', true);
 -- jsonb subscript
 select ('123'::jsonb)['a'];
 select ('123'::jsonb)[0];
+select ('123'::jsonb)[NULL];
 select ('{"a": 1}'::jsonb)['a'];
 select ('{"a": 1}'::jsonb)[0];
 select ('{"a": 1}'::jsonb)['not_exist'];
+select ('{"a": 1}'::jsonb)[NULL];
 select ('[1, "2", null]'::jsonb)['a'];
 select ('[1, "2", null]'::jsonb)[0];
 select ('[1, "2", null]'::jsonb)['1'];
@@ -1138,6 +1140,11 @@ select * from test_jsonb_subscript;
 select * from test_jsonb_subscript where test_json['key'] = '"value"';
 select * from test_jsonb_subscript where test_json['key_doesnt_exists'] = '"value"';
 select * from test_jsonb_subscript where test_json['key'] = '"wrong_value"';
+
+-- NULL
+update test_jsonb_subscript set test_json[NULL] = 1;
+update test_jsonb_subscript set test_json['another_key'] = NULL;
+select * from test_jsonb_subscript;
 
 -- jsonb to tsvector
 select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb);

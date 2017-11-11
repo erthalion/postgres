@@ -4982,7 +4982,6 @@ jsonb_subscript_assign(PG_FUNCTION_ARGS)
 
 	SubscriptingRefState		*sbstate = step->d.sbsref.state;
 	bool						*is_null = step->resnull;
-	bool						eisnull = sbstate->replacenull;
 
 	/*
 	 * the original jsonb must be non-NULL, else we punt and return the
