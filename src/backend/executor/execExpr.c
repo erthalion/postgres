@@ -2350,9 +2350,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		fmgr_info(aref->refnestedfunc, nested_finfo);
 	}
 
-	scratch->d.sbsref.eval_finfo = eval_finfo;
-	scratch->d.sbsref.nested_finfo = nested_finfo;
-
 	/* Fill constant fields of SubscriptingRefState */
 	arefstate->isassignment = isAssignment;
 	arefstate->refelemtype = aref->refelemtype;
@@ -2376,9 +2373,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		scratch->opcode = EEOP_JUMP_IF_NULL;
 		scratch->d.jump.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
-
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
 
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
@@ -2425,9 +2419,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		scratch->d.sbsref_subscript.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
 
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
-
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
 		i++;
@@ -2461,9 +2452,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		scratch->d.sbsref_subscript.isupper = false;
 		scratch->d.sbsref_subscript.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
-
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
 
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
@@ -2499,10 +2487,9 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		{
 			scratch->opcode = EEOP_SBSREF_OLD;
 			scratch->d.sbsref.state = arefstate;
-			ExprEvalPushStep(state, scratch);
-
 			scratch->d.sbsref.eval_finfo = eval_finfo;
 			scratch->d.sbsref.nested_finfo = nested_finfo;
+			ExprEvalPushStep(state, scratch);
 		}
 
 		/* SBSREF_OLD puts extracted value into prevvalue/prevnull */
@@ -2521,10 +2508,9 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		/* and perform the assignment */
 		scratch->opcode = EEOP_SBSREF_ASSIGN;
 		scratch->d.sbsref.state = arefstate;
-		ExprEvalPushStep(state, scratch);
-
 		scratch->d.sbsref.eval_finfo = eval_finfo;
 		scratch->d.sbsref.nested_finfo = nested_finfo;
+		ExprEvalPushStep(state, scratch);
 
 	}
 	else
@@ -2532,10 +2518,9 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		/* array fetch is much simpler */
 		scratch->opcode = EEOP_SBSREF_FETCH;
 		scratch->d.sbsref.state = arefstate;
-		ExprEvalPushStep(state, scratch);
-
 		scratch->d.sbsref.eval_finfo = eval_finfo;
 		scratch->d.sbsref.nested_finfo = nested_finfo;
+		ExprEvalPushStep(state, scratch);
 
 	}
 
