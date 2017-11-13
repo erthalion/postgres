@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "access/hash.h"
 #include "access/htup_details.h"
 #include "access/multixact.h"
 #include "access/nbtree.h"
@@ -227,7 +228,7 @@ do { \
 typedef struct opclasscacheent
 {
 	Oid			opclassoid;		/* lookup key: OID of opclass */
-	bool		valid;			/* set TRUE after successful fill-in */
+	bool		valid;			/* set true after successful fill-in */
 	StrategyNumber numSupport;	/* max # of support procs (from pg_am) */
 	Oid			opcfamily;		/* OID of opclass's family */
 	Oid			opcintype;		/* OID of opclass's declared input type */
@@ -833,6 +834,7 @@ RelationBuildPartitionKey(Relation relation)
 	Datum		datum;
 	MemoryContext partkeycxt,
 				oldcxt;
+	int16		procnum;
 
 	tuple = SearchSysCache1(PARTRELID,
 							ObjectIdGetDatum(RelationGetRelid(relation)));
@@ -912,6 +914,10 @@ RelationBuildPartitionKey(Relation relation)
 	key->parttypalign = (char *) palloc0(key->partnatts * sizeof(char));
 	key->parttypcoll = (Oid *) palloc0(key->partnatts * sizeof(Oid));
 
+	/* For the hash partitioning, an extended hash function will be used. */
+	procnum = (key->strategy == PARTITION_STRATEGY_HASH) ?
+		HASHEXTENDED_PROC : BTORDER_PROC;
+
 	/* Copy partattrs and fill other per-attribute info */
 	memcpy(key->partattrs, attrs, key->partnatts * sizeof(int16));
 	partexprs_item = list_head(key->partexprs);
@@ -932,18 +938,20 @@ RelationBuildPartitionKey(Relation relation)
 		key->partopfamily[i] = opclassform->opcfamily;
 		key->partopcintype[i] = opclassform->opcintype;
 
-		/*
-		 * A btree support function covers the cases of list and range methods
-		 * currently supported.
-		 */
+		/* Get a support function for the specified opfamily and datatypes */
 		funcid = get_opfamily_proc(opclassform->opcfamily,
 								   opclassform->opcintype,
 								   opclassform->opcintype,
-								   BTORDER_PROC);
-		if (!OidIsValid(funcid))	/* should not happen */
-			elog(ERROR, "missing support function %d(%u,%u) in opfamily %u",
-				 BTORDER_PROC, opclassform->opcintype, opclassform->opcintype,
-				 opclassform->opcfamily);
+								   procnum);
+		if (!OidIsValid(funcid))
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+					 errmsg("operator class \"%s\" of access method %s is missing support function %d for data type \"%s\"",
+							NameStr(opclassform->opcname),
+							(key->strategy == PARTITION_STRATEGY_HASH) ?
+							"hash" : "btree",
+							procnum,
+							format_type_be(opclassform->opcintype))));
 
 		fmgr_info(funcid, &key->partsupfunc[i]);
 
@@ -5358,9 +5366,9 @@ errtableconstraint(Relation rel, const char *conname)
  * load_relcache_init_file -- attempt to load cache from the shared
  * or local cache init file
  *
- * If successful, return TRUE and set criticalRelcachesBuilt or
+ * If successful, return true and set criticalRelcachesBuilt or
  * criticalSharedRelcachesBuilt to true.
- * If not successful, return FALSE.
+ * If not successful, return false.
  *
  * NOTE: we assume we are already switched into CacheMemoryContext.
  */

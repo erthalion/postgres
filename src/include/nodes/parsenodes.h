@@ -198,7 +198,7 @@ typedef struct Query
  * Similarly, if "typmods" is NIL then the actual typmod is expected to
  * be prespecified in typemod, otherwise typemod is unused.
  *
- * If pct_type is TRUE, then names is actually a field name and we look up
+ * If pct_type is true, then names is actually a field name and we look up
  * the type of that field.  Otherwise (the normal case), names is a type
  * name possibly qualified with schema and database name.
  */
@@ -777,12 +777,14 @@ typedef struct PartitionElem
 typedef struct PartitionSpec
 {
 	NodeTag		type;
-	char	   *strategy;		/* partitioning strategy ('list' or 'range') */
+	char	   *strategy;		/* partitioning strategy ('hash', 'list' or
+								 * 'range') */
 	List	   *partParams;		/* List of PartitionElems */
 	int			location;		/* token location, or -1 if unknown */
 } PartitionSpec;
 
 /* Internal codes for partitioning strategies */
+#define PARTITION_STRATEGY_HASH		'h'
 #define PARTITION_STRATEGY_LIST		'l'
 #define PARTITION_STRATEGY_RANGE	'r'
 
@@ -798,6 +800,10 @@ typedef struct PartitionBoundSpec
 
 	char		strategy;		/* see PARTITION_STRATEGY codes above */
 	bool		is_default;		/* is it a default partition bound? */
+
+	/* Partitioning info for HASH strategy: */
+	int			modulus;
+	int			remainder;
 
 	/* Partitioning info for LIST strategy: */
 	List	   *listdatums;		/* List of Consts (or A_Consts in raw tree) */
@@ -888,8 +894,8 @@ typedef struct PartitionCmd
  *	  them from the joinaliasvars list, because that would affect the attnums
  *	  of Vars referencing the rest of the list.)
  *
- *	  inh is TRUE for relation references that should be expanded to include
- *	  inheritance children, if the rel has any.  This *must* be FALSE for
+ *	  inh is true for relation references that should be expanded to include
+ *	  inheritance children, if the rel has any.  This *must* be false for
  *	  RTEs other than RTE_RELATION entries.
  *
  *	  inFromCl marks those range variables that are listed in the FROM clause.
@@ -1147,7 +1153,7 @@ typedef struct WithCheckOption
  *		or InvalidOid if not available.
  * nulls_first means about what you'd expect.  If sortop is InvalidOid
  *		then nulls_first is meaningless and should be set to false.
- * hashable is TRUE if eqop is hashable (note this condition also depends
+ * hashable is true if eqop is hashable (note this condition also depends
  *		on the datatype of the input expression).
  *
  * In an ORDER BY item, all fields must be valid.  (The eqop isn't essential
@@ -2680,7 +2686,7 @@ typedef struct FetchStmt
 	FetchDirection direction;	/* see above */
 	long		howMany;		/* number of rows, or position argument */
 	char	   *portalname;		/* name of portal (cursor) */
-	bool		ismove;			/* TRUE if MOVE */
+	bool		ismove;			/* true if MOVE */
 } FetchStmt;
 
 /* ----------------------
