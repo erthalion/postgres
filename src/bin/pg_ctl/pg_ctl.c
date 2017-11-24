@@ -965,7 +965,7 @@ do_restart(void)
 		write_stderr(_("%s: PID file \"%s\" does not exist\n"),
 					 progname, pid_file);
 		write_stderr(_("Is server running?\n"));
-		write_stderr(_("starting server anyway\n"));
+		write_stderr(_("trying to start server anyway\n"));
 		do_start();
 		return;
 	}
@@ -1903,7 +1903,7 @@ do_help(void)
 	printf(_("  immediate   quit without complete shutdown; will lead to recovery on restart\n"));
 
 	printf(_("\nAllowed signal names for kill:\n"));
-	printf("  ABRT HUP INT QUIT TERM USR1 USR2\n");
+	printf("  ABRT HUP INT KILL QUIT TERM USR1 USR2\n");
 
 #ifdef WIN32
 	printf(_("\nOptions for register and unregister:\n"));
@@ -1961,11 +1961,8 @@ set_sig(char *signame)
 		sig = SIGQUIT;
 	else if (strcmp(signame, "ABRT") == 0)
 		sig = SIGABRT;
-#if 0
-	/* probably should NOT provide SIGKILL */
 	else if (strcmp(signame, "KILL") == 0)
 		sig = SIGKILL;
-#endif
 	else if (strcmp(signame, "TERM") == 0)
 		sig = SIGTERM;
 	else if (strcmp(signame, "USR1") == 0)

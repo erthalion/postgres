@@ -981,7 +981,9 @@ AddNewRelationType(const char *typeName,
 				   0,			/* array dimensions for typBaseType */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* rowtypes never have a collation */
-				   InvalidOid);	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsassign - none */
+				   InvalidOid);	/* typsubsfetch - none */
 }
 
 /* --------------------------------
@@ -1252,7 +1254,9 @@ heap_create_with_catalog(const char *relname,
 				   0,			/* array dimensions for typBaseType */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* rowtypes never have a collation */
-				   F_ARRAY_SUBSCRIPT_PARSE);	/* array implementation */
+				   F_ARRAY_SUBSCRIPT_PARSE,
+				   F_ARRAY_SUBSCRIPT_ASSIGN,
+				   F_ARRAY_SUBSCRIPT_FETCH);	/* array implementation */
 
 		pfree(relarrayname);
 	}
@@ -1761,7 +1765,8 @@ heap_drop_with_catalog(Oid relid)
 {
 	Relation	rel;
 	HeapTuple	tuple;
-	Oid			parentOid = InvalidOid;
+	Oid			parentOid = InvalidOid,
+				defaultPartOid = InvalidOid;
 
 	/*
 	 * To drop a partition safely, we must grab exclusive lock on its parent,
@@ -1777,6 +1782,14 @@ heap_drop_with_catalog(Oid relid)
 	{
 		parentOid = get_partition_parent(relid);
 		LockRelationOid(parentOid, AccessExclusiveLock);
+
+		/*
+		 * If this is not the default partition, dropping it will change the
+		 * default partition's partition constraint, so we must lock it.
+		 */
+		defaultPartOid = get_default_partition_oid(parentOid);
+		if (OidIsValid(defaultPartOid) && relid != defaultPartOid)
+			LockRelationOid(defaultPartOid, AccessExclusiveLock);
 	}
 
 	ReleaseSysCache(tuple);
@@ -1826,6 +1839,13 @@ heap_drop_with_catalog(Oid relid)
 	 */
 	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 		RemovePartitionKeyByRelId(relid);
+
+	/*
+	 * If the relation being dropped is the default partition itself,
+	 * invalidate its entry in pg_partitioned_table.
+	 */
+	if (relid == defaultPartOid)
+		update_default_partition_oid(parentOid, InvalidOid);
 
 	/*
 	 * Schedule unlinking of the relation's physical files at commit.
@@ -1886,6 +1906,14 @@ heap_drop_with_catalog(Oid relid)
 
 	if (OidIsValid(parentOid))
 	{
+		/*
+		 * If this is not the default partition, the partition constraint of
+		 * the default partition has changed to include the portion of the key
+		 * space previously covered by the dropped partition.
+		 */
+		if (OidIsValid(defaultPartOid) && relid != defaultPartOid)
+			CacheInvalidateRelcacheByRelid(defaultPartOid);
+
 		/*
 		 * Invalidate the parent's relcache so that the partition is no longer
 		 * included in its partition descriptor.
@@ -3140,6 +3168,7 @@ StorePartitionKey(Relation rel,
 	values[Anum_pg_partitioned_table_partrelid - 1] = ObjectIdGetDatum(RelationGetRelid(rel));
 	values[Anum_pg_partitioned_table_partstrat - 1] = CharGetDatum(strategy);
 	values[Anum_pg_partitioned_table_partnatts - 1] = Int16GetDatum(partnatts);
+	values[Anum_pg_partitioned_table_partdefid - 1] = ObjectIdGetDatum(InvalidOid);
 	values[Anum_pg_partitioned_table_partattrs - 1] = PointerGetDatum(partattrs_vec);
 	values[Anum_pg_partitioned_table_partclass - 1] = PointerGetDatum(partopclass_vec);
 	values[Anum_pg_partitioned_table_partcollation - 1] = PointerGetDatum(partcollation_vec);
@@ -3225,7 +3254,8 @@ RemovePartitionKeyByRelId(Oid relid)
  *		relispartition to true
  *
  * Also, invalidate the parent's relcache, so that the next rebuild will load
- * the new partition's info into its partition descriptor.
+ * the new partition's info into its partition descriptor.  If there is a
+ * default partition, we must invalidate its relcache entry as well.
  */
 void
 StorePartitionBound(Relation rel, Relation parent, PartitionBoundSpec *bound)
@@ -3236,6 +3266,7 @@ StorePartitionBound(Relation rel, Relation parent, PartitionBoundSpec *bound)
 	Datum		new_val[Natts_pg_class];
 	bool		new_null[Natts_pg_class],
 				new_repl[Natts_pg_class];
+	Oid			defaultPartOid;
 
 	/* Update pg_class tuple */
 	classRel = heap_open(RelationRelationId, RowExclusiveLock);
@@ -3272,6 +3303,16 @@ StorePartitionBound(Relation rel, Relation parent, PartitionBoundSpec *bound)
 	CatalogTupleUpdate(classRel, &newtuple->t_self, newtuple);
 	heap_freetuple(newtuple);
 	heap_close(classRel, RowExclusiveLock);
+
+	/*
+	 * The partition constraint for the default partition depends on the
+	 * partition bounds of every other partition, so we must invalidate the
+	 * relcache entry for that partition every time a partition is added or
+	 * removed.
+	 */
+	defaultPartOid = get_default_oid_from_partdesc(RelationGetPartitionDesc(parent));
+	if (OidIsValid(defaultPartOid))
+		CacheInvalidateRelcacheByRelid(defaultPartOid);
 
 	CacheInvalidateRelcache(parent);
 }

@@ -162,7 +162,7 @@ ExecSerializePlan(Plan *plan, EState *estate)
 	 */
 	pstmt = makeNode(PlannedStmt);
 	pstmt->commandType = CMD_SELECT;
-	pstmt->queryId = 0;
+	pstmt->queryId = UINT64CONST(0);
 	pstmt->hasReturning = false;
 	pstmt->hasModifyingCTE = false;
 	pstmt->canSetTag = true;
@@ -608,14 +608,12 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers,
 
 /*
  * Set up tuple queue readers to read the results of a parallel subplan.
- * All the workers are expected to return tuples matching tupDesc.
  *
  * This is separate from ExecInitParallelPlan() because we can launch the
  * worker processes and let them start doing something before we do this.
  */
 void
-ExecParallelCreateReaders(ParallelExecutorInfo *pei,
-						  TupleDesc tupDesc)
+ExecParallelCreateReaders(ParallelExecutorInfo *pei)
 {
 	int			nworkers = pei->pcxt->nworkers_launched;
 	int			i;
@@ -631,8 +629,7 @@ ExecParallelCreateReaders(ParallelExecutorInfo *pei,
 		{
 			shm_mq_set_handle(pei->tqueue[i],
 							  pei->pcxt->worker[i].bgwhandle);
-			pei->reader[i] = CreateTupleQueueReader(pei->tqueue[i],
-													tupDesc);
+			pei->reader[i] = CreateTupleQueueReader(pei->tqueue[i]);
 		}
 	}
 }

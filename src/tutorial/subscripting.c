@@ -26,9 +26,10 @@ typedef struct Custom
 }	Custom;
 
 PG_FUNCTION_INFO_V1(custom_in);
-PG_FUNCTION_INFO_V1(custom_subscript_parse);
+PG_FUNCTION_INFO_V1(custom_out);
+PG_FUNCTION_INFO_V1(custom_subscripting_parse);
 PG_FUNCTION_INFO_V1(custom_subscripting_assign);
-PG_FUNCTION_INFO_V1(custom_subscripting_extract);
+PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
 
 /*****************************************************************************
  * Input/Output functions
@@ -54,8 +55,6 @@ custom_in(PG_FUNCTION_ARGS)
 	result->second = secondValue;
 	PG_RETURN_POINTER(result);
 }
-
-PG_FUNCTION_INFO_V1(custom_out);
 
 Datum
 custom_out(PG_FUNCTION_ARGS)
@@ -95,7 +94,7 @@ custom_subscripting_assign(PG_FUNCTION_ARGS)
 
 
 Datum
-custom_subscripting_extract(PG_FUNCTION_ARGS)
+custom_subscripting_fetch(PG_FUNCTION_ARGS)
 {
 	Custom					*containerSource = (Custom *) PG_GETARG_DATUM(0);
 	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -115,15 +114,13 @@ custom_subscripting_extract(PG_FUNCTION_ARGS)
 }
 
 Datum
-custom_subscript_parse(PG_FUNCTION_ARGS)
+custom_subscripting_parse(PG_FUNCTION_ARGS)
 {
 	bool				isAssignment = PG_GETARG_BOOL(0);
 	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
 	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
-	Datum				assign_proc = CStringGetTextDatum("custom_subscripting_assign");
-	Datum				extract_proc = CStringGetTextDatum("custom_subscripting_extract");
 
 	if (sbsref->reflowerindexpr != NIL)
 		ereport(ERROR,
@@ -158,15 +155,30 @@ custom_subscript_parse(PG_FUNCTION_ARGS)
 					 parser_errposition(pstate, exprLocation(subexpr))));
 
 		upperIndexpr = lappend(upperIndexpr, subexpr);
+
+		if (isAssignment)
+		{
+			Node *assignExpr = (Node *) sbsref->refassgnexpr;
+			Node *new_from;
+
+			new_from = coerce_to_target_type(pstate,
+					assignExpr, exprType(assignExpr),
+					INT4OID, -1,
+					COERCION_ASSIGNMENT,
+					COERCE_IMPLICIT_CAST,
+					-1);
+			if (new_from == NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
+						 errmsg("custom assignment requires int type"),
+						 errhint("You will need to rewrite or cast the expression."),
+						 parser_errposition(pstate, exprLocation(assignExpr))));
+			sbsref->refassgnexpr = (Expr *)new_from;
+		}
 	}
 
 	sbsref->refupperindexpr = upperIndexpr;
 	sbsref->refelemtype = INT4OID;
-
-	if (isAssignment)
-		sbsref->refevalfunc = DirectFunctionCall1(to_regproc, assign_proc);
-	else
-		sbsref->refevalfunc = DirectFunctionCall1(to_regproc, extract_proc);
 
 	PG_RETURN_POINTER(sbsref);
 }

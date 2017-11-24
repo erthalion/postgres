@@ -507,6 +507,8 @@ typedef struct EState
 	bool	   *es_epqTupleSet; /* true if EPQ tuple is provided */
 	bool	   *es_epqScanDone; /* true if EPQ tuple has been fetched */
 
+	bool		es_use_parallel_mode;	/* can we use parallel workers? */
+
 	/* The per-query shared memory area to use for parallel execution. */
 	struct dsa_area *es_query_dsa;
 } EState;
@@ -670,6 +672,7 @@ typedef struct WindowFuncExprState
 	ExprState  *aggfilter;		/* FILTER expression */
 	int			wfuncno;		/* ID number for wfunc within its plan node */
 } WindowFuncExprState;
+
 
 /* ----------------
  *		SetExprState node
@@ -945,6 +948,7 @@ typedef struct ProjectSetState
 	ExprDoneCond *elemdone;		/* array of per-SRF is-done states */
 	int			nelems;			/* length of elemdone[] array */
 	bool		pending_srf_tuples; /* still evaluating srfs in tlist? */
+	MemoryContext argcontext;	/* context for SRF arguments */
 } ProjectSetState;
 
 /* ----------------
@@ -977,12 +981,14 @@ typedef struct ModifyTableState
 	int			mt_num_dispatch;	/* Number of entries in the above array */
 	int			mt_num_partitions;	/* Number of members in the following
 									 * arrays */
-	ResultRelInfo *mt_partitions;	/* Per partition result relation */
+	ResultRelInfo **mt_partitions;	/* Per partition result relation pointers */
 	TupleConversionMap **mt_partition_tupconv_maps;
 	/* Per partition tuple conversion map */
 	TupleTableSlot *mt_partition_tuple_slot;
 	struct TransitionCaptureState *mt_transition_capture;
-	/* controls transition table population */
+	/* controls transition table population for specified operation */
+	struct TransitionCaptureState *mt_oc_transition_capture;
+	/* controls transition table population for INSERT...ON CONFLICT UPDATE */
 	TupleConversionMap **mt_transition_tupconv_maps;
 	/* Per plan/partition tuple conversion */
 } ModifyTableState;
@@ -1325,6 +1331,10 @@ typedef struct ParallelBitmapHeapState
  *		tbm				   bitmap obtained from child index scan(s)
  *		tbmiterator		   iterator for scanning current pages
  *		tbmres			   current-page data
+ *		can_skip_fetch	   can we potentially skip tuple fetches in this scan?
+ *		skip_fetch		   are we skipping tuple fetches on this page?
+ *		vmbuffer		   buffer for visibility-map lookups
+ *		pvmbuffer		   ditto, for prefetched pages
  *		exact_pages		   total number of exact pages retrieved
  *		lossy_pages		   total number of lossy pages retrieved
  *		prefetch_iterator  iterator for prefetching ahead of current page
@@ -1345,6 +1355,10 @@ typedef struct BitmapHeapScanState
 	TIDBitmap  *tbm;
 	TBMIterator *tbmiterator;
 	TBMIterateResult *tbmres;
+	bool		can_skip_fetch;
+	bool		skip_fetch;
+	Buffer		vmbuffer;
+	Buffer		pvmbuffer;
 	long		exact_pages;
 	long		lossy_pages;
 	TBMIterator *prefetch_iterator;
@@ -1804,7 +1818,8 @@ typedef struct AggState
 	ExprContext **aggcontexts;	/* econtexts for long-lived data (per GS) */
 	ExprContext *tmpcontext;	/* econtext for input expressions */
 	ExprContext *curaggcontext; /* currently active aggcontext */
-	AggStatePerTrans curpertrans;	/* currently active trans state */
+	AggStatePerAgg curperagg;	/* currently active aggregate, if any */
+	AggStatePerTrans curpertrans;	/* currently active trans state, if any */
 	bool		input_done;		/* indicates end of input */
 	bool		agg_done;		/* indicates completion of Agg scan */
 	int			projected_set;	/* The last projected grouping set */
@@ -1825,10 +1840,8 @@ typedef struct AggState
 	int			num_hashes;
 	AggStatePerHash perhash;
 	AggStatePerGroup *hash_pergroup;	/* array of per-group pointers */
-	/* support for evaluation of agg inputs */
-	TupleTableSlot *evalslot;	/* slot for agg inputs */
-	ProjectionInfo *evalproj;	/* projection machinery */
-	TupleDesc	evaldesc;		/* descriptor of input tuples */
+	/* support for evaluation of agg input expressions: */
+	ProjectionInfo *combinedproj;	/* projection machinery */
 } AggState;
 
 /* ----------------

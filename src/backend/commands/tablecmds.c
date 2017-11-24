@@ -168,6 +168,8 @@ typedef struct AlteredTableInfo
 	bool		chgPersistence; /* T if SET LOGGED/UNLOGGED is used */
 	char		newrelpersistence;	/* if above is true */
 	Expr	   *partition_constraint;	/* for attach partition validation */
+	/* true, if validating default due to some other attach/detach */
+	bool		validate_default;
 	/* Objects to rebuild after completing ALTER TYPE operations */
 	List	   *changedConstraintOids;	/* OIDs of constraints to rebuild */
 	List	   *changedConstraintDefs;	/* string definitions of same */
@@ -423,7 +425,8 @@ static void ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId,
 					 char *cmd, List **wqueue, LOCKMODE lockmode,
 					 bool rewrite);
 static void RebuildConstraintComment(AlteredTableInfo *tab, int pass,
-						 Oid objid, Relation rel, char *conname);
+						 Oid objid, Relation rel, List *domname,
+						 char *conname);
 static void TryReuseIndex(Oid oldId, IndexStmt *stmt);
 static void TryReuseForeignKey(Oid oldId, Constraint *con);
 static void change_owner_fix_column_acls(Oid relationOid,
@@ -473,11 +476,10 @@ static void CreateInheritance(Relation child_rel, Relation parent_rel);
 static void RemoveInheritance(Relation child_rel, Relation parent_rel);
 static ObjectAddress ATExecAttachPartition(List **wqueue, Relation rel,
 					  PartitionCmd *cmd);
-static bool PartConstraintImpliedByRelConstraint(Relation scanrel,
-									 List *partConstraint);
 static void ValidatePartitionConstraints(List **wqueue, Relation scanrel,
 							 List *scanrel_children,
-							 List *partConstraint);
+							 List *partConstraint,
+							 bool validate_default);
 static ObjectAddress ATExecDetachPartition(Relation rel, RangeVar *name);
 
 
@@ -774,8 +776,10 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	{
 		PartitionBoundSpec *bound;
 		ParseState *pstate;
-		Oid			parentId = linitial_oid(inheritOids);
-		Relation	parent;
+		Oid			parentId = linitial_oid(inheritOids),
+					defaultPartOid;
+		Relation	parent,
+					defaultRel = NULL;
 
 		/* Already have strong enough lock on the parent */
 		parent = heap_open(parentId, NoLock);
@@ -790,6 +794,30 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 					 errmsg("\"%s\" is not partitioned",
 							RelationGetRelationName(parent))));
 
+		/*
+		 * The partition constraint of the default partition depends on the
+		 * partition bounds of every other partition. It is possible that
+		 * another backend might be about to execute a query on the default
+		 * partition table, and that the query relies on previously cached
+		 * default partition constraints. We must therefore take a table lock
+		 * strong enough to prevent all queries on the default partition from
+		 * proceeding until we commit and send out a shared-cache-inval notice
+		 * that will make them update their index lists.
+		 *
+		 * Order of locking: The relation being added won't be visible to
+		 * other backends until it is committed, hence here in
+		 * DefineRelation() the order of locking the default partition and the
+		 * relation being added does not matter. But at all other places we
+		 * need to lock the default relation before we lock the relation being
+		 * added or removed i.e. we should take the lock in same order at all
+		 * the places such that lock parent, lock default partition and then
+		 * lock the partition so as to avoid a deadlock.
+		 */
+		defaultPartOid =
+			get_default_oid_from_partdesc(RelationGetPartitionDesc(parent));
+		if (OidIsValid(defaultPartOid))
+			defaultRel = heap_open(defaultPartOid, AccessExclusiveLock);
+
 		/* Tranform the bound values */
 		pstate = make_parsestate(NULL);
 		pstate->p_sourcetext = queryString;
@@ -798,13 +826,30 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 
 		/*
 		 * Check first that the new partition's bound is valid and does not
-		 * overlap with any of existing partitions of the parent - note that
-		 * it does not return on error.
+		 * overlap with any of existing partitions of the parent.
 		 */
 		check_new_partition_bound(relname, parent, bound);
 
+		/*
+		 * If the default partition exists, its partition constraints will
+		 * change after the addition of this new partition such that it won't
+		 * allow any row that qualifies for this new partition. So, check that
+		 * the existing data in the default partition satisfies the constraint
+		 * as it will exist after adding this partition.
+		 */
+		if (OidIsValid(defaultPartOid))
+		{
+			check_default_allows_bound(parent, defaultRel, bound);
+			/* Keep the lock until commit. */
+			heap_close(defaultRel, NoLock);
+		}
+
 		/* Update the pg_class entry. */
 		StorePartitionBound(rel, parent, bound);
+
+		/* Update the default partition oid */
+		if (bound->is_default)
+			update_default_partition_oid(RelationGetRelid(parent), relationId);
 
 		heap_close(parent, NoLock);
 
@@ -3275,6 +3320,7 @@ AlterTableGetLockLevel(List *cmds)
 			case AT_ProcessedConstraint:	/* becomes AT_AddConstraint */
 			case AT_AddConstraintRecurse:	/* becomes AT_AddConstraint */
 			case AT_ReAddConstraint:	/* becomes AT_AddConstraint */
+			case AT_ReAddDomainConstraint:	/* becomes AT_AddConstraint */
 				if (IsA(cmd->def, Constraint))
 				{
 					Constraint *con = (Constraint *) cmd->def;
@@ -3775,7 +3821,9 @@ ATRewriteCatalogs(List **wqueue, LOCKMODE lockmode)
 			rel = relation_open(tab->relid, NoLock);
 
 			foreach(lcmd, subcmds)
-				ATExecCmd(wqueue, tab, rel, (AlterTableCmd *) lfirst(lcmd), lockmode);
+				ATExecCmd(wqueue, tab, rel,
+						  castNode(AlterTableCmd, lfirst(lcmd)),
+						  lockmode);
 
 			/*
 			 * After the ALTER TYPE pass, do cleanup work (this is not done in
@@ -3891,6 +3939,13 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			address =
 				ATExecAddConstraint(wqueue, tab, rel, (Constraint *) cmd->def,
 									true, true, lockmode);
+			break;
+		case AT_ReAddDomainConstraint:	/* Re-add pre-existing domain check
+										 * constraint */
+			address =
+				AlterDomainAddConstraint(((AlterDomainStmt *) cmd->def)->typeName,
+										 ((AlterDomainStmt *) cmd->def)->def,
+										 NULL);
 			break;
 		case AT_ReAddComment:	/* Re-add existing comment */
 			address = CommentObject((CommentStmt *) cmd->def);
@@ -4595,9 +4650,16 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 			}
 
 			if (partqualstate && !ExecCheck(partqualstate, econtext))
-				ereport(ERROR,
-						(errcode(ERRCODE_CHECK_VIOLATION),
-						 errmsg("partition constraint is violated by some row")));
+			{
+				if (tab->validate_default)
+					ereport(ERROR,
+							(errcode(ERRCODE_CHECK_VIOLATION),
+							 errmsg("updated partition constraint for default partition would be violated by some row")));
+				else
+					ereport(ERROR,
+							(errcode(ERRCODE_CHECK_VIOLATION),
+							 errmsg("partition constraint is violated by some row")));
+			}
 
 			/* Write the tuple out to the new relation */
 			if (newrel)
@@ -5040,6 +5102,8 @@ find_typed_table_dependencies(Oid typeOid, const char *typeName, DropBehavior be
  * isn't suitable, throw an error.  Currently, we require that the type
  * originated with CREATE TYPE AS.  We could support any row type, but doing so
  * would require handling a number of extra corner cases in the DDL commands.
+ * (Also, allowing domain-over-composite would open up a can of worms about
+ * whether and how the domain's constraints should apply to derived tables.)
  */
 void
 check_of_type(HeapTuple typetuple)
@@ -6139,8 +6203,8 @@ ATPrepSetStatistics(Relation rel, const char *colName, int16 colNum, Node *newVa
 						RelationGetRelationName(rel))));
 
 	/*
-	 * We allow referencing columns by numbers only for indexes, since
-	 * table column numbers could contain gaps if columns are later dropped.
+	 * We allow referencing columns by numbers only for indexes, since table
+	 * column numbers could contain gaps if columns are later dropped.
 	 */
 	if (rel->rd_rel->relkind != RELKIND_INDEX && !colName)
 		ereport(ERROR,
@@ -9563,7 +9627,15 @@ ATPostAlterTypeCleanup(List **wqueue, AlteredTableInfo *tab, LOCKMODE lockmode)
 		if (!HeapTupleIsValid(tup)) /* should not happen */
 			elog(ERROR, "cache lookup failed for constraint %u", oldId);
 		con = (Form_pg_constraint) GETSTRUCT(tup);
-		relid = con->conrelid;
+		if (OidIsValid(con->conrelid))
+			relid = con->conrelid;
+		else
+		{
+			/* must be a domain constraint */
+			relid = get_typ_typrelid(getBaseType(con->contypid));
+			if (!OidIsValid(relid))
+				elog(ERROR, "could not identify relation associated with constraint %u", oldId);
+		}
 		confrelid = con->confrelid;
 		conislocal = con->conislocal;
 		ReleaseSysCache(tup);
@@ -9700,7 +9772,7 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 
 			foreach(lcmd, stmt->cmds)
 			{
-				AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lcmd);
+				AlterTableCmd *cmd = castNode(AlterTableCmd, lfirst(lcmd));
 
 				if (cmd->subtype == AT_AddIndex)
 				{
@@ -9724,13 +9796,14 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 					RebuildConstraintComment(tab,
 											 AT_PASS_OLD_INDEX,
 											 oldId,
-											 rel, indstmt->idxname);
+											 rel,
+											 NIL,
+											 indstmt->idxname);
 				}
 				else if (cmd->subtype == AT_AddConstraint)
 				{
-					Constraint *con;
+					Constraint *con = castNode(Constraint, cmd->def);
 
-					con = castNode(Constraint, cmd->def);
 					con->old_pktable_oid = refRelId;
 					/* rewriting neither side of a FK */
 					if (con->contype == CONSTR_FOREIGN &&
@@ -9744,12 +9817,40 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 					RebuildConstraintComment(tab,
 											 AT_PASS_OLD_CONSTR,
 											 oldId,
-											 rel, con->conname);
+											 rel,
+											 NIL,
+											 con->conname);
 				}
 				else
 					elog(ERROR, "unexpected statement subtype: %d",
 						 (int) cmd->subtype);
 			}
+		}
+		else if (IsA(stm, AlterDomainStmt))
+		{
+			AlterDomainStmt *stmt = (AlterDomainStmt *) stm;
+
+			if (stmt->subtype == 'C')	/* ADD CONSTRAINT */
+			{
+				Constraint *con = castNode(Constraint, stmt->def);
+				AlterTableCmd *cmd = makeNode(AlterTableCmd);
+
+				cmd->subtype = AT_ReAddDomainConstraint;
+				cmd->def = (Node *) stmt;
+				tab->subcmds[AT_PASS_OLD_CONSTR] =
+					lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);
+
+				/* recreate any comment on the constraint */
+				RebuildConstraintComment(tab,
+										 AT_PASS_OLD_CONSTR,
+										 oldId,
+										 NULL,
+										 stmt->typeName,
+										 con->conname);
+			}
+			else
+				elog(ERROR, "unexpected statement subtype: %d",
+					 (int) stmt->subtype);
 		}
 		else
 			elog(ERROR, "unexpected statement type: %d",
@@ -9760,12 +9861,19 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 }
 
 /*
- * Subroutine for ATPostAlterTypeParse() to recreate a comment entry for
- * a constraint that is being re-added.
+ * Subroutine for ATPostAlterTypeParse() to recreate any existing comment
+ * for a table or domain constraint that is being rebuilt.
+ *
+ * objid is the OID of the constraint.
+ * Pass "rel" for a table constraint, or "domname" (domain's qualified name
+ * as a string list) for a domain constraint.
+ * (We could dig that info, as well as the conname, out of the pg_constraint
+ * entry; but callers already have them so might as well pass them.)
  */
 static void
 RebuildConstraintComment(AlteredTableInfo *tab, int pass, Oid objid,
-						 Relation rel, char *conname)
+						 Relation rel, List *domname,
+						 char *conname)
 {
 	CommentStmt *cmd;
 	char	   *comment_str;
@@ -9776,12 +9884,23 @@ RebuildConstraintComment(AlteredTableInfo *tab, int pass, Oid objid,
 	if (comment_str == NULL)
 		return;
 
-	/* Build node CommentStmt */
+	/* Build CommentStmt node, copying all input data for safety */
 	cmd = makeNode(CommentStmt);
-	cmd->objtype = OBJECT_TABCONSTRAINT;
-	cmd->object = (Node *) list_make3(makeString(get_namespace_name(RelationGetNamespace(rel))),
-									  makeString(pstrdup(RelationGetRelationName(rel))),
-									  makeString(pstrdup(conname)));
+	if (rel)
+	{
+		cmd->objtype = OBJECT_TABCONSTRAINT;
+		cmd->object = (Node *)
+			list_make3(makeString(get_namespace_name(RelationGetNamespace(rel))),
+					   makeString(pstrdup(RelationGetRelationName(rel))),
+					   makeString(pstrdup(conname)));
+	}
+	else
+	{
+		cmd->objtype = OBJECT_DOMCONSTRAINT;
+		cmd->object = (Node *)
+			list_make2(makeTypeNameFromNameList(copyObject(domname)),
+					   makeString(pstrdup(conname)));
+	}
 	cmd->comment = comment_str;
 
 	/* Append it to list of commands */
@@ -13482,7 +13601,7 @@ ComputePartitionAttrs(Relation rel, List *partParams, AttrNumber *partattrs,
  * Existing constraints includes its check constraints and column-level
  * NOT NULL constraints and partConstraint describes the partition constraint.
  */
-static bool
+bool
 PartConstraintImpliedByRelConstraint(Relation scanrel,
 									 List *partConstraint)
 {
@@ -13569,7 +13688,8 @@ PartConstraintImpliedByRelConstraint(Relation scanrel,
 static void
 ValidatePartitionConstraints(List **wqueue, Relation scanrel,
 							 List *scanrel_children,
-							 List *partConstraint)
+							 List *partConstraint,
+							 bool validate_default)
 {
 	bool		found_whole_row;
 	ListCell   *lc;
@@ -13583,9 +13703,14 @@ ValidatePartitionConstraints(List **wqueue, Relation scanrel,
 	 */
 	if (PartConstraintImpliedByRelConstraint(scanrel, partConstraint))
 	{
-		ereport(INFO,
-				(errmsg("partition constraint for table \"%s\" is implied by existing constraints",
-						RelationGetRelationName(scanrel))));
+		if (!validate_default)
+			ereport(INFO,
+					(errmsg("partition constraint for table \"%s\" is implied by existing constraints",
+							RelationGetRelationName(scanrel))));
+		else
+			ereport(INFO,
+					(errmsg("updated partition constraint for default partition \"%s\" is implied by existing constraints",
+							RelationGetRelationName(scanrel))));
 		return;
 	}
 
@@ -13626,11 +13751,27 @@ ValidatePartitionConstraints(List **wqueue, Relation scanrel,
 			/* There can never be a whole-row reference here */
 			if (found_whole_row)
 				elog(ERROR, "unexpected whole-row reference found in partition key");
+
+			/* Can we skip scanning this part_rel? */
+			if (PartConstraintImpliedByRelConstraint(part_rel, my_partconstr))
+			{
+				if (!validate_default)
+					ereport(INFO,
+							(errmsg("partition constraint for table \"%s\" is implied by existing constraints",
+									RelationGetRelationName(part_rel))));
+				else
+					ereport(INFO,
+							(errmsg("updated partition constraint for default partition \"%s\" is implied by existing constraints",
+									RelationGetRelationName(part_rel))));
+				heap_close(part_rel, NoLock);
+				continue;
+			}
 		}
 
 		/* Grab a work queue entry. */
 		tab = ATGetQueueEntry(wqueue, part_rel);
 		tab->partition_constraint = (Expr *) linitial(my_partconstr);
+		tab->validate_default = validate_default;
 
 		/* keep our lock until commit */
 		if (part_rel != scanrel)
@@ -13658,6 +13799,17 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	ObjectAddress address;
 	const char *trigger_name;
 	bool		found_whole_row;
+	Oid			defaultPartOid;
+	List	   *partBoundConstraint;
+
+	/*
+	 * We must lock the default partition, because attaching a new partition
+	 * will change its partition constraint.
+	 */
+	defaultPartOid =
+		get_default_oid_from_partdesc(RelationGetPartitionDesc(rel));
+	if (OidIsValid(defaultPartOid))
+		LockRelationOid(defaultPartOid, AccessExclusiveLock);
 
 	attachrel = heap_openrv(cmd->name, AccessExclusiveLock);
 
@@ -13715,7 +13867,7 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	 * Prevent circularity by seeing if rel is a partition of attachrel. (In
 	 * particular, this disallows making a rel a partition of itself.)
 	 *
-	 * We do that by checking if rel is a member of the list of attachRel's
+	 * We do that by checking if rel is a member of the list of attachrel's
 	 * partitions provided the latter is partitioned at all.  We want to avoid
 	 * having to construct this list again, so we request the strongest lock
 	 * on all partitions.  We need the strongest lock, because we may decide
@@ -13795,7 +13947,7 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 					 errmsg("table \"%s\" contains column \"%s\" not found in parent \"%s\"",
 							RelationGetRelationName(attachrel), attributeName,
 							RelationGetRelationName(rel)),
-					 errdetail("New partition should contain only the columns present in parent.")));
+					 errdetail("The new partition may contain only the columns present in parent.")));
 	}
 
 	/*
@@ -13814,6 +13966,11 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	/* OK to create inheritance.  Rest of the checks performed there */
 	CreateInheritance(attachrel, rel);
 
+	/* Update the default partition oid */
+	if (cmd->bound->is_default)
+		update_default_partition_oid(RelationGetRelid(rel),
+									 RelationGetRelid(attachrel));
+
 	/*
 	 * Check that the new partition's bound is valid and does not overlap any
 	 * of existing partitions of the parent - note that it does not return on
@@ -13830,27 +13987,61 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	 * If the parent itself is a partition, make sure to include its
 	 * constraint as well.
 	 */
-	partConstraint = list_concat(get_qual_from_partbound(attachrel, rel,
-														 cmd->bound),
+	partBoundConstraint = get_qual_from_partbound(attachrel, rel, cmd->bound);
+	partConstraint = list_concat(partBoundConstraint,
 								 RelationGetPartitionQual(rel));
-	partConstraint = (List *) eval_const_expressions(NULL,
-													 (Node *) partConstraint);
-	partConstraint = (List *) canonicalize_qual((Expr *) partConstraint);
-	partConstraint = list_make1(make_ands_explicit(partConstraint));
+
+	/* Skip validation if there are no constraints to validate. */
+	if (partConstraint)
+	{
+		partConstraint =
+			(List *) eval_const_expressions(NULL,
+											(Node *) partConstraint);
+		partConstraint = (List *) canonicalize_qual((Expr *) partConstraint);
+		partConstraint = list_make1(make_ands_explicit(partConstraint));
+
+		/*
+		 * Adjust the generated constraint to match this partition's attribute
+		 * numbers.
+		 */
+		partConstraint = map_partition_varattnos(partConstraint, 1, attachrel,
+												 rel, &found_whole_row);
+		/* There can never be a whole-row reference here */
+		if (found_whole_row)
+			elog(ERROR,
+				 "unexpected whole-row reference found in partition key");
+
+		/* Validate partition constraints against the table being attached. */
+		ValidatePartitionConstraints(wqueue, attachrel, attachrel_children,
+									 partConstraint, false);
+	}
 
 	/*
-	 * Adjust the generated constraint to match this partition's attribute
-	 * numbers.
+	 * Check whether default partition has a row that would fit the partition
+	 * being attached.
 	 */
-	partConstraint = map_partition_varattnos(partConstraint, 1, attachrel,
-											 rel, &found_whole_row);
-	/* There can never be a whole-row reference here */
-	if (found_whole_row)
-		elog(ERROR, "unexpected whole-row reference found in partition key");
+	defaultPartOid =
+		get_default_oid_from_partdesc(RelationGetPartitionDesc(rel));
+	if (OidIsValid(defaultPartOid))
+	{
+		Relation	defaultrel;
+		List	   *defaultrel_children;
+		List	   *defPartConstraint;
 
-	/* Validate partition constraints against the table being attached. */
-	ValidatePartitionConstraints(wqueue, attachrel, attachrel_children,
-								 partConstraint);
+		/* We already have taken a lock on default partition. */
+		defaultrel = heap_open(defaultPartOid, NoLock);
+		defPartConstraint =
+			get_proposed_default_constraint(partBoundConstraint);
+		defaultrel_children =
+			find_all_inheritors(defaultPartOid,
+								AccessExclusiveLock, NULL);
+		ValidatePartitionConstraints(wqueue, defaultrel,
+									 defaultrel_children,
+									 defPartConstraint, true);
+
+		/* keep our lock until commit. */
+		heap_close(defaultrel, NoLock);
+	}
 
 	ObjectAddressSet(address, RelationRelationId, RelationGetRelid(attachrel));
 
@@ -13877,6 +14068,16 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 				new_null[Natts_pg_class],
 				new_repl[Natts_pg_class];
 	ObjectAddress address;
+	Oid			defaultPartOid;
+
+	/*
+	 * We must lock the default partition, because detaching this partition
+	 * will changing its partition constrant.
+	 */
+	defaultPartOid =
+		get_default_oid_from_partdesc(RelationGetPartitionDesc(rel));
+	if (OidIsValid(defaultPartOid))
+		LockRelationOid(defaultPartOid, AccessExclusiveLock);
 
 	partRel = heap_openrv(name, AccessShareLock);
 
@@ -13907,6 +14108,24 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 	CatalogTupleUpdate(classRel, &newtuple->t_self, newtuple);
 	heap_freetuple(newtuple);
 	heap_close(classRel, RowExclusiveLock);
+
+	if (OidIsValid(defaultPartOid))
+	{
+		/*
+		 * If the detach relation is the default partition itself, invalidate
+		 * its entry in pg_partitioned_table.
+		 */
+		if (RelationGetRelid(partRel) == defaultPartOid)
+			update_default_partition_oid(RelationGetRelid(rel), InvalidOid);
+		else
+		{
+			/*
+			 * We must invalidate default partition's relcache, for the same
+			 * reasons explained in StorePartitionBound().
+			 */
+			CacheInvalidateRelcacheByRelid(defaultPartOid);
+		}
+	}
 
 	/*
 	 * Invalidate the parent's relcache so that the partition is no longer

@@ -875,9 +875,9 @@ rewriteTargetListIU(List *targetList,
 					new_expr = coerce_to_domain(new_expr,
 												InvalidOid, -1,
 												att_tup->atttypid,
+												COERCION_IMPLICIT,
 												COERCE_IMPLICIT_CAST,
 												-1,
-												false,
 												false);
 				}
 			}
@@ -1051,11 +1051,9 @@ process_matched_tle(TargetEntry *src_tle,
 	}
 	else if (IsA(src_expr, SubscriptingRef))
 	{
-		NodeTag sbstag = nodeTag(src_expr);
-		Size nodeSize = sizeof(SubscriptingRef);
-		SubscriptingRef *sbsref = (SubscriptingRef *) newNode(nodeSize, sbstag);
+		SubscriptingRef *sbsref = makeNode(SubscriptingRef);
 
-		memcpy(sbsref, src_expr, nodeSize);
+		memcpy(sbsref, src_expr, sizeof(SubscriptingRef));
 		sbsref->refexpr = (Expr *) prior_expr;
 		newexpr = (Node *) sbsref;
 	}
@@ -1271,9 +1269,9 @@ rewriteValuesRTE(RangeTblEntry *rte, Relation target_relation, List *attrnos)
 					new_expr = coerce_to_domain(new_expr,
 												InvalidOid, -1,
 												att_tup->atttypid,
+												COERCION_IMPLICIT,
 												COERCE_IMPLICIT_CAST,
 												-1,
-												false,
 												false);
 				}
 				newList = lappend(newList, new_expr);
@@ -3575,7 +3573,7 @@ RewriteQuery(Query *parsetree, List *rewrite_events)
 List *
 QueryRewrite(Query *parsetree)
 {
-	uint32		input_query_id = parsetree->queryId;
+	uint64		input_query_id = parsetree->queryId;
 	List	   *querylist;
 	List	   *results;
 	ListCell   *l;

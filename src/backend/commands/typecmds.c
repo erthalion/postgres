@@ -126,7 +126,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 	List	   *typmodinName = NIL;
 	List	   *typmodoutName = NIL;
 	List	   *analyzeName = NIL;
-	List	   *subscriptingName = NIL;
+	List	   *subscriptingParseName = NIL;
+	List	   *subscriptingAssignName = NIL;
+	List	   *subscriptingFetchName = NIL;
 	char		category = TYPCATEGORY_USER;
 	bool		preferred = false;
 	char		delimiter = DEFAULT_TYPDELIM;
@@ -145,7 +147,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 	DefElem    *typmodinNameEl = NULL;
 	DefElem    *typmodoutNameEl = NULL;
 	DefElem    *analyzeNameEl = NULL;
-	DefElem    *subscriptingNameEl = NULL;
+	DefElem    *subscriptingParseNameEl = NULL;
+	DefElem    *subscriptingAssignNameEl = NULL;
+	DefElem    *subscriptingFetchNameEl = NULL;
 	DefElem    *categoryEl = NULL;
 	DefElem    *preferredEl = NULL;
 	DefElem    *delimiterEl = NULL;
@@ -168,7 +172,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 	Oid			resulttype;
 	ListCell   *pl;
 	ObjectAddress address;
-	Oid			subscriptingOid = InvalidOid;
+	Oid			subscriptingParseOid = InvalidOid;
+	Oid			subscriptingAssignOid = InvalidOid;
+	Oid			subscriptingFetchOid = InvalidOid;
 
 	/*
 	 * As of Postgres 8.4, we require superuser privilege to create a base
@@ -268,9 +274,12 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 		else if (pg_strcasecmp(defel->defname, "analyze") == 0 ||
 				 pg_strcasecmp(defel->defname, "analyse") == 0)
 			defelp = &analyzeNameEl;
-		else if (pg_strcasecmp(defel->defname, "subscripting") == 0 ||
-				 pg_strcasecmp(defel->defname, "subscripting") == 0)
-			defelp = &subscriptingNameEl;
+		else if (pg_strcasecmp(defel->defname, "subscripting_parse") == 0)
+			defelp = &subscriptingParseNameEl;
+		else if (pg_strcasecmp(defel->defname, "subscripting_assign") == 0)
+			defelp = &subscriptingAssignNameEl;
+		else if (pg_strcasecmp(defel->defname, "subscripting_fetch") == 0)
+			defelp = &subscriptingFetchNameEl;
 		else if (pg_strcasecmp(defel->defname, "category") == 0)
 			defelp = &categoryEl;
 		else if (pg_strcasecmp(defel->defname, "preferred") == 0)
@@ -341,8 +350,12 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 		typmodoutName = defGetQualifiedName(typmodoutNameEl);
 	if (analyzeNameEl)
 		analyzeName = defGetQualifiedName(analyzeNameEl);
-	if (subscriptingNameEl)
-		subscriptingName = defGetQualifiedName(subscriptingNameEl);
+	if (subscriptingParseNameEl)
+		subscriptingParseName = defGetQualifiedName(subscriptingParseNameEl);
+	if (subscriptingAssignNameEl)
+		subscriptingAssignName = defGetQualifiedName(subscriptingAssignNameEl);
+	if (subscriptingFetchNameEl)
+		subscriptingFetchName = defGetQualifiedName(subscriptingFetchNameEl);
 	if (categoryEl)
 	{
 		char	   *p = defGetString(categoryEl);
@@ -524,8 +537,14 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 	if (analyzeName)
 		analyzeOid = findTypeAnalyzeFunction(analyzeName, typoid);
 
-	if (subscriptingName)
-		subscriptingOid = findTypeSubscriptingFunction(subscriptingName);
+	if (subscriptingParseName)
+		subscriptingParseOid = findTypeSubscriptingFunction(subscriptingParseName);
+
+	if (subscriptingAssignName)
+		subscriptingAssignOid = findTypeSubscriptingFunction(subscriptingAssignName);
+
+	if (subscriptingFetchName)
+		subscriptingFetchOid = findTypeSubscriptingFunction(subscriptingFetchName);
 
 	/*
 	 * Check permissions on functions.  We choose to require the creator/owner
@@ -647,7 +666,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 				   0,			/* Array Dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   collation,	/* type's collation */
-				   subscriptingOid);	/* subscripting procedure */
+				   subscriptingParseOid,	/* subscripting procedure */
+				   subscriptingAssignOid,
+				   subscriptingFetchOid);
 	Assert(typoid == address.objectId);
 
 	/*
@@ -689,7 +710,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   collation,		/* type's collation */
-			   F_ARRAY_SUBSCRIPT_PARSE);
+			   F_ARRAY_SUBSCRIPT_PARSE,
+			   F_ARRAY_SUBSCRIPT_ASSIGN,
+			   F_ARRAY_SUBSCRIPT_FETCH);
 
 	pfree(array_type);
 
@@ -743,6 +766,7 @@ ObjectAddress
 DefineDomain(CreateDomainStmt *stmt)
 {
 	char	   *domainName;
+	char	   *domainArrayName;
 	Oid			domainNamespace;
 	AclResult	aclresult;
 	int16		internalLength;
@@ -751,7 +775,9 @@ DefineDomain(CreateDomainStmt *stmt)
 	Oid			receiveProcedure;
 	Oid			sendProcedure;
 	Oid			analyzeProcedure;
-	Oid			subscriptingProcedure;
+	Oid			subscriptingParseProcedure;
+	Oid			subscriptingAssignProcedure;
+	Oid			subscriptingFetchProcedure;
 	bool		byValue;
 	char		category;
 	char		delimiter;
@@ -772,6 +798,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	Oid			basetypeoid;
 	Oid			old_type_oid;
 	Oid			domaincoll;
+	Oid			domainArrayOid;
 	Form_pg_type baseType;
 	int32		basetypeMod;
 	Oid			baseColl;
@@ -811,13 +838,16 @@ DefineDomain(CreateDomainStmt *stmt)
 	basetypeoid = HeapTupleGetOid(typeTup);
 
 	/*
-	 * Base type must be a plain base type, another domain, an enum or a range
-	 * type. Domains over pseudotypes would create a security hole.  Domains
-	 * over composite types might be made to work in the future, but not
-	 * today.
+	 * Base type must be a plain base type, a composite type, another domain,
+	 * an enum or a range type.  Domains over pseudotypes would create a
+	 * security hole.  (It would be shorter to code this to just check for
+	 * pseudotypes; but it seems safer to call out the specific typtypes that
+	 * are supported, rather than assume that all future typtypes would be
+	 * automatically supported.)
 	 */
 	typtype = baseType->typtype;
 	if (typtype != TYPTYPE_BASE &&
+		typtype != TYPTYPE_COMPOSITE &&
 		typtype != TYPTYPE_DOMAIN &&
 		typtype != TYPTYPE_ENUM &&
 		typtype != TYPTYPE_RANGE)
@@ -875,8 +905,10 @@ DefineDomain(CreateDomainStmt *stmt)
 	/* Analysis function */
 	analyzeProcedure = baseType->typanalyze;
 
-	/* Subscripting function */
-	subscriptingProcedure = baseType->typsubsparse;
+	/* Subscripting functions */
+	subscriptingParseProcedure = baseType->typsubsparse;
+	subscriptingAssignProcedure = baseType->typsubsassign;
+	subscriptingFetchProcedure = baseType->typsubsfetch;
 
 	/* Inherited default value */
 	datum = SysCacheGetAttr(TYPEOID, typeTup,
@@ -1045,6 +1077,9 @@ DefineDomain(CreateDomainStmt *stmt)
 		}
 	}
 
+	/* Allocate OID for array type */
+	domainArrayOid = AssignTypeArrayOid();
+
 	/*
 	 * Have TypeCreate do all the real work.
 	 */
@@ -1069,7 +1104,7 @@ DefineDomain(CreateDomainStmt *stmt)
 				   analyzeProcedure,	/* analyze procedure */
 				   InvalidOid,	/* no array element type */
 				   false,		/* this isn't an array */
-				   InvalidOid,	/* no arrays for domains (yet) */
+				   domainArrayOid,	/* array type we are about to create */
 				   basetypeoid, /* base type ID */
 				   defaultValue,	/* default type value (text) */
 				   defaultValueBin, /* default type value (binary) */
@@ -1080,7 +1115,54 @@ DefineDomain(CreateDomainStmt *stmt)
 				   typNDims,	/* Array dimensions for base type */
 				   typNotNull,	/* Type NOT NULL */
 				   domaincoll,  /* type's collation */
-				   subscriptingProcedure);	/* subscripting procedure */
+				   subscriptingParseProcedure,	/* subscripting procedure */
+				   subscriptingAssignProcedure,
+				   subscriptingFetchProcedure);
+
+	/*
+	 * Create the array type that goes with it.
+	 */
+	domainArrayName = makeArrayTypeName(domainName, domainNamespace);
+
+	/* alignment must be 'i' or 'd' for arrays */
+	alignment = (alignment == 'd') ? 'd' : 'i';
+
+	TypeCreate(domainArrayOid,	/* force assignment of this type OID */
+			   domainArrayName, /* type name */
+			   domainNamespace, /* namespace */
+			   InvalidOid,		/* relation oid (n/a here) */
+			   0,				/* relation kind (ditto) */
+			   GetUserId(),		/* owner's ID */
+			   -1,				/* internal size (always varlena) */
+			   TYPTYPE_BASE,	/* type-type (base type) */
+			   TYPCATEGORY_ARRAY,	/* type-category (array) */
+			   false,			/* array types are never preferred */
+			   delimiter,		/* array element delimiter */
+			   F_ARRAY_IN,		/* input procedure */
+			   F_ARRAY_OUT,		/* output procedure */
+			   F_ARRAY_RECV,	/* receive procedure */
+			   F_ARRAY_SEND,	/* send procedure */
+			   InvalidOid,		/* typmodin procedure - none */
+			   InvalidOid,		/* typmodout procedure - none */
+			   F_ARRAY_TYPANALYZE,	/* analyze procedure */
+			   address.objectId,	/* element type ID */
+			   true,			/* yes this is an array type */
+			   InvalidOid,		/* no further array type */
+			   InvalidOid,		/* base type ID */
+			   NULL,			/* never a default type value */
+			   NULL,			/* binary default isn't sent either */
+			   false,			/* never passed by value */
+			   alignment,		/* see above */
+			   'x',				/* ARRAY is always toastable */
+			   -1,				/* typMod (Domains only) */
+			   0,				/* Array dimensions of typbasetype */
+			   false,			/* Type NOT NULL */
+			   domaincoll,		/* type's collation */
+			   F_ARRAY_SUBSCRIPT_PARSE, /* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_ASSIGN,
+			   F_ARRAY_SUBSCRIPT_FETCH);
+
+	pfree(domainArrayName);
 
 	/*
 	 * Process constraints which refer to the domain ID returned by TypeCreate
@@ -1158,6 +1240,7 @@ DefineEnum(CreateEnumStmt *stmt)
 					 errmsg("type \"%s\" already exists", enumName)));
 	}
 
+	/* Allocate OID for array type */
 	enumArrayOid = AssignTypeArrayOid();
 
 	/* Create the pg_type entry */
@@ -1193,7 +1276,9 @@ DefineEnum(CreateEnumStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* type's collation */
-				   InvalidOid);	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsassign - none */
+				   InvalidOid);	/* typsubsfetch - none */
 
 	/* Enter the enum's values into pg_enum */
 	EnumValuesCreate(enumTypeAddr.objectId, stmt->vals);
@@ -1234,7 +1319,9 @@ DefineEnum(CreateEnumStmt *stmt)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   InvalidOid,		/* type's collation */
-			   F_ARRAY_SUBSCRIPT_PARSE);	/* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_PARSE,	/* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_ASSIGN,
+			   F_ARRAY_SUBSCRIPT_FETCH);
 
 	pfree(enumArrayName);
 
@@ -1243,10 +1330,10 @@ DefineEnum(CreateEnumStmt *stmt)
 
 /*
  * AlterEnum
- *		Adds a new label to an existing enum.
+ *		ALTER TYPE on an enum.
  */
 ObjectAddress
-AlterEnum(AlterEnumStmt *stmt)
+AlterEnum(AlterEnumStmt *stmt, bool isTopLevel)
 {
 	Oid			enum_type_oid;
 	TypeName   *typename;
@@ -1264,8 +1351,6 @@ AlterEnum(AlterEnumStmt *stmt)
 	/* Check it's an enum and check user has permission to ALTER the enum */
 	checkEnumOwner(tup);
 
-	ReleaseSysCache(tup);
-
 	if (stmt->oldVal)
 	{
 		/* Rename an existing label */
@@ -1274,6 +1359,27 @@ AlterEnum(AlterEnumStmt *stmt)
 	else
 	{
 		/* Add a new label */
+
+		/*
+		 * Ordinarily we disallow adding values within transaction blocks,
+		 * because we can't cope with enum OID values getting into indexes and
+		 * then having their defining pg_enum entries go away.  However, it's
+		 * okay if the enum type was created in the current transaction, since
+		 * then there can be no such indexes that wouldn't themselves go away
+		 * on rollback.  (We support this case because pg_dump
+		 * --binary-upgrade needs it.)  We test this by seeing if the pg_type
+		 * row has xmin == current XID and is not HEAP_UPDATED.  If it is
+		 * HEAP_UPDATED, we can't be sure whether the type was created or only
+		 * modified in this xact.  So we are disallowing some cases that could
+		 * theoretically be safe; but fortunately pg_dump only needs the
+		 * simplest case.
+		 */
+		if (HeapTupleHeaderGetXmin(tup->t_data) == GetCurrentTransactionId() &&
+			!(tup->t_data->t_infomask & HEAP_UPDATED))
+			 /* safe to do inside transaction block */ ;
+		else
+			PreventTransactionChain(isTopLevel, "ALTER TYPE ... ADD");
+
 		AddEnumLabel(enum_type_oid, stmt->newVal,
 					 stmt->newValNeighbor, stmt->newValIsAfter,
 					 stmt->skipIfNewValExists);
@@ -1282,6 +1388,8 @@ AlterEnum(AlterEnumStmt *stmt)
 	InvokeObjectPostAlterHook(TypeRelationId, enum_type_oid, 0);
 
 	ObjectAddressSet(address, TypeRelationId, enum_type_oid);
+
+	ReleaseSysCache(tup);
 
 	return address;
 }
@@ -1523,7 +1631,9 @@ DefineRange(CreateRangeStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* type's collation (ranges never have one) */
-				   InvalidOid);	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsparse - none */
+				   InvalidOid,	/* typsubsassign - none */
+				   InvalidOid);	/* typsubsfetch - none */
 	Assert(typoid == address.objectId);
 
 	/* Create the entry in pg_range */
@@ -1566,7 +1676,9 @@ DefineRange(CreateRangeStmt *stmt)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   InvalidOid,		/* typcollation */
-			   F_ARRAY_SUBSCRIPT_PARSE);	/* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_PARSE,	/* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_ASSIGN,
+			   F_ARRAY_SUBSCRIPT_FETCH);
 
 	pfree(rangeArrayName);
 
@@ -2291,6 +2403,8 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 							 typTup->typbasetype,
 							 typTup->typcollation,
 							 typTup->typsubsparse,
+							 typTup->typsubsassign,
+							 typTup->typsubsfetch,
 							 defaultExpr,
 							 true); /* Rebuild is true */
 

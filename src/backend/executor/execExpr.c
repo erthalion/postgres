@@ -1225,6 +1225,7 @@ ExecInitExprRec(Expr *node, PlanState *parent, ExprState *state,
 			{
 				ArrayCoerceExpr *acoerce = (ArrayCoerceExpr *) node;
 				Oid			resultelemtype;
+				ExprState  *elemstate;
 
 				/* evaluate argument into step's result area */
 				ExecInitExprRec(acoerce->arg, parent, state, resv, resnull);
@@ -1234,42 +1235,49 @@ ExecInitExprRec(Expr *node, PlanState *parent, ExprState *state,
 					ereport(ERROR,
 							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							 errmsg("target type is not an array")));
-				/* Arrays over domains aren't supported yet */
-				Assert(getBaseType(resultelemtype) == resultelemtype);
+
+				/*
+				 * Construct a sub-expression for the per-element expression;
+				 * but don't ready it until after we check it for triviality.
+				 * We assume it hasn't any Var references, but does have a
+				 * CaseTestExpr representing the source array element values.
+				 */
+				elemstate = makeNode(ExprState);
+				elemstate->expr = acoerce->elemexpr;
+				elemstate->innermost_caseval = (Datum *) palloc(sizeof(Datum));
+				elemstate->innermost_casenull = (bool *) palloc(sizeof(bool));
+
+				ExecInitExprRec(acoerce->elemexpr, parent, elemstate,
+								&elemstate->resvalue, &elemstate->resnull);
+
+				if (elemstate->steps_len == 1 &&
+					elemstate->steps[0].opcode == EEOP_CASE_TESTVAL)
+				{
+					/* Trivial, so we need no per-element work at runtime */
+					elemstate = NULL;
+				}
+				else
+				{
+					/* Not trivial, so append a DONE step */
+					scratch.opcode = EEOP_DONE;
+					ExprEvalPushStep(elemstate, &scratch);
+					/* and ready the subexpression */
+					ExecReadyExpr(elemstate);
+				}
 
 				scratch.opcode = EEOP_ARRAYCOERCE;
-				scratch.d.arraycoerce.coerceexpr = acoerce;
+				scratch.d.arraycoerce.elemexprstate = elemstate;
 				scratch.d.arraycoerce.resultelemtype = resultelemtype;
 
-				if (OidIsValid(acoerce->elemfuncid))
+				if (elemstate)
 				{
-					AclResult	aclresult;
-
-					/* Check permission to call function */
-					aclresult = pg_proc_aclcheck(acoerce->elemfuncid,
-												 GetUserId(),
-												 ACL_EXECUTE);
-					if (aclresult != ACLCHECK_OK)
-						aclcheck_error(aclresult, ACL_KIND_PROC,
-									   get_func_name(acoerce->elemfuncid));
-					InvokeFunctionExecuteHook(acoerce->elemfuncid);
-
-					/* Set up the primary fmgr lookup information */
-					scratch.d.arraycoerce.elemfunc =
-						(FmgrInfo *) palloc0(sizeof(FmgrInfo));
-					fmgr_info(acoerce->elemfuncid,
-							  scratch.d.arraycoerce.elemfunc);
-					fmgr_info_set_expr((Node *) acoerce,
-									   scratch.d.arraycoerce.elemfunc);
-
 					/* Set up workspace for array_map */
 					scratch.d.arraycoerce.amstate =
 						(ArrayMapState *) palloc0(sizeof(ArrayMapState));
 				}
 				else
 				{
-					/* Don't need workspace if there's no conversion func */
-					scratch.d.arraycoerce.elemfunc = NULL;
+					/* Don't need workspace if there's no subexpression */
 					scratch.d.arraycoerce.amstate = NULL;
 				}
 
@@ -2342,9 +2350,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		fmgr_info(aref->refnestedfunc, nested_finfo);
 	}
 
-	scratch->d.sbsref.eval_finfo = eval_finfo;
-	scratch->d.sbsref.nested_finfo = nested_finfo;
-
 	/* Fill constant fields of SubscriptingRefState */
 	arefstate->isassignment = isAssignment;
 	arefstate->refelemtype = aref->refelemtype;
@@ -2368,9 +2373,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		scratch->opcode = EEOP_JUMP_IF_NULL;
 		scratch->d.jump.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
-
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
 
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
@@ -2417,9 +2419,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		scratch->d.sbsref_subscript.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
 
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
-
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
 		i++;
@@ -2453,9 +2452,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		scratch->d.sbsref_subscript.isupper = false;
 		scratch->d.sbsref_subscript.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
-
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
 
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
@@ -2491,10 +2487,9 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		{
 			scratch->opcode = EEOP_SBSREF_OLD;
 			scratch->d.sbsref.state = arefstate;
-			ExprEvalPushStep(state, scratch);
-
 			scratch->d.sbsref.eval_finfo = eval_finfo;
 			scratch->d.sbsref.nested_finfo = nested_finfo;
+			ExprEvalPushStep(state, scratch);
 		}
 
 		/* SBSREF_OLD puts extracted value into prevvalue/prevnull */
@@ -2513,10 +2508,9 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		/* and perform the assignment */
 		scratch->opcode = EEOP_SBSREF_ASSIGN;
 		scratch->d.sbsref.state = arefstate;
-		ExprEvalPushStep(state, scratch);
-
 		scratch->d.sbsref.eval_finfo = eval_finfo;
 		scratch->d.sbsref.nested_finfo = nested_finfo;
+		ExprEvalPushStep(state, scratch);
 
 	}
 	else
@@ -2524,10 +2518,9 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref, PlanState 
 		/* array fetch is much simpler */
 		scratch->opcode = EEOP_SBSREF_FETCH;
 		scratch->d.sbsref.state = arefstate;
-		ExprEvalPushStep(state, scratch);
-
 		scratch->d.sbsref.eval_finfo = eval_finfo;
 		scratch->d.sbsref.nested_finfo = nested_finfo;
+		ExprEvalPushStep(state, scratch);
 
 	}
 

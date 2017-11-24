@@ -67,6 +67,7 @@ extern bool enable_material;
 extern bool enable_mergejoin;
 extern bool enable_hashjoin;
 extern bool enable_gathermerge;
+extern bool enable_partition_wise_join;
 extern int	constraint_exclusion;
 
 extern double clamp_row_est(double nrows);
@@ -115,6 +116,7 @@ extern void cost_material(Path *path,
 extern void cost_agg(Path *path, PlannerInfo *root,
 		 AggStrategy aggstrategy, const AggClauseCosts *aggcosts,
 		 int numGroupCols, double numGroups,
+		 List *quals,
 		 Cost input_startup_cost, Cost input_total_cost,
 		 double input_tuples);
 extern void cost_windowagg(Path *path, PlannerInfo *root,
@@ -123,6 +125,7 @@ extern void cost_windowagg(Path *path, PlannerInfo *root,
 			   double input_tuples);
 extern void cost_group(Path *path, PlannerInfo *root,
 		   int numGroupCols, double numGroups,
+		   List *quals,
 		   Cost input_startup_cost, Cost input_total_cost,
 		   double input_tuples);
 extern void initial_cost_nestloop(PlannerInfo *root,

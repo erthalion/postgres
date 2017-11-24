@@ -18,6 +18,8 @@
 
 #include "access/tupdesc.h"
 #include "fmgr.h"
+#include "storage/dsm.h"
+#include "utils/dsa.h"
 
 
 /* DomainConstraintCache is an opaque struct known only within typcache.c */
@@ -90,6 +92,13 @@ typedef struct TypeCacheEntry
 	FmgrInfo	rng_subdiff_finfo;	/* difference function, if any */
 
 	/*
+	 * Domain's base type and typmod if it's a domain type.  Zeroes if not
+	 * domain, or if information hasn't been requested.
+	 */
+	Oid			domainBaseType;
+	int32		domainBaseTypmod;
+
+	/*
 	 * Domain constraint data if it's a domain type.  NULL if not domain, or
 	 * if domain has no constraints, or if information hasn't been requested.
 	 */
@@ -121,9 +130,10 @@ typedef struct TypeCacheEntry
 #define TYPECACHE_BTREE_OPFAMILY	0x0200
 #define TYPECACHE_HASH_OPFAMILY		0x0400
 #define TYPECACHE_RANGE_INFO		0x0800
-#define TYPECACHE_DOMAIN_INFO		0x1000
-#define TYPECACHE_HASH_EXTENDED_PROC		0x2000
-#define TYPECACHE_HASH_EXTENDED_PROC_FINFO	0x4000
+#define TYPECACHE_DOMAIN_BASE_INFO			0x1000
+#define TYPECACHE_DOMAIN_CONSTR_INFO		0x2000
+#define TYPECACHE_HASH_EXTENDED_PROC		0x4000
+#define TYPECACHE_HASH_EXTENDED_PROC_FINFO	0x8000
 
 /*
  * Callers wishing to maintain a long-lived reference to a domain's constraint
@@ -143,6 +153,7 @@ typedef struct DomainConstraintRef
 	MemoryContextCallback callback; /* used to release refcount when done */
 } DomainConstraintRef;
 
+typedef struct SharedRecordTypmodRegistry SharedRecordTypmodRegistry;
 
 extern TypeCacheEntry *lookup_type_cache(Oid type_id, int flags);
 
@@ -160,8 +171,18 @@ extern TupleDesc lookup_rowtype_tupdesc_noerror(Oid type_id, int32 typmod,
 
 extern TupleDesc lookup_rowtype_tupdesc_copy(Oid type_id, int32 typmod);
 
+extern TupleDesc lookup_rowtype_tupdesc_domain(Oid type_id, int32 typmod,
+							  bool noError);
+
 extern void assign_record_type_typmod(TupleDesc tupDesc);
 
 extern int	compare_values_of_enum(TypeCacheEntry *tcache, Oid arg1, Oid arg2);
+
+extern size_t SharedRecordTypmodRegistryEstimate(void);
+
+extern void SharedRecordTypmodRegistryInit(SharedRecordTypmodRegistry *,
+							   dsm_segment *segment, dsa_area *area);
+
+extern void SharedRecordTypmodRegistryAttach(SharedRecordTypmodRegistry *);
 
 #endif							/* TYPCACHE_H */

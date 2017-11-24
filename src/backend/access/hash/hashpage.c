@@ -298,20 +298,20 @@ _hash_dropscanbuf(Relation rel, HashScanOpaque so)
 {
 	/* release pin we hold on primary bucket page */
 	if (BufferIsValid(so->hashso_bucket_buf) &&
-		so->hashso_bucket_buf != so->hashso_curbuf)
+		so->hashso_bucket_buf != so->currPos.buf)
 		_hash_dropbuf(rel, so->hashso_bucket_buf);
 	so->hashso_bucket_buf = InvalidBuffer;
 
 	/* release pin we hold on primary bucket page  of bucket being split */
 	if (BufferIsValid(so->hashso_split_bucket_buf) &&
-		so->hashso_split_bucket_buf != so->hashso_curbuf)
+		so->hashso_split_bucket_buf != so->currPos.buf)
 		_hash_dropbuf(rel, so->hashso_split_bucket_buf);
 	so->hashso_split_bucket_buf = InvalidBuffer;
 
 	/* release any pin we still hold */
-	if (BufferIsValid(so->hashso_curbuf))
-		_hash_dropbuf(rel, so->hashso_curbuf);
-	so->hashso_curbuf = InvalidBuffer;
+	if (BufferIsValid(so->currPos.buf))
+		_hash_dropbuf(rel, so->currPos.buf);
+	so->currPos.buf = InvalidBuffer;
 
 	/* reset split scan */
 	so->hashso_buc_populated = false;
@@ -403,7 +403,7 @@ _hash_init(Relation rel, double num_tuples, ForkNumber forkNum)
 
 		XLogBeginInsert();
 		XLogRegisterData((char *) &xlrec, SizeOfHashInitMetaPage);
-		XLogRegisterBuffer(0, metabuf, REGBUF_WILL_INIT);
+		XLogRegisterBuffer(0, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
 
 		recptr = XLogInsert(RM_HASH_ID, XLOG_HASH_INIT_META_PAGE);
 
@@ -592,8 +592,9 @@ _hash_init_metabuffer(Buffer buf, double num_tuples, RegProcedure procid,
 	metap->hashm_firstfree = 0;
 
 	/*
-	 * Set pd_lower just past the end of the metadata.  This is to log full
-	 * page image of metapage in xloginsert.c.
+	 * Set pd_lower just past the end of the metadata.  This is essential,
+	 * because without doing so, metadata will be lost if xlog.c compresses
+	 * the page.
 	 */
 	((PageHeader) page)->pd_lower =
 		((char *) metap + sizeof(HashMetaPageData)) - (char *) page;

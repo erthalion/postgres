@@ -46,12 +46,12 @@ CREATE FUNCTION custom_out(custom)
    AS '_OBJWD_/subscripting'
    LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION custom_subscript_parse(internal)
+CREATE FUNCTION custom_subscripting_parse(internal)
    RETURNS internal
    AS '_OBJWD_/subscripting'
    LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION custom_subscripting_extract(internal)
+CREATE FUNCTION custom_subscripting_fetch(internal)
    RETURNS internal
    AS '_OBJWD_/subscripting'
    LANGUAGE C IMMUTABLE STRICT;
@@ -65,7 +65,9 @@ CREATE TYPE custom (
    internallength = 8,
    input = custom_in,
    output = custom_out,
-   subscripting = custom_subscript_parse
+   subscripting_parse = custom_subscripting_parse,
+   subscripting_fetch = custom_subscripting_fetch,
+   subscripting_assign = custom_subscripting_assign
 );
 
 -- we can use it in a table

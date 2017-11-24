@@ -2118,6 +2118,9 @@ heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer,
 		 * If we can't see it, maybe no one else can either.  At caller
 		 * request, check whether all chain members are dead to all
 		 * transactions.
+		 *
+		 * Note: if you change the criterion here for what is "dead", fix the
+		 * planner's get_actual_variable_range() function to match.
 		 */
 		if (all_dead && *all_dead &&
 			!HeapTupleIsSurelyDead(heapTuple, RecentGlobalXmin))
@@ -2595,15 +2598,17 @@ heap_prepare_insert(Relation relation, HeapTuple tup, TransactionId xid,
 					CommandId cid, int options)
 {
 	/*
-	 * For now, parallel operations are required to be strictly read-only.
-	 * Unlike heap_update() and heap_delete(), an insert should never create a
-	 * combo CID, so it might be possible to relax this restriction, but not
-	 * without more thought and testing.
+	 * Parallel operations are required to be strictly read-only in a parallel
+	 * worker.  Parallel inserts are not safe even in the leader in the
+	 * general case, because group locking means that heavyweight locks for
+	 * relation extension or GIN page locks will not conflict between members
+	 * of a lock group, but we don't prohibit that case here because there are
+	 * useful special cases that we can safely allow, such as CREATE TABLE AS.
 	 */
-	if (IsInParallelMode())
+	if (IsParallelWorker())
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-				 errmsg("cannot insert tuples during a parallel operation")));
+				 errmsg("cannot insert tuples in a parallel worker")));
 
 	if (relation->rd_rel->relhasoids)
 	{
@@ -9163,7 +9168,7 @@ heap_mask(char *pagedata, BlockNumber blkno)
 	Page		page = (Page) pagedata;
 	OffsetNumber off;
 
-	mask_page_lsn(page);
+	mask_page_lsn_and_checksum(page);
 
 	mask_page_hint_bits(page);
 	mask_unused_space(page);

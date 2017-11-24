@@ -1016,7 +1016,7 @@ CopyArrayEls(ArrayType *array,
 Datum
 array_out(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 	Oid			element_type = AARR_ELEMTYPE(v);
 	int			typlen;
 	bool		typbyval;
@@ -1539,7 +1539,7 @@ ReadArrayBinary(StringInfo buf,
 Datum
 array_send(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 	Oid			element_type = AARR_ELEMTYPE(v);
 	int			typlen;
 	bool		typbyval;
@@ -1595,13 +1595,13 @@ array_send(PG_FUNCTION_ARGS)
 	pq_begintypsend(&buf);
 
 	/* Send the array header information */
-	pq_sendint(&buf, ndim, 4);
-	pq_sendint(&buf, AARR_HASNULL(v) ? 1 : 0, 4);
-	pq_sendint(&buf, element_type, sizeof(Oid));
+	pq_sendint32(&buf, ndim);
+	pq_sendint32(&buf, AARR_HASNULL(v) ? 1 : 0);
+	pq_sendint32(&buf, element_type);
 	for (i = 0; i < ndim; i++)
 	{
-		pq_sendint(&buf, dim[i], 4);
-		pq_sendint(&buf, lb[i], 4);
+		pq_sendint32(&buf, dim[i]);
+		pq_sendint32(&buf, lb[i]);
 	}
 
 	/* Send the array elements using the element's own sendproc */
@@ -1619,14 +1619,14 @@ array_send(PG_FUNCTION_ARGS)
 		if (isnull)
 		{
 			/* -1 length means a NULL */
-			pq_sendint(&buf, -1, 4);
+			pq_sendint32(&buf, -1);
 		}
 		else
 		{
 			bytea	   *outputbytes;
 
 			outputbytes = SendFunctionCall(&my_extra->proc, itemvalue);
-			pq_sendint(&buf, VARSIZE(outputbytes) - VARHDRSZ, 4);
+			pq_sendint32(&buf, VARSIZE(outputbytes) - VARHDRSZ);
 			pq_sendbytes(&buf, VARDATA(outputbytes),
 						 VARSIZE(outputbytes) - VARHDRSZ);
 			pfree(outputbytes);
@@ -1643,7 +1643,7 @@ array_send(PG_FUNCTION_ARGS)
 Datum
 array_ndims(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 
 	/* Sanity check: does it look like an array at all? */
 	if (AARR_NDIM(v) <= 0 || AARR_NDIM(v) > MAXDIM)
@@ -1659,7 +1659,7 @@ array_ndims(PG_FUNCTION_ARGS)
 Datum
 array_dims(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 	char	   *p;
 	int			i;
 	int		   *dimv,
@@ -1697,7 +1697,7 @@ array_dims(PG_FUNCTION_ARGS)
 Datum
 array_lower(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 	int			reqdim = PG_GETARG_INT32(1);
 	int		   *lb;
 	int			result;
@@ -1724,7 +1724,7 @@ array_lower(PG_FUNCTION_ARGS)
 Datum
 array_upper(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 	int			reqdim = PG_GETARG_INT32(1);
 	int		   *dimv,
 			   *lb;
@@ -1754,7 +1754,7 @@ array_upper(PG_FUNCTION_ARGS)
 Datum
 array_length(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 	int			reqdim = PG_GETARG_INT32(1);
 	int		   *dimv;
 	int			result;
@@ -1781,7 +1781,7 @@ array_length(PG_FUNCTION_ARGS)
 Datum
 array_cardinality(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 
 	PG_RETURN_INT32(ArrayGetNItems(AARR_NDIM(v), AARR_DIMS(v)));
 }
@@ -3097,21 +3097,18 @@ array_set(ArrayType *array, int nSubscripts, int *indx,
 /*
  * array_map()
  *
- * Map an array through an arbitrary function.  Return a new array with
- * same dimensions and each source element transformed by fn().  Each
- * source element is passed as the first argument to fn(); additional
- * arguments to be passed to fn() can be specified by the caller.
- * The output array can have a different element type than the input.
+ * Map an array through an arbitrary expression.  Return a new array with
+ * the same dimensions and each source element transformed by the given,
+ * already-compiled expression.  Each source element is placed in the
+ * innermost_caseval/innermost_casenull fields of the ExprState.
  *
  * Parameters are:
- * * fcinfo: a function-call data structure pre-constructed by the caller
- *	 to be ready to call the desired function, with everything except the
- *	 first argument position filled in.  In particular, flinfo identifies
- *	 the function fn(), and if nargs > 1 then argument positions after the
- *	 first must be preset to the additional values to be passed.  The
- *	 first argument position initially holds the input array value.
+ * * arrayd: Datum representing array argument.
+ * * exprstate: ExprState representing the per-element transformation.
+ * * econtext: context for expression evaluation.
  * * retType: OID of element type of output array.  This must be the same as,
- *	 or binary-compatible with, the result type of fn().
+ *	 or binary-compatible with, the result type of the expression.  It might
+ *	 be different from the input array's element type.
  * * amstate: workspace for array_map.  Must be zeroed by caller before
  *	 first call, and not touched after that.
  *
@@ -3121,11 +3118,14 @@ array_set(ArrayType *array, int nSubscripts, int *indx,
  *
  * NB: caller must assure that input array is not NULL.  NULL elements in
  * the array are OK however.
+ * NB: caller should be running in econtext's per-tuple memory context.
  */
 Datum
-array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
+array_map(Datum arrayd,
+		  ExprState *exprstate, ExprContext *econtext,
+		  Oid retType, ArrayMapState *amstate)
 {
-	AnyArrayType *v;
+	AnyArrayType *v = DatumGetAnyArrayP(arrayd);
 	ArrayType  *result;
 	Datum	   *values;
 	bool	   *nulls;
@@ -3146,13 +3146,8 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
 	array_iter	iter;
 	ArrayMetaState *inp_extra;
 	ArrayMetaState *ret_extra;
-
-	/* Get input array */
-	if (fcinfo->nargs < 1)
-		elog(ERROR, "invalid nargs: %d", fcinfo->nargs);
-	if (PG_ARGISNULL(0))
-		elog(ERROR, "null input array");
-	v = PG_GETARG_ANY_ARRAY(0);
+	Datum	   *transform_source = exprstate->innermost_caseval;
+	bool	   *transform_source_isnull = exprstate->innermost_casenull;
 
 	inpType = AARR_ELEMTYPE(v);
 	ndim = AARR_NDIM(v);
@@ -3163,7 +3158,7 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
 	if (nitems <= 0)
 	{
 		/* Return empty array */
-		PG_RETURN_ARRAYTYPE_P(construct_empty_array(retType));
+		return PointerGetDatum(construct_empty_array(retType));
 	}
 
 	/*
@@ -3208,39 +3203,15 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
 
 	for (i = 0; i < nitems; i++)
 	{
-		bool		callit = true;
-
 		/* Get source element, checking for NULL */
-		fcinfo->arg[0] = array_iter_next(&iter, &fcinfo->argnull[0], i,
-										 inp_typlen, inp_typbyval, inp_typalign);
+		*transform_source =
+			array_iter_next(&iter, transform_source_isnull, i,
+							inp_typlen, inp_typbyval, inp_typalign);
 
-		/*
-		 * Apply the given function to source elt and extra args.
-		 */
-		if (fcinfo->flinfo->fn_strict)
-		{
-			int			j;
+		/* Apply the given expression to source element */
+		values[i] = ExecEvalExpr(exprstate, econtext, &nulls[i]);
 
-			for (j = 0; j < fcinfo->nargs; j++)
-			{
-				if (fcinfo->argnull[j])
-				{
-					callit = false;
-					break;
-				}
-			}
-		}
-
-		if (callit)
-		{
-			fcinfo->isnull = false;
-			values[i] = FunctionCallInvoke(fcinfo);
-		}
-		else
-			fcinfo->isnull = true;
-
-		nulls[i] = fcinfo->isnull;
-		if (fcinfo->isnull)
+		if (nulls[i])
 			hasnulls = true;
 		else
 		{
@@ -3259,7 +3230,7 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
 		}
 	}
 
-	/* Allocate and initialize the result array */
+	/* Allocate and fill the result array */
 	if (hasnulls)
 	{
 		dataoffset = ARR_OVERHEAD_WITHNULLS(ndim, nitems);
@@ -3278,18 +3249,18 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
 	memcpy(ARR_DIMS(result), AARR_DIMS(v), ndim * sizeof(int));
 	memcpy(ARR_LBOUND(result), AARR_LBOUND(v), ndim * sizeof(int));
 
-	/*
-	 * Note: do not risk trying to pfree the results of the called function
-	 */
 	CopyArrayEls(result,
 				 values, nulls, nitems,
 				 typlen, typbyval, typalign,
 				 false);
 
+	/*
+	 * Note: do not risk trying to pfree the results of the called expression
+	 */
 	pfree(values);
 	pfree(nulls);
 
-	PG_RETURN_ARRAYTYPE_P(result);
+	return PointerGetDatum(result);
 }
 
 /*
@@ -3302,6 +3273,7 @@ array_map(FunctionCallInfo fcinfo, Oid retType, ArrayMapState *amstate)
  *
  * A palloc'd 1-D array object is constructed and returned.  Note that
  * elem values will be copied into the object even if pass-by-ref type.
+ * Also note the result will be 0-D not 1-D if nelems = 0.
  *
  * NOTE: it would be cleaner to look up the elmlen/elmbval/elmalign info
  * from the system catalogs, given the elmtype.  However, the caller is
@@ -3336,6 +3308,7 @@ construct_array(Datum *elems, int nelems,
  *
  * A palloc'd ndims-D array object is constructed and returned.  Note that
  * elem values will be copied into the object even if pass-by-ref type.
+ * Also note the result will be 0-D not ndims-D if any dims[i] = 0.
  *
  * NOTE: it would be cleaner to look up the elmlen/elmbval/elmalign info
  * from the system catalogs, given the elmtype.  However, the caller is
@@ -3367,11 +3340,11 @@ construct_md_array(Datum *elems,
 				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
 						ndims, MAXDIM)));
 
-	/* fast track for empty array */
-	if (ndims == 0)
-		return construct_empty_array(elmtype);
-
 	nelems = ArrayGetNItems(ndims, dims);
+
+	/* if ndims <= 0 or any dims[i] == 0, return empty array */
+	if (nelems <= 0)
+		return construct_empty_array(elmtype);
 
 	/* compute required space */
 	nbytes = 0;
@@ -3594,8 +3567,8 @@ array_contains_nulls(ArrayType *array)
 Datum
 array_eq(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY(0);
-	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY(1);
+	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY_P(0);
+	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY_P(1);
 	Oid			collation = PG_GET_COLLATION();
 	int			ndims1 = AARR_NDIM(array1);
 	int			ndims2 = AARR_NDIM(array2);
@@ -3765,8 +3738,8 @@ btarraycmp(PG_FUNCTION_ARGS)
 static int
 array_cmp(FunctionCallInfo fcinfo)
 {
-	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY(0);
-	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY(1);
+	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY_P(0);
+	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY_P(1);
 	Oid			collation = PG_GET_COLLATION();
 	int			ndims1 = AARR_NDIM(array1);
 	int			ndims2 = AARR_NDIM(array2);
@@ -3936,7 +3909,7 @@ array_cmp(FunctionCallInfo fcinfo)
 Datum
 hash_array(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *array = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *array = PG_GETARG_ANY_ARRAY_P(0);
 	int			ndims = AARR_NDIM(array);
 	int		   *dims = AARR_DIMS(array);
 	Oid			element_type = AARR_ELEMTYPE(array);
@@ -4033,7 +4006,7 @@ hash_array(PG_FUNCTION_ARGS)
 Datum
 hash_array_extended(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *array = PG_GETARG_ANY_ARRAY(0);
+	AnyArrayType *array = PG_GETARG_ANY_ARRAY_P(0);
 	uint64		seed = PG_GETARG_INT64(1);
 	int			ndims = AARR_NDIM(array);
 	int		   *dims = AARR_DIMS(array);
@@ -4265,8 +4238,8 @@ array_contain_compare(AnyArrayType *array1, AnyArrayType *array2, Oid collation,
 Datum
 arrayoverlap(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY(0);
-	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY(1);
+	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY_P(0);
+	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY_P(1);
 	Oid			collation = PG_GET_COLLATION();
 	bool		result;
 
@@ -4283,8 +4256,8 @@ arrayoverlap(PG_FUNCTION_ARGS)
 Datum
 arraycontains(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY(0);
-	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY(1);
+	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY_P(0);
+	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY_P(1);
 	Oid			collation = PG_GET_COLLATION();
 	bool		result;
 
@@ -4301,8 +4274,8 @@ arraycontains(PG_FUNCTION_ARGS)
 Datum
 arraycontained(PG_FUNCTION_ARGS)
 {
-	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY(0);
-	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY(1);
+	AnyArrayType *array1 = PG_GETARG_ANY_ARRAY_P(0);
+	AnyArrayType *array2 = PG_GETARG_ANY_ARRAY_P(1);
 	Oid			collation = PG_GET_COLLATION();
 	bool		result;
 
@@ -5639,7 +5612,7 @@ generate_subscripts(PG_FUNCTION_ARGS)
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
 	{
-		AnyArrayType *v = PG_GETARG_ANY_ARRAY(0);
+		AnyArrayType *v = PG_GETARG_ANY_ARRAY_P(0);
 		int			reqdim = PG_GETARG_INT32(1);
 		int		   *lb,
 				   *dimv;
@@ -6001,7 +5974,7 @@ array_unnest(PG_FUNCTION_ARGS)
 		 * and not before.  (If no detoast happens, we assume the originally
 		 * passed array will stick around till then.)
 		 */
-		arr = PG_GETARG_ANY_ARRAY(0);
+		arr = PG_GETARG_ANY_ARRAY_P(0);
 
 		/* allocate memory for user context */
 		fctx = (array_unnest_fctx *) palloc(sizeof(array_unnest_fctx));
@@ -6597,7 +6570,7 @@ width_bucket_array_variable(Datum operand,
  * value will be returned.
  */
 Datum
-array_subscripting_assign(PG_FUNCTION_ARGS)
+array_subscript_assign(PG_FUNCTION_ARGS)
 {
 	Datum						containerSource = PG_GETARG_DATUM(0);
 	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -6662,7 +6635,7 @@ array_subscripting_assign(PG_FUNCTION_ARGS)
 }
 
 Datum
-array_subscripting_fetch(PG_FUNCTION_ARGS)
+array_subscript_fetch(PG_FUNCTION_ARGS)
 {
 	Datum							containerSource = PG_GETARG_DATUM(0);
 	ExprEvalStep					*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
@@ -6853,12 +6826,7 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 
 	}
 
-	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPTING_FETCH;
-
-	if (isAssignment)
-		sbsref->refevalfunc = F_ARRAY_SUBSCRIPTING_ASSIGN;
-	else
-		sbsref->refevalfunc = F_ARRAY_SUBSCRIPTING_FETCH;
+	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_FETCH;
 
 	PG_RETURN_POINTER(sbsref);
 }

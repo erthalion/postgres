@@ -211,8 +211,6 @@ typedef char bool;
 #endif
 #endif							/* not C++ */
 
-typedef bool *BoolPtr;
-
 #ifndef TRUE
 #define TRUE	1
 #endif
@@ -644,6 +642,23 @@ typedef NameData *Name;
  * if they are to be used.
  */
 #define pg_attribute_noreturn()
+#endif
+
+
+/*
+ * Forcing a function not to be inlined can be useful if it's the slow path of
+ * a performance-critical function, or should be visible in profiles to allow
+ * for proper cost attribution.  Note that unlike the pg_attribute_XXX macros
+ * above, this should be placed before the function's return type and name.
+ */
+/* GCC, Sunpro and XLC support noinline via __attribute__ */
+#if (defined(__GNUC__) && __GNUC__ > 2) || defined(__SUNPRO_C) || defined(__IBMC__)
+#define pg_noinline __attribute__((noinline))
+/* msvc via declspec */
+#elif defined(_MSC_VER)
+#define pg_noinline __declspec(noinline)
+#else
+#define pg_noinline
 #endif
 
 /* ----------------------------------------------------------------
@@ -1097,14 +1112,6 @@ extern int	fdatasync(int fildes);
 #if defined(HAVE_LONG_LONG_INT_64) && !defined(HAVE_STRTOULL) && defined(HAVE_STRTOUQ)
 #define strtoull strtouq
 #define HAVE_STRTOULL 1
-#endif
-
-/*
- * We assume if we have these two functions, we have their friends too, and
- * can use the wide-character functions.
- */
-#if defined(HAVE_WCSTOMBS) && defined(HAVE_TOWLOWER)
-#define USE_WIDE_UPPER_LOWER
 #endif
 
 /* EXEC_BACKEND defines */

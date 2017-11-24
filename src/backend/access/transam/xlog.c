@@ -110,6 +110,8 @@ int			wal_retrieve_retry_interval = 5000;
 bool		XLOG_DEBUG = false;
 #endif
 
+int			wal_segment_size = DEFAULT_XLOG_SEG_SIZE;
+
 /*
  * Number of WAL insertion locks to use. A higher value allows more insertions
  * to happen concurrently, but adds some CPU overhead to flushing the WAL,
@@ -731,14 +733,16 @@ static ControlFileData *ControlFile = NULL;
 	(((recptr) / XLOG_BLCKSZ) % (XLogCtl->XLogCacheBlck + 1))
 
 /*
- * These are the number of bytes in a WAL page and segment usable for WAL data.
+ * These are the number of bytes in a WAL page usable for WAL data.
  */
 #define UsableBytesInPage (XLOG_BLCKSZ - SizeOfXLogShortPHD)
-#define UsableBytesInSegment ((XLOG_SEG_SIZE / XLOG_BLCKSZ) * UsableBytesInPage - (SizeOfXLogLongPHD - SizeOfXLogShortPHD))
 
 /* Convert min_wal_size_mb and max wal_size_mb to equivalent segment count */
-#define ConvertToXSegs(x)	\
-	(x / (XLOG_SEG_SIZE / (1024 * 1024)))
+#define ConvertToXSegs(x, segsize)	\
+	(x / ((segsize) / (1024 * 1024)))
+
+/* The number of bytes in a WAL segment usable for WAL data. */
+static int	UsableBytesInSegment;
 
 /*
  * Private, possibly out-of-date copy of shared LogwrtResult.
@@ -1137,7 +1141,9 @@ XLogInsertRecord(XLogRecData *rdata,
 			EndPos = StartPos + SizeOfXLogRecord;
 			if (StartPos / XLOG_BLCKSZ != EndPos / XLOG_BLCKSZ)
 			{
-				if (EndPos % XLOG_SEG_SIZE == EndPos % XLOG_BLCKSZ)
+				uint64		offset = XLogSegmentOffset(EndPos, wal_segment_size);
+
+				if (offset == EndPos % XLOG_BLCKSZ)
 					EndPos += SizeOfXLogLongPHD;
 				else
 					EndPos += SizeOfXLogShortPHD;
@@ -1170,7 +1176,7 @@ XLogInsertRecord(XLogRecData *rdata,
 			appendBinaryStringInfo(&recordBuf, rdata->data, rdata->len);
 
 		if (!debug_reader)
-			debug_reader = XLogReaderAllocate(NULL, NULL);
+			debug_reader = XLogReaderAllocate(wal_segment_size, NULL, NULL);
 
 		if (!debug_reader)
 		{
@@ -1296,7 +1302,7 @@ ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
 	startbytepos = Insert->CurrBytePos;
 
 	ptr = XLogBytePosToEndRecPtr(startbytepos);
-	if (ptr % XLOG_SEG_SIZE == 0)
+	if (XLogSegmentOffset(ptr, wal_segment_size) == 0)
 	{
 		SpinLockRelease(&Insert->insertpos_lck);
 		*EndPos = *StartPos = ptr;
@@ -1309,8 +1315,8 @@ ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
 	*StartPos = XLogBytePosToRecPtr(startbytepos);
 	*EndPos = XLogBytePosToEndRecPtr(endbytepos);
 
-	segleft = XLOG_SEG_SIZE - ((*EndPos) % XLOG_SEG_SIZE);
-	if (segleft != XLOG_SEG_SIZE)
+	segleft = wal_segment_size - XLogSegmentOffset(*EndPos, wal_segment_size);
+	if (segleft != wal_segment_size)
 	{
 		/* consume the rest of the segment */
 		*EndPos += segleft;
@@ -1323,7 +1329,7 @@ ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
 
 	*PrevPtr = XLogBytePosToRecPtr(prevbytepos);
 
-	Assert((*EndPos) % XLOG_SEG_SIZE == 0);
+	Assert(XLogSegmentOffset(*EndPos, wal_segment_size) == 0);
 	Assert(XLogRecPtrToBytePos(*EndPos) == endbytepos);
 	Assert(XLogRecPtrToBytePos(*StartPos) == startbytepos);
 	Assert(XLogRecPtrToBytePos(*PrevPtr) == prevbytepos);
@@ -1501,7 +1507,7 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 			pagehdr->xlp_info |= XLP_FIRST_IS_CONTRECORD;
 
 			/* skip over the page header */
-			if (CurrPos % XLogSegSize == 0)
+			if (XLogSegmentOffset(CurrPos, wal_segment_size) == 0)
 			{
 				CurrPos += SizeOfXLogLongPHD;
 				currpos += SizeOfXLogLongPHD;
@@ -1532,16 +1538,16 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 	 * allocated and zeroed in the WAL buffers so that when the caller (or
 	 * someone else) does XLogWrite(), it can really write out all the zeros.
 	 */
-	if (isLogSwitch && CurrPos % XLOG_SEG_SIZE != 0)
+	if (isLogSwitch && XLogSegmentOffset(CurrPos, wal_segment_size) != 0)
 	{
 		/* An xlog-switch record doesn't contain any data besides the header */
 		Assert(write_len == SizeOfXLogRecord);
 
 		/*
 		 * We do this one page at a time, to make sure we don't deadlock
-		 * against ourselves if wal_buffers < XLOG_SEG_SIZE.
+		 * against ourselves if wal_buffers < wal_segment_size.
 		 */
-		Assert(EndPos % XLogSegSize == 0);
+		Assert(XLogSegmentOffset(EndPos, wal_segment_size) == 0);
 
 		/* Use up all the remaining space on the first page */
 		CurrPos += freespace;
@@ -1866,10 +1872,10 @@ GetXLogBuffer(XLogRecPtr ptr)
 		 * the page header.
 		 */
 		if (ptr % XLOG_BLCKSZ == SizeOfXLogShortPHD &&
-			ptr % XLOG_SEG_SIZE > XLOG_BLCKSZ)
+			XLogSegmentOffset(ptr, wal_segment_size) > XLOG_BLCKSZ)
 			initializedUpto = ptr - SizeOfXLogShortPHD;
 		else if (ptr % XLOG_BLCKSZ == SizeOfXLogLongPHD &&
-				 ptr % XLOG_SEG_SIZE < XLOG_BLCKSZ)
+				 XLogSegmentOffset(ptr, wal_segment_size) < XLOG_BLCKSZ)
 			initializedUpto = ptr - SizeOfXLogLongPHD;
 		else
 			initializedUpto = ptr;
@@ -1939,7 +1945,7 @@ XLogBytePosToRecPtr(uint64 bytepos)
 		seg_offset += fullpages * XLOG_BLCKSZ + bytesleft + SizeOfXLogShortPHD;
 	}
 
-	XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, result);
+	XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, result, wal_segment_size);
 
 	return result;
 }
@@ -1985,7 +1991,7 @@ XLogBytePosToEndRecPtr(uint64 bytepos)
 			seg_offset += fullpages * XLOG_BLCKSZ + bytesleft + SizeOfXLogShortPHD;
 	}
 
-	XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, result);
+	XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, result, wal_segment_size);
 
 	return result;
 }
@@ -2001,9 +2007,9 @@ XLogRecPtrToBytePos(XLogRecPtr ptr)
 	uint32		offset;
 	uint64		result;
 
-	XLByteToSeg(ptr, fullsegs);
+	XLByteToSeg(ptr, fullsegs, wal_segment_size);
 
-	fullpages = (ptr % XLOG_SEG_SIZE) / XLOG_BLCKSZ;
+	fullpages = (XLogSegmentOffset(ptr, wal_segment_size)) / XLOG_BLCKSZ;
 	offset = ptr % XLOG_BLCKSZ;
 
 	if (fullpages == 0)
@@ -2168,12 +2174,12 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic)
 		/*
 		 * If first page of an XLOG segment file, make it a long header.
 		 */
-		if ((NewPage->xlp_pageaddr % XLogSegSize) == 0)
+		if ((XLogSegmentOffset(NewPage->xlp_pageaddr, wal_segment_size)) == 0)
 		{
 			XLogLongPageHeader NewLongPage = (XLogLongPageHeader) NewPage;
 
 			NewLongPage->xlp_sysid = ControlFile->system_identifier;
-			NewLongPage->xlp_seg_size = XLogSegSize;
+			NewLongPage->xlp_seg_size = wal_segment_size;
 			NewLongPage->xlp_xlog_blcksz = XLOG_BLCKSZ;
 			NewPage->xlp_info |= XLP_LONG_HEADER;
 		}
@@ -2215,12 +2221,18 @@ CalculateCheckpointSegments(void)
 	 * Calculate the distance at which to trigger a checkpoint, to avoid
 	 * exceeding max_wal_size_mb. This is based on two assumptions:
 	 *
-	 * a) we keep WAL for two checkpoint cycles, back to the "prev" checkpoint.
+	 * a) we keep WAL for only one checkpoint cycle (prior to PG11 we kept
+	 *    WAL for two checkpoint cycles to allow us to recover from the
+	 *    secondary checkpoint if the first checkpoint failed, though we
+	 *    only did this on the master anyway, not on standby. Keeping just
+	 *    one checkpoint simplifies processing and reduces disk space in
+	 *    many smaller databases.)
 	 * b) during checkpoint, we consume checkpoint_completion_target *
 	 *	  number of segments consumed between checkpoints.
 	 *-------
 	 */
-	target = (double) ConvertToXSegs(max_wal_size_mb) / (2.0 + CheckPointCompletionTarget);
+	target = (double) ConvertToXSegs(max_wal_size_mb, wal_segment_size) /
+		(1.0 + CheckPointCompletionTarget);
 
 	/* round down */
 	CheckPointSegments = (int) target;
@@ -2260,8 +2272,10 @@ XLOGfileslop(XLogRecPtr PriorRedoPtr)
 	 * correspond to. Always recycle enough segments to meet the minimum, and
 	 * remove enough segments to stay below the maximum.
 	 */
-	minSegNo = PriorRedoPtr / XLOG_SEG_SIZE + ConvertToXSegs(min_wal_size_mb) - 1;
-	maxSegNo = PriorRedoPtr / XLOG_SEG_SIZE + ConvertToXSegs(max_wal_size_mb) - 1;
+	minSegNo = PriorRedoPtr / wal_segment_size +
+		ConvertToXSegs(min_wal_size_mb, wal_segment_size) - 1;
+	maxSegNo = PriorRedoPtr / wal_segment_size +
+		ConvertToXSegs(max_wal_size_mb, wal_segment_size) - 1;
 
 	/*
 	 * Between those limits, recycle enough segments to get us through to the
@@ -2270,27 +2284,13 @@ XLOGfileslop(XLogRecPtr PriorRedoPtr)
 	 * To estimate where the next checkpoint will finish, assume that the
 	 * system runs steadily consuming CheckPointDistanceEstimate bytes between
 	 * every checkpoint.
-	 *
-	 * The reason this calculation is done from the prior checkpoint, not the
-	 * one that just finished, is that this behaves better if some checkpoint
-	 * cycles are abnormally short, like if you perform a manual checkpoint
-	 * right after a timed one. The manual checkpoint will make almost a full
-	 * cycle's worth of WAL segments available for recycling, because the
-	 * segments from the prior's prior, fully-sized checkpoint cycle are no
-	 * longer needed. However, the next checkpoint will make only few segments
-	 * available for recycling, the ones generated between the timed
-	 * checkpoint and the manual one right after that. If at the manual
-	 * checkpoint we only retained enough segments to get us to the next timed
-	 * one, and removed the rest, then at the next checkpoint we would not
-	 * have enough segments around for recycling, to get us to the checkpoint
-	 * after that. Basing the calculations on the distance from the prior redo
-	 * pointer largely fixes that problem.
 	 */
-	distance = (2.0 + CheckPointCompletionTarget) * CheckPointDistanceEstimate;
+	distance = (1.0 + CheckPointCompletionTarget) * CheckPointDistanceEstimate;
 	/* add 10% for good measure. */
 	distance *= 1.10;
 
-	recycleSegNo = (XLogSegNo) ceil(((double) PriorRedoPtr + distance) / XLOG_SEG_SIZE);
+	recycleSegNo = (XLogSegNo) ceil(((double) PriorRedoPtr + distance) /
+									wal_segment_size);
 
 	if (recycleSegNo < minSegNo)
 		recycleSegNo = minSegNo;
@@ -2314,7 +2314,7 @@ XLogCheckpointNeeded(XLogSegNo new_segno)
 {
 	XLogSegNo	old_segno;
 
-	XLByteToSeg(RedoRecPtr, old_segno);
+	XLByteToSeg(RedoRecPtr, old_segno, wal_segment_size);
 
 	if (new_segno >= old_segno + (uint64) (CheckPointSegments - 1))
 		return true;
@@ -2392,7 +2392,8 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 		LogwrtResult.Write = EndPtr;
 		ispartialpage = WriteRqst.Write < LogwrtResult.Write;
 
-		if (!XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo))
+		if (!XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo,
+							 wal_segment_size))
 		{
 			/*
 			 * Switch to new logfile segment.  We cannot have any pending
@@ -2401,7 +2402,8 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			Assert(npages == 0);
 			if (openLogFile >= 0)
 				XLogFileClose();
-			XLByteToPrevSeg(LogwrtResult.Write, openLogSegNo);
+			XLByteToPrevSeg(LogwrtResult.Write, openLogSegNo,
+							wal_segment_size);
 
 			/* create/use new log file */
 			use_existent = true;
@@ -2412,7 +2414,8 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 		/* Make sure we have the current logfile open */
 		if (openLogFile < 0)
 		{
-			XLByteToPrevSeg(LogwrtResult.Write, openLogSegNo);
+			XLByteToPrevSeg(LogwrtResult.Write, openLogSegNo,
+							wal_segment_size);
 			openLogFile = XLogFileOpen(openLogSegNo);
 			openLogOff = 0;
 		}
@@ -2422,7 +2425,8 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 		{
 			/* first of group */
 			startidx = curridx;
-			startoffset = (LogwrtResult.Write - XLOG_BLCKSZ) % XLogSegSize;
+			startoffset = XLogSegmentOffset(LogwrtResult.Write - XLOG_BLCKSZ,
+											wal_segment_size);
 		}
 		npages++;
 
@@ -2435,7 +2439,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 		last_iteration = WriteRqst.Write <= LogwrtResult.Write;
 
 		finishing_seg = !ispartialpage &&
-			(startoffset + npages * XLOG_BLCKSZ) >= XLogSegSize;
+			(startoffset + npages * XLOG_BLCKSZ) >= wal_segment_size;
 
 		if (last_iteration ||
 			curridx == XLogCtl->XLogCacheBlck ||
@@ -2562,11 +2566,13 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible)
 			sync_method != SYNC_METHOD_OPEN_DSYNC)
 		{
 			if (openLogFile >= 0 &&
-				!XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo))
+				!XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo,
+								 wal_segment_size))
 				XLogFileClose();
 			if (openLogFile < 0)
 			{
-				XLByteToPrevSeg(LogwrtResult.Write, openLogSegNo);
+				XLByteToPrevSeg(LogwrtResult.Write, openLogSegNo,
+								wal_segment_size);
 				openLogFile = XLogFileOpen(openLogSegNo);
 				openLogOff = 0;
 			}
@@ -2982,7 +2988,8 @@ XLogBackgroundFlush(void)
 	{
 		if (openLogFile >= 0)
 		{
-			if (!XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo))
+			if (!XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo,
+								 wal_segment_size))
 			{
 				XLogFileClose();
 			}
@@ -3161,15 +3168,14 @@ XLogFileInit(XLogSegNo logsegno, bool *use_existent, bool use_lock)
 	int			fd;
 	int			nbytes;
 
-	XLogFilePath(path, ThisTimeLineID, logsegno);
+	XLogFilePath(path, ThisTimeLineID, logsegno, wal_segment_size);
 
 	/*
 	 * Try to use existent file (checkpoint maker may have created it already)
 	 */
 	if (*use_existent)
 	{
-		fd = BasicOpenFile(path, O_RDWR | PG_BINARY | get_sync_bit(sync_method),
-						   S_IRUSR | S_IWUSR);
+		fd = BasicOpenFile(path, O_RDWR | PG_BINARY | get_sync_bit(sync_method));
 		if (fd < 0)
 		{
 			if (errno != ENOENT)
@@ -3194,8 +3200,7 @@ XLogFileInit(XLogSegNo logsegno, bool *use_existent, bool use_lock)
 	unlink(tmppath);
 
 	/* do not use get_sync_bit() here --- want to fsync only at end of fill */
-	fd = BasicOpenFile(tmppath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-					   S_IRUSR | S_IWUSR);
+	fd = BasicOpenFile(tmppath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
 	if (fd < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
@@ -3215,7 +3220,7 @@ XLogFileInit(XLogSegNo logsegno, bool *use_existent, bool use_lock)
 	 */
 	zbuffer = (char *) MAXALIGN(zbuffer_raw);
 	memset(zbuffer, 0, XLOG_BLCKSZ);
-	for (nbytes = 0; nbytes < XLogSegSize; nbytes += XLOG_BLCKSZ)
+	for (nbytes = 0; nbytes < wal_segment_size; nbytes += XLOG_BLCKSZ)
 	{
 		errno = 0;
 		pgstat_report_wait_start(WAIT_EVENT_WAL_INIT_WRITE);
@@ -3291,8 +3296,7 @@ XLogFileInit(XLogSegNo logsegno, bool *use_existent, bool use_lock)
 	*use_existent = false;
 
 	/* Now open original target segment (might not be file I just made) */
-	fd = BasicOpenFile(path, O_RDWR | PG_BINARY | get_sync_bit(sync_method),
-					   S_IRUSR | S_IWUSR);
+	fd = BasicOpenFile(path, O_RDWR | PG_BINARY | get_sync_bit(sync_method));
 	if (fd < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
@@ -3332,8 +3336,8 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 	/*
 	 * Open the source file
 	 */
-	XLogFilePath(path, srcTLI, srcsegno);
-	srcfd = OpenTransientFile(path, O_RDONLY | PG_BINARY, 0);
+	XLogFilePath(path, srcTLI, srcsegno, wal_segment_size);
+	srcfd = OpenTransientFile(path, O_RDONLY | PG_BINARY);
 	if (srcfd < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
@@ -3347,8 +3351,7 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 	unlink(tmppath);
 
 	/* do not use get_sync_bit() here --- want to fsync only at end of fill */
-	fd = OpenTransientFile(tmppath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-						   S_IRUSR | S_IWUSR);
+	fd = OpenTransientFile(tmppath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
 	if (fd < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
@@ -3357,7 +3360,7 @@ XLogFileCopy(XLogSegNo destsegno, TimeLineID srcTLI, XLogSegNo srcsegno,
 	/*
 	 * Do the data copying.
 	 */
-	for (nbytes = 0; nbytes < XLogSegSize; nbytes += sizeof(buffer))
+	for (nbytes = 0; nbytes < wal_segment_size; nbytes += sizeof(buffer))
 	{
 		int			nread;
 
@@ -3467,7 +3470,7 @@ InstallXLogFileSegment(XLogSegNo *segno, char *tmppath,
 	char		path[MAXPGPATH];
 	struct stat stat_buf;
 
-	XLogFilePath(path, ThisTimeLineID, *segno);
+	XLogFilePath(path, ThisTimeLineID, *segno, wal_segment_size);
 
 	/*
 	 * We want to be sure that only one process does this at a time.
@@ -3493,7 +3496,7 @@ InstallXLogFileSegment(XLogSegNo *segno, char *tmppath,
 				return false;
 			}
 			(*segno)++;
-			XLogFilePath(path, ThisTimeLineID, *segno);
+			XLogFilePath(path, ThisTimeLineID, *segno, wal_segment_size);
 		}
 	}
 
@@ -3524,10 +3527,9 @@ XLogFileOpen(XLogSegNo segno)
 	char		path[MAXPGPATH];
 	int			fd;
 
-	XLogFilePath(path, ThisTimeLineID, segno);
+	XLogFilePath(path, ThisTimeLineID, segno, wal_segment_size);
 
-	fd = BasicOpenFile(path, O_RDWR | PG_BINARY | get_sync_bit(sync_method),
-					   S_IRUSR | S_IWUSR);
+	fd = BasicOpenFile(path, O_RDWR | PG_BINARY | get_sync_bit(sync_method));
 	if (fd < 0)
 		ereport(PANIC,
 				(errcode_for_file_access(),
@@ -3551,7 +3553,7 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 	char		path[MAXPGPATH];
 	int			fd;
 
-	XLogFileName(xlogfname, tli, segno);
+	XLogFileName(xlogfname, tli, segno, wal_segment_size);
 
 	switch (source)
 	{
@@ -3563,7 +3565,7 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 
 			restoredFromArchive = RestoreArchivedFile(path, xlogfname,
 													  "RECOVERYXLOG",
-													  XLogSegSize,
+													  wal_segment_size,
 													  InRedo);
 			if (!restoredFromArchive)
 				return -1;
@@ -3571,7 +3573,7 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 
 		case XLOG_FROM_PG_WAL:
 		case XLOG_FROM_STREAM:
-			XLogFilePath(path, tli, segno);
+			XLogFilePath(path, tli, segno, wal_segment_size);
 			restoredFromArchive = false;
 			break;
 
@@ -3593,7 +3595,7 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 		snprintf(path, MAXPGPATH, XLOGDIR "/%s", xlogfname);
 	}
 
-	fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
+	fd = BasicOpenFile(path, O_RDONLY | PG_BINARY);
 	if (fd >= 0)
 	{
 		/* Success! */
@@ -3690,7 +3692,7 @@ XLogFileReadAnyTLI(XLogSegNo segno, int emode, int source)
 	}
 
 	/* Couldn't find it.  For simplicity, complain about front timeline */
-	XLogFilePath(path, recoveryTargetTLI, segno);
+	XLogFilePath(path, recoveryTargetTLI, segno, wal_segment_size);
 	errno = ENOENT;
 	ereport(emode,
 			(errcode_for_file_access(),
@@ -3741,9 +3743,11 @@ PreallocXlogFiles(XLogRecPtr endptr)
 	XLogSegNo	_logSegNo;
 	int			lf;
 	bool		use_existent;
+	uint64		offset;
 
-	XLByteToPrevSeg(endptr, _logSegNo);
-	if ((endptr - 1) % XLogSegSize >= (uint32) (0.75 * XLogSegSize))
+	XLByteToPrevSeg(endptr, _logSegNo, wal_segment_size);
+	offset = XLogSegmentOffset(endptr - 1, wal_segment_size);
+	if (offset >= (uint32) (0.75 * wal_segment_size))
 	{
 		_logSegNo++;
 		use_existent = true;
@@ -3774,7 +3778,7 @@ CheckXLogRemoved(XLogSegNo segno, TimeLineID tli)
 	{
 		char		filename[MAXFNAMELEN];
 
-		XLogFileName(filename, tli, segno);
+		XLogFileName(filename, tli, segno, wal_segment_size);
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("requested WAL segment %s has already been removed",
@@ -3811,7 +3815,7 @@ UpdateLastRemovedPtr(char *filename)
 	uint32		tli;
 	XLogSegNo	segno;
 
-	XLogFromFileName(filename, &tli, &segno);
+	XLogFromFileName(filename, &tli, &segno, wal_segment_size);
 
 	SpinLockAcquire(&XLogCtl->info_lck);
 	if (segno > XLogCtl->lastRemovedSegNo)
@@ -3845,7 +3849,7 @@ RemoveOldXlogFiles(XLogSegNo segno, XLogRecPtr PriorRedoPtr, XLogRecPtr endptr)
 	 * doesn't matter, we ignore that in the comparison. (During recovery,
 	 * ThisTimeLineID isn't set, so we can't use that.)
 	 */
-	XLogFileName(lastoff, 0, segno);
+	XLogFileName(lastoff, 0, segno, wal_segment_size);
 
 	elog(DEBUG2, "attempting to remove WAL segments older than log file %s",
 		 lastoff);
@@ -3906,7 +3910,7 @@ RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
 	char		switchseg[MAXFNAMELEN];
 	XLogSegNo	endLogSegNo;
 
-	XLByteToPrevSeg(switchpoint, endLogSegNo);
+	XLByteToPrevSeg(switchpoint, endLogSegNo, wal_segment_size);
 
 	xldir = AllocateDir(XLOGDIR);
 	if (xldir == NULL)
@@ -3918,7 +3922,7 @@ RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
 	/*
 	 * Construct a filename of the last segment to be kept.
 	 */
-	XLogFileName(switchseg, newTLI, endLogSegNo);
+	XLogFileName(switchseg, newTLI, endLogSegNo, wal_segment_size);
 
 	elog(DEBUG2, "attempting to remove WAL segments newer than log file %s",
 		 switchseg);
@@ -3974,7 +3978,7 @@ RemoveXlogFile(const char *segname, XLogRecPtr PriorRedoPtr, XLogRecPtr endptr)
 	/*
 	 * Initialize info about where to try to recycle to.
 	 */
-	XLByteToSeg(endptr, endlogSegNo);
+	XLByteToSeg(endptr, endlogSegNo, wal_segment_size);
 	if (PriorRedoPtr == InvalidXLogRecPtr)
 		recycleSegNo = endlogSegNo + 10;
 	else
@@ -4192,9 +4196,11 @@ ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, int emode,
 			XLogSegNo	segno;
 			int32		offset;
 
-			XLByteToSeg(xlogreader->latestPagePtr, segno);
-			offset = xlogreader->latestPagePtr % XLogSegSize;
-			XLogFileName(fname, xlogreader->readPageTLI, segno);
+			XLByteToSeg(xlogreader->latestPagePtr, segno, wal_segment_size);
+			offset = XLogSegmentOffset(xlogreader->latestPagePtr,
+									   wal_segment_size);
+			XLogFileName(fname, xlogreader->readPageTLI, segno,
+						 wal_segment_size);
 			ereport(emode_for_corrupt_record(emode,
 											 RecPtr ? RecPtr : EndRecPtr),
 					(errmsg("unexpected timeline ID %u in log segment %s, offset %u",
@@ -4399,7 +4405,7 @@ WriteControlFile(void)
 	ControlFile->blcksz = BLCKSZ;
 	ControlFile->relseg_size = RELSEG_SIZE;
 	ControlFile->xlog_blcksz = XLOG_BLCKSZ;
-	ControlFile->xlog_seg_size = XLOG_SEG_SIZE;
+	ControlFile->xlog_seg_size = wal_segment_size;
 
 	ControlFile->nameDataLen = NAMEDATALEN;
 	ControlFile->indexMaxKeys = INDEX_MAX_KEYS;
@@ -4428,8 +4434,7 @@ WriteControlFile(void)
 	memcpy(buffer, ControlFile, sizeof(ControlFileData));
 
 	fd = BasicOpenFile(XLOG_CONTROL_FILE,
-					   O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
-					   S_IRUSR | S_IWUSR);
+					   O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
 	if (fd < 0)
 		ereport(PANIC,
 				(errcode_for_file_access(),
@@ -4467,13 +4472,13 @@ ReadControlFile(void)
 {
 	pg_crc32c	crc;
 	int			fd;
+	static char wal_segsz_str[20];
 
 	/*
 	 * Read data...
 	 */
 	fd = BasicOpenFile(XLOG_CONTROL_FILE,
-					   O_RDWR | PG_BINARY,
-					   S_IRUSR | S_IWUSR);
+					   O_RDWR | PG_BINARY);
 	if (fd < 0)
 		ereport(PANIC,
 				(errcode_for_file_access(),
@@ -4569,13 +4574,6 @@ ReadControlFile(void)
 						   " but the server was compiled with XLOG_BLCKSZ %d.",
 						   ControlFile->xlog_blcksz, XLOG_BLCKSZ),
 				 errhint("It looks like you need to recompile or initdb.")));
-	if (ControlFile->xlog_seg_size != XLOG_SEG_SIZE)
-		ereport(FATAL,
-				(errmsg("database files are incompatible with server"),
-				 errdetail("The database cluster was initialized with XLOG_SEG_SIZE %d,"
-						   " but the server was compiled with XLOG_SEG_SIZE %d.",
-						   ControlFile->xlog_seg_size, XLOG_SEG_SIZE),
-				 errhint("It looks like you need to recompile or initdb.")));
 	if (ControlFile->nameDataLen != NAMEDATALEN)
 		ereport(FATAL,
 				(errmsg("database files are incompatible with server"),
@@ -4637,6 +4635,32 @@ ReadControlFile(void)
 				 errhint("It looks like you need to recompile or initdb.")));
 #endif
 
+	wal_segment_size = ControlFile->xlog_seg_size;
+
+	if (!IsValidWalSegSize(wal_segment_size))
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("WAL segment size must be a power of two between 1MB and 1GB, but the control file specifies %d bytes",
+							   wal_segment_size)));
+
+	snprintf(wal_segsz_str, sizeof(wal_segsz_str), "%d", wal_segment_size);
+	SetConfigOption("wal_segment_size", wal_segsz_str, PGC_INTERNAL,
+					PGC_S_OVERRIDE);
+
+	/* check and update variables dependent on wal_segment_size */
+	if (ConvertToXSegs(min_wal_size_mb, wal_segment_size) < 2)
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("\"min_wal_size\" must be at least twice \"wal_segment_size\".")));
+
+	if (ConvertToXSegs(max_wal_size_mb, wal_segment_size) < 2)
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("\"max_wal_size\" must be at least twice \"wal_segment_size\".")));
+
+	UsableBytesInSegment =
+		(wal_segment_size / XLOG_BLCKSZ * UsableBytesInPage) -
+		(SizeOfXLogLongPHD - SizeOfXLogShortPHD);
+
+	CalculateCheckpointSegments();
+
 	/* Make the initdb settings visible as GUC variables, too */
 	SetConfigOption("data_checksums", DataChecksumsEnabled() ? "yes" : "no",
 					PGC_INTERNAL, PGC_S_OVERRIDE);
@@ -4654,8 +4678,7 @@ UpdateControlFile(void)
 	FIN_CRC32C(ControlFile->crc);
 
 	fd = BasicOpenFile(XLOG_CONTROL_FILE,
-					   O_RDWR | PG_BINARY,
-					   S_IRUSR | S_IWUSR);
+					   O_RDWR | PG_BINARY);
 	if (fd < 0)
 		ereport(PANIC,
 				(errcode_for_file_access(),
@@ -4757,8 +4780,8 @@ XLOGChooseNumBuffers(void)
 	int			xbuffers;
 
 	xbuffers = NBuffers / 32;
-	if (xbuffers > XLOG_SEG_SIZE / XLOG_BLCKSZ)
-		xbuffers = XLOG_SEG_SIZE / XLOG_BLCKSZ;
+	if (xbuffers > (wal_segment_size / XLOG_BLCKSZ))
+		xbuffers = (wal_segment_size / XLOG_BLCKSZ);
 	if (xbuffers < 8)
 		xbuffers = 8;
 	return xbuffers;
@@ -4797,6 +4820,26 @@ check_wal_buffers(int *newval, void **extra, GucSource source)
 		*newval = 4;
 
 	return true;
+}
+
+/*
+ * Read the control file, set respective GUCs.
+ *
+ * This is to be called during startup, including a crash recovery cycle,
+ * unless in bootstrap mode, where no control file yet exists.  As there's no
+ * usable shared memory yet (its sizing can depend on the contents of the
+ * control file!), first store the contents in local memory. XLOGShemInit()
+ * will then copy it to shared memory later.
+ *
+ * reset just controls whether previous contents are to be expected (in the
+ * reset case, there's a dangling pointer into old shared memory), or not.
+ */
+void
+LocalProcessControlFile(bool reset)
+{
+	Assert(reset || ControlFile == NULL);
+	ControlFile = palloc(sizeof(ControlFileData));
+	ReadControlFile();
 }
 
 /*
@@ -4850,6 +4893,7 @@ XLOGShmemInit(void)
 				foundXLog;
 	char	   *allocptr;
 	int			i;
+	ControlFileData *localControlFile;
 
 #ifdef WAL_DEBUG
 
@@ -4867,10 +4911,13 @@ XLOGShmemInit(void)
 	}
 #endif
 
-	ControlFile = (ControlFileData *)
-		ShmemInitStruct("Control File", sizeof(ControlFileData), &foundCFile);
+
 	XLogCtl = (XLogCtlData *)
 		ShmemInitStruct("XLOG Ctl", XLOGShmemSize(), &foundXLog);
+
+	localControlFile = ControlFile;
+	ControlFile = (ControlFileData *)
+		ShmemInitStruct("Control File", sizeof(ControlFileData), &foundCFile);
 
 	if (foundCFile || foundXLog)
 	{
@@ -4881,9 +4928,22 @@ XLOGShmemInit(void)
 		WALInsertLocks = XLogCtl->Insert.WALInsertLocks;
 		LWLockRegisterTranche(LWTRANCHE_WAL_INSERT,
 							  "wal_insert");
+
+		if (localControlFile)
+			pfree(localControlFile);
 		return;
 	}
 	memset(XLogCtl, 0, sizeof(XLogCtlData));
+
+	/*
+	 * Already have read control file locally, unless in bootstrap mode. Move
+	 * contents into shared memory.
+	 */
+	if (localControlFile)
+	{
+		memcpy(ControlFile, localControlFile, sizeof(ControlFileData));
+		pfree(localControlFile);
+	}
 
 	/*
 	 * Since XLogCtlData contains XLogRecPtr fields, its sizeof should be a
@@ -4933,14 +4993,6 @@ XLOGShmemInit(void)
 	SpinLockInit(&XLogCtl->info_lck);
 	SpinLockInit(&XLogCtl->ulsn_lck);
 	InitSharedLatch(&XLogCtl->recoveryWakeupLatch);
-
-	/*
-	 * If we are not in bootstrap mode, pg_control should already exist. Read
-	 * and validate it immediately (see comments in ReadControlFile() for the
-	 * reasons why).
-	 */
-	if (!IsBootstrapProcessingMode())
-		ReadControlFile();
 }
 
 /*
@@ -5005,7 +5057,7 @@ BootStrapXLOG(void)
 	 * segment with logid=0 logseg=1. The very first WAL segment, 0/0, is not
 	 * used, so that we can use 0/0 to mean "before any valid WAL segment".
 	 */
-	checkPoint.redo = XLogSegSize + SizeOfXLogLongPHD;
+	checkPoint.redo = wal_segment_size + SizeOfXLogLongPHD;
 	checkPoint.ThisTimeLineID = ThisTimeLineID;
 	checkPoint.PrevTimeLineID = ThisTimeLineID;
 	checkPoint.fullPageWrites = fullPageWrites;
@@ -5036,10 +5088,10 @@ BootStrapXLOG(void)
 	page->xlp_magic = XLOG_PAGE_MAGIC;
 	page->xlp_info = XLP_LONG_HEADER;
 	page->xlp_tli = ThisTimeLineID;
-	page->xlp_pageaddr = XLogSegSize;
+	page->xlp_pageaddr = wal_segment_size;
 	longpage = (XLogLongPageHeader) page;
 	longpage->xlp_sysid = sysidentifier;
-	longpage->xlp_seg_size = XLogSegSize;
+	longpage->xlp_seg_size = wal_segment_size;
 	longpage->xlp_xlog_blcksz = XLOG_BLCKSZ;
 
 	/* Insert the initial checkpoint record */
@@ -5129,6 +5181,12 @@ BootStrapXLOG(void)
 	BootStrapMultiXact();
 
 	pfree(buffer);
+
+	/*
+	 * Force control file to be read - in contrast to normal processing we'd
+	 * otherwise never run the checks and GUC related initializations therein.
+	 */
+	ReadControlFile();
 }
 
 static char *
@@ -5515,8 +5573,8 @@ exitArchiveRecovery(TimeLineID endTLI, XLogRecPtr endOfLog)
 	 * they are the same, but if the switch happens exactly at a segment
 	 * boundary, startLogSegNo will be endLogSegNo + 1.
 	 */
-	XLByteToPrevSeg(endOfLog, endLogSegNo);
-	XLByteToSeg(endOfLog, startLogSegNo);
+	XLByteToPrevSeg(endOfLog, endLogSegNo, wal_segment_size);
+	XLByteToSeg(endOfLog, startLogSegNo, wal_segment_size);
 
 	/*
 	 * Initialize the starting WAL segment for the new timeline. If the switch
@@ -5534,7 +5592,7 @@ exitArchiveRecovery(TimeLineID endTLI, XLogRecPtr endOfLog)
 		 * avoid emplacing a bogus file.
 		 */
 		XLogFileCopy(endLogSegNo, endTLI, endLogSegNo,
-					 endOfLog % XLOG_SEG_SIZE);
+					 XLogSegmentOffset(endOfLog, wal_segment_size));
 	}
 	else
 	{
@@ -5558,7 +5616,7 @@ exitArchiveRecovery(TimeLineID endTLI, XLogRecPtr endOfLog)
 	 * Let's just make real sure there are not .ready or .done flags posted
 	 * for the new segment.
 	 */
-	XLogFileName(xlogfname, ThisTimeLineID, startLogSegNo);
+	XLogFileName(xlogfname, ThisTimeLineID, startLogSegNo, wal_segment_size);
 	XLogArchiveCleanup(xlogfname);
 
 	/*
@@ -6227,13 +6285,8 @@ StartupXLOG(void)
 	struct stat st;
 
 	/*
-	 * Read control file and check XLOG status looks valid.
-	 *
-	 * Note: in most control paths, *ControlFile is already valid and we need
-	 * not do ReadControlFile() here, but might as well do it to be sure.
+	 * Verify XLOG status looks valid.
 	 */
-	ReadControlFile();
-
 	if (ControlFile->state < DB_SHUTDOWNED ||
 		ControlFile->state > DB_IN_PRODUCTION ||
 		!XRecOffIsValid(ControlFile->checkPoint))
@@ -6360,7 +6413,7 @@ StartupXLOG(void)
 
 	/* Set up XLOG reader facility */
 	MemSet(&private, 0, sizeof(XLogPageReadPrivate));
-	xlogreader = XLogReaderAllocate(&XLogPageRead, &private);
+	xlogreader = XLogReaderAllocate(wal_segment_size, &XLogPageRead, &private);
 	if (!xlogreader)
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
@@ -6530,29 +6583,16 @@ StartupXLOG(void)
 					(errmsg("checkpoint record is at %X/%X",
 							(uint32) (checkPointLoc >> 32), (uint32) checkPointLoc)));
 		}
-		else if (StandbyMode)
+		else
 		{
 			/*
-			 * The last valid checkpoint record required for a streaming
-			 * recovery exists in neither standby nor the primary.
+			 * We used to attempt to go back to a secondary checkpoint
+			 * record here, but only when not in standby_mode. We now
+			 * just fail if we can't read the last checkpoint because
+			 * this allows us to simplify processing around checkpoints.
 			 */
 			ereport(PANIC,
 					(errmsg("could not locate a valid checkpoint record")));
-		}
-		else
-		{
-			checkPointLoc = ControlFile->prevCheckPoint;
-			record = ReadCheckpointRecord(xlogreader, checkPointLoc, 2, true);
-			if (record != NULL)
-			{
-				ereport(LOG,
-						(errmsg("using previous checkpoint record at %X/%X",
-								(uint32) (checkPointLoc >> 32), (uint32) checkPointLoc)));
-				InRecovery = true;	/* force recovery even if SHUTDOWNED */
-			}
-			else
-				ereport(PANIC,
-						(errmsg("could not locate a valid checkpoint record")));
 		}
 		memcpy(&checkPoint, XLogRecGetData(xlogreader), sizeof(CheckPoint));
 		wasShutdown = ((record->xl_info & ~XLR_INFO_MASK) == XLOG_CHECKPOINT_SHUTDOWN);
@@ -6782,7 +6822,6 @@ StartupXLOG(void)
 								recoveryTargetTLI)));
 			ControlFile->state = DB_IN_CRASH_RECOVERY;
 		}
-		ControlFile->prevCheckPoint = ControlFile->checkPoint;
 		ControlFile->checkPoint = checkPointLoc;
 		ControlFile->checkPointCopy = checkPoint;
 		if (InArchiveRecovery)
@@ -7493,7 +7532,7 @@ StartupXLOG(void)
 		XLogRecPtr	pageBeginPtr;
 
 		pageBeginPtr = EndOfLog - (EndOfLog % XLOG_BLCKSZ);
-		Assert(readOff == pageBeginPtr % XLogSegSize);
+		Assert(readOff == XLogSegmentOffset(pageBeginPtr, wal_segment_size));
 
 		firstIdx = XLogRecPtrToBufIdx(EndOfLog);
 
@@ -7556,12 +7595,11 @@ StartupXLOG(void)
 		{
 			if (fast_promote)
 			{
-				checkPointLoc = ControlFile->prevCheckPoint;
+				checkPointLoc = ControlFile->checkPoint;
 
 				/*
 				 * Confirm the last checkpoint is available for us to recover
-				 * from if we fail. Note that we don't check for the secondary
-				 * checkpoint since that isn't available in most base backups.
+				 * from if we fail.
 				 */
 				record = ReadCheckpointRecord(xlogreader, checkPointLoc, 1, false);
 				if (record != NULL)
@@ -7642,13 +7680,14 @@ StartupXLOG(void)
 		 * restored from the archive to begin with, it's expected to have a
 		 * .done file).
 		 */
-		if (EndOfLog % XLOG_SEG_SIZE != 0 && XLogArchivingActive())
+		if (XLogSegmentOffset(EndOfLog, wal_segment_size) != 0 &&
+			XLogArchivingActive())
 		{
 			char		origfname[MAXFNAMELEN];
 			XLogSegNo	endLogSegNo;
 
-			XLByteToPrevSeg(EndOfLog, endLogSegNo);
-			XLogFileName(origfname, EndOfLogTLI, endLogSegNo);
+			XLByteToPrevSeg(EndOfLog, endLogSegNo, wal_segment_size);
+			XLogFileName(origfname, EndOfLogTLI, endLogSegNo, wal_segment_size);
 
 			if (!XLogArchiveIsReadyOrDone(origfname))
 			{
@@ -7656,7 +7695,7 @@ StartupXLOG(void)
 				char		partialfname[MAXFNAMELEN];
 				char		partialpath[MAXPGPATH];
 
-				XLogFilePath(origpath, EndOfLogTLI, endLogSegNo);
+				XLogFilePath(origpath, EndOfLogTLI, endLogSegNo, wal_segment_size);
 				snprintf(partialfname, MAXFNAMELEN, "%s.partial", origfname);
 				snprintf(partialpath, MAXPGPATH, "%s.partial", origpath);
 
@@ -8026,7 +8065,7 @@ LocalSetXLogInsertAllowed(void)
  * Subroutine to try to fetch and validate a prior checkpoint record.
  *
  * whichChkpt identifies the checkpoint (merely for reporting purposes).
- * 1 for "primary", 2 for "secondary", 0 for "other" (backup_label)
+ * 1 for "primary", 0 for "other" (backup_label)
  */
 static XLogRecord *
 ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr,
@@ -8045,10 +8084,6 @@ ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr,
 			case 1:
 				ereport(LOG,
 						(errmsg("invalid primary checkpoint link in control file")));
-				break;
-			case 2:
-				ereport(LOG,
-						(errmsg("invalid secondary checkpoint link in control file")));
 				break;
 			default:
 				ereport(LOG,
@@ -8071,10 +8106,6 @@ ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr,
 				ereport(LOG,
 						(errmsg("invalid primary checkpoint record")));
 				break;
-			case 2:
-				ereport(LOG,
-						(errmsg("invalid secondary checkpoint record")));
-				break;
 			default:
 				ereport(LOG,
 						(errmsg("invalid checkpoint record")));
@@ -8089,10 +8120,6 @@ ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr,
 			case 1:
 				ereport(LOG,
 						(errmsg("invalid resource manager ID in primary checkpoint record")));
-				break;
-			case 2:
-				ereport(LOG,
-						(errmsg("invalid resource manager ID in secondary checkpoint record")));
 				break;
 			default:
 				ereport(LOG,
@@ -8111,10 +8138,6 @@ ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr,
 				ereport(LOG,
 						(errmsg("invalid xl_info in primary checkpoint record")));
 				break;
-			case 2:
-				ereport(LOG,
-						(errmsg("invalid xl_info in secondary checkpoint record")));
-				break;
 			default:
 				ereport(LOG,
 						(errmsg("invalid xl_info in checkpoint record")));
@@ -8129,10 +8152,6 @@ ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr,
 			case 1:
 				ereport(LOG,
 						(errmsg("invalid length of primary checkpoint record")));
-				break;
-			case 2:
-				ereport(LOG,
-						(errmsg("invalid length of secondary checkpoint record")));
 				break;
 			default:
 				ereport(LOG,
@@ -8161,6 +8180,9 @@ InitXLOGAccess(void)
 	/* ThisTimeLineID doesn't change so we need no lock to copy it */
 	ThisTimeLineID = XLogCtl->ThisTimeLineID;
 	Assert(ThisTimeLineID != 0 || IsBootstrapProcessingMode());
+
+	/* set wal_segment_size */
+	wal_segment_size = ControlFile->xlog_seg_size;
 
 	/* Use GetRedoRecPtr to copy the RedoRecPtr safely */
 	(void) GetRedoRecPtr();
@@ -8492,7 +8514,7 @@ UpdateCheckPointDistanceEstimate(uint64 nbytes)
 	 * more.
 	 *
 	 * When checkpoints are triggered by max_wal_size, this should converge to
-	 * CheckpointSegments * XLOG_SEG_SIZE,
+	 * CheckpointSegments * wal_segment_size,
 	 *
 	 * Note: This doesn't pay any attention to what caused the checkpoint.
 	 * Checkpoints triggered manually with CHECKPOINT command, or by e.g.
@@ -8658,7 +8680,7 @@ CreateCheckPoint(int flags)
 			LWLockRelease(CheckpointLock);
 			END_CRIT_SECTION();
 			ereport(DEBUG1,
-					(errmsg("checkpoint skipped due to an idle system")));
+					(errmsg("checkpoint skipped because system is idle")));
 			return;
 		}
 	}
@@ -8691,7 +8713,7 @@ CreateCheckPoint(int flags)
 	freespace = INSERT_FREESPACE(curInsert);
 	if (freespace == 0)
 	{
-		if (curInsert % XLogSegSize == 0)
+		if (XLogSegmentOffset(curInsert, wal_segment_size) == 0)
 			curInsert += SizeOfXLogLongPHD;
 		else
 			curInsert += SizeOfXLogShortPHD;
@@ -8866,8 +8888,7 @@ CreateCheckPoint(int flags)
 				(errmsg("concurrent write-ahead log activity while database system is shutting down")));
 
 	/*
-	 * Remember the prior checkpoint's redo pointer, used later to determine
-	 * the point where the log can be truncated.
+	 * Remember the prior checkpoint's redo ptr for UpdateCheckPointDistanceEstimate()
 	 */
 	PriorRedoPtr = ControlFile->checkPointCopy.redo;
 
@@ -8877,7 +8898,6 @@ CreateCheckPoint(int flags)
 	LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
 	if (shutdown)
 		ControlFile->state = DB_SHUTDOWNED;
-	ControlFile->prevCheckPoint = ControlFile->checkPoint;
 	ControlFile->checkPoint = ProcLastRecPtr;
 	ControlFile->checkPointCopy = checkPoint;
 	ControlFile->time = (pg_time_t) time(NULL);
@@ -8915,8 +8935,7 @@ CreateCheckPoint(int flags)
 	smgrpostckpt();
 
 	/*
-	 * Delete old log files (those no longer needed even for previous
-	 * checkpoint or the standbys in XLOG streaming).
+	 * Delete old log files and recycle them
 	 */
 	if (PriorRedoPtr != InvalidXLogRecPtr)
 	{
@@ -8925,7 +8944,8 @@ CreateCheckPoint(int flags)
 		/* Update the average distance between checkpoints. */
 		UpdateCheckPointDistanceEstimate(RedoRecPtr - PriorRedoPtr);
 
-		XLByteToSeg(PriorRedoPtr, _logSegNo);
+		/* Trim from the last checkpoint, not the last - 1 */
+		XLByteToSeg(RedoRecPtr, _logSegNo, wal_segment_size);
 		KeepLogSeg(recptr, &_logSegNo);
 		_logSegNo--;
 		RemoveOldXlogFiles(_logSegNo, PriorRedoPtr, recptr);
@@ -9191,8 +9211,7 @@ CreateRestartPoint(int flags)
 	CheckPointGuts(lastCheckPoint.redo, flags);
 
 	/*
-	 * Remember the prior checkpoint's redo pointer, used later to determine
-	 * the point at which we can truncate the log.
+	 * Remember the prior checkpoint's redo ptr for UpdateCheckPointDistanceEstimate()
 	 */
 	PriorRedoPtr = ControlFile->checkPointCopy.redo;
 
@@ -9206,7 +9225,6 @@ CreateRestartPoint(int flags)
 	if (ControlFile->state == DB_IN_ARCHIVE_RECOVERY &&
 		ControlFile->checkPointCopy.redo < lastCheckPoint.redo)
 	{
-		ControlFile->prevCheckPoint = ControlFile->checkPoint;
 		ControlFile->checkPoint = lastCheckPointRecPtr;
 		ControlFile->checkPointCopy = lastCheckPoint;
 		ControlFile->time = (pg_time_t) time(NULL);
@@ -9253,7 +9271,7 @@ CreateRestartPoint(int flags)
 		/* Update the average distance between checkpoints/restartpoints. */
 		UpdateCheckPointDistanceEstimate(RedoRecPtr - PriorRedoPtr);
 
-		XLByteToSeg(PriorRedoPtr, _logSegNo);
+		XLByteToSeg(PriorRedoPtr, _logSegNo, wal_segment_size);
 
 		/*
 		 * Get the current end of xlog replayed or received, whichever is
@@ -9348,7 +9366,7 @@ KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo)
 	XLogSegNo	segno;
 	XLogRecPtr	keep;
 
-	XLByteToSeg(recptr, segno);
+	XLByteToSeg(recptr, segno, wal_segment_size);
 	keep = XLogGetReplicationSlotMinimumLSN();
 
 	/* compute limit for wal_keep_segments first */
@@ -9366,7 +9384,7 @@ KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo)
 	{
 		XLogSegNo	slotSegNo;
 
-		XLByteToSeg(keep, slotSegNo);
+		XLByteToSeg(keep, slotSegNo, wal_segment_size);
 
 		if (slotSegNo <= 0)
 			segno = 1;
@@ -10149,7 +10167,7 @@ XLogFileNameP(TimeLineID tli, XLogSegNo segno)
 {
 	char	   *result = palloc(MAXFNAMELEN);
 
-	XLogFileName(result, tli, segno);
+	XLogFileName(result, tli, segno, wal_segment_size);
 	return result;
 }
 
@@ -10403,8 +10421,8 @@ do_pg_start_backup(const char *backupidstr, bool fast, TimeLineID *starttli_p,
 			WALInsertLockRelease();
 		} while (!gotUniqueStartpoint);
 
-		XLByteToSeg(startpoint, _logSegNo);
-		XLogFileName(xlogfilename, starttli, _logSegNo);
+		XLByteToSeg(startpoint, _logSegNo, wal_segment_size);
+		XLogFileName(xlogfilename, starttli, _logSegNo, wal_segment_size);
 
 		/*
 		 * Construct tablespace_map file
@@ -10955,8 +10973,8 @@ do_pg_stop_backup(char *labelfile, bool waitforarchive, TimeLineID *stoptli_p)
 		 */
 		RequestXLogSwitch(false);
 
-		XLByteToPrevSeg(stoppoint, _logSegNo);
-		XLogFileName(stopxlogfilename, stoptli, _logSegNo);
+		XLByteToPrevSeg(stoppoint, _logSegNo, wal_segment_size);
+		XLogFileName(stopxlogfilename, stoptli, _logSegNo, wal_segment_size);
 
 		/* Use the log timezone here, not the session timezone */
 		stamp_time = (pg_time_t) time(NULL);
@@ -10967,9 +10985,9 @@ do_pg_stop_backup(char *labelfile, bool waitforarchive, TimeLineID *stoptli_p)
 		/*
 		 * Write the backup history file
 		 */
-		XLByteToSeg(startpoint, _logSegNo);
+		XLByteToSeg(startpoint, _logSegNo, wal_segment_size);
 		BackupHistoryFilePath(histfilepath, stoptli, _logSegNo,
-							  (uint32) (startpoint % XLogSegSize));
+							  startpoint, wal_segment_size);
 		fp = AllocateFile(histfilepath, "w");
 		if (!fp)
 			ereport(ERROR,
@@ -11023,12 +11041,12 @@ do_pg_stop_backup(char *labelfile, bool waitforarchive, TimeLineID *stoptli_p)
 		((!backup_started_in_recovery && XLogArchivingActive()) ||
 		 (backup_started_in_recovery && XLogArchivingAlways())))
 	{
-		XLByteToPrevSeg(stoppoint, _logSegNo);
-		XLogFileName(lastxlogfilename, stoptli, _logSegNo);
+		XLByteToPrevSeg(stoppoint, _logSegNo, wal_segment_size);
+		XLogFileName(lastxlogfilename, stoptli, _logSegNo, wal_segment_size);
 
-		XLByteToSeg(startpoint, _logSegNo);
+		XLByteToSeg(startpoint, _logSegNo, wal_segment_size);
 		BackupHistoryFileName(histfilename, stoptli, _logSegNo,
-							  (uint32) (startpoint % XLogSegSize));
+							  startpoint, wal_segment_size);
 
 		seconds_before_warning = 60;
 		waits = 0;
@@ -11471,14 +11489,15 @@ XLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
 	uint32		targetPageOff;
 	XLogSegNo	targetSegNo PG_USED_FOR_ASSERTS_ONLY;
 
-	XLByteToSeg(targetPagePtr, targetSegNo);
-	targetPageOff = targetPagePtr % XLogSegSize;
+	XLByteToSeg(targetPagePtr, targetSegNo, wal_segment_size);
+	targetPageOff = XLogSegmentOffset(targetPagePtr, wal_segment_size);
 
 	/*
 	 * See if we need to switch to a new segment because the requested record
 	 * is not in the currently open one.
 	 */
-	if (readFile >= 0 && !XLByteInSeg(targetPagePtr, readSegNo))
+	if (readFile >= 0 &&
+		!XLByteInSeg(targetPagePtr, readSegNo, wal_segment_size))
 	{
 		/*
 		 * Request a restartpoint if we've replayed too much xlog since the
@@ -11499,7 +11518,7 @@ XLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
 		readSource = 0;
 	}
 
-	XLByteToSeg(targetPagePtr, readSegNo);
+	XLByteToSeg(targetPagePtr, readSegNo, wal_segment_size);
 
 retry:
 	/* See if we need to retrieve more data */
@@ -11539,7 +11558,8 @@ retry:
 		if (((targetPagePtr) / XLOG_BLCKSZ) != (receivedUpto / XLOG_BLCKSZ))
 			readLen = XLOG_BLCKSZ;
 		else
-			readLen = receivedUpto % XLogSegSize - targetPageOff;
+			readLen = XLogSegmentOffset(receivedUpto, wal_segment_size) -
+				targetPageOff;
 	}
 	else
 		readLen = XLOG_BLCKSZ;
@@ -11550,7 +11570,7 @@ retry:
 	{
 		char		fname[MAXFNAMELEN];
 
-		XLogFileName(fname, curFileTLI, readSegNo);
+		XLogFileName(fname, curFileTLI, readSegNo, wal_segment_size);
 		ereport(emode_for_corrupt_record(emode, targetPagePtr + reqLen),
 				(errcode_for_file_access(),
 				 errmsg("could not seek in log segment %s to offset %u: %m",
@@ -11564,7 +11584,7 @@ retry:
 		char		fname[MAXFNAMELEN];
 
 		pgstat_report_wait_end();
-		XLogFileName(fname, curFileTLI, readSegNo);
+		XLogFileName(fname, curFileTLI, readSegNo, wal_segment_size);
 		ereport(emode_for_corrupt_record(emode, targetPagePtr + reqLen),
 				(errcode_for_file_access(),
 				 errmsg("could not read from log segment %s, offset %u: %m",

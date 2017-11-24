@@ -144,6 +144,11 @@ static bool doing_extended_query_message = false;
 static bool ignore_till_sync = false;
 
 /*
+ * Flag to keep track of whether statement timeout timer is active.
+ */
+static bool stmt_timeout_active = false;
+
+/*
  * If an unnamed prepared statement exists, it's stored here.
  * We keep it separate from the hashtable kept by commands/prepare.c
  * in order to reduce overhead for short-lived queries.
@@ -159,6 +164,10 @@ static bool UseSemiNewlineNewline = false;	/* -j switch */
 static bool RecoveryConflictPending = false;
 static bool RecoveryConflictRetryable = true;
 static ProcSignalReason RecoveryConflictReason;
+
+/* reused buffer to pass to SendRowDescriptionMessage() */
+static MemoryContext row_description_context = NULL;
+static StringInfoData row_description_buf;
 
 /* ----------------------------------------------------------------
  *		decls for routines only used in this file
@@ -182,6 +191,8 @@ static bool IsTransactionExitStmtList(List *pstmts);
 static bool IsTransactionStmtList(List *pstmts);
 static void drop_unnamed_stmt(void);
 static void log_disconnections(int code, Datum arg);
+static void enable_statement_timeout(void);
+static void disable_statement_timeout(void);
 
 
 /* ----------------------------------------------------------------
@@ -1241,7 +1252,8 @@ exec_parse_message(const char *query_string,	/* string to execute */
 	/*
 	 * Start up a transaction command so we can run parse analysis etc. (Note
 	 * that this will normally change current memory context.) Nothing happens
-	 * if we are already in one.
+	 * if we are already in one.  This also arms the statement timeout if
+	 * necessary.
 	 */
 	start_xact_command();
 
@@ -1529,7 +1541,8 @@ exec_bind_message(StringInfo input_message)
 	/*
 	 * Start up a transaction command so we can call functions etc. (Note that
 	 * this will normally change current memory context.) Nothing happens if
-	 * we are already in one.
+	 * we are already in one.  This also arms the statement timeout if
+	 * necessary.
 	 */
 	start_xact_command();
 
@@ -2021,6 +2034,9 @@ exec_execute_message(const char *portal_name, long max_rows)
 			 * those that start or end a transaction block.
 			 */
 			CommandCounterIncrement();
+
+			/* full command has been executed, reset timeout */
+			disable_statement_timeout();
 		}
 
 		/* Send appropriate CommandComplete to client */
@@ -2303,7 +2319,6 @@ static void
 exec_describe_statement_message(const char *stmt_name)
 {
 	CachedPlanSource *psrc;
-	StringInfoData buf;
 	int			i;
 
 	/*
@@ -2359,16 +2374,17 @@ exec_describe_statement_message(const char *stmt_name)
 	/*
 	 * First describe the parameters...
 	 */
-	pq_beginmessage(&buf, 't'); /* parameter description message type */
-	pq_sendint(&buf, psrc->num_params, 2);
+	pq_beginmessage_reuse(&row_description_buf, 't'); /* parameter description
+													   * message type */
+	pq_sendint16(&row_description_buf, psrc->num_params);
 
 	for (i = 0; i < psrc->num_params; i++)
 	{
 		Oid			ptype = psrc->param_types[i];
 
-		pq_sendint(&buf, (int) ptype, 4);
+		pq_sendint32(&row_description_buf, (int) ptype);
 	}
-	pq_endmessage(&buf);
+	pq_endmessage_reuse(&row_description_buf);
 
 	/*
 	 * Next send RowDescription or NoData to describe the result...
@@ -2380,7 +2396,10 @@ exec_describe_statement_message(const char *stmt_name)
 		/* Get the plan's primary targetlist */
 		tlist = CachedPlanGetTargetList(psrc, NULL);
 
-		SendRowDescriptionMessage(psrc->resultDesc, tlist, NULL);
+		SendRowDescriptionMessage(&row_description_buf,
+								  psrc->resultDesc,
+								  tlist,
+								  NULL);
 	}
 	else
 		pq_putemptymessage('n');	/* NoData */
@@ -2432,7 +2451,8 @@ exec_describe_portal_message(const char *portal_name)
 		return;					/* can't actually do anything... */
 
 	if (portal->tupDesc)
-		SendRowDescriptionMessage(portal->tupDesc,
+		SendRowDescriptionMessage(&row_description_buf,
+								  portal->tupDesc,
 								  FetchPortalTargetList(portal),
 								  portal->formats);
 	else
@@ -2450,25 +2470,27 @@ start_xact_command(void)
 	{
 		StartTransactionCommand();
 
-		/* Set statement timeout running, if any */
-		/* NB: this mustn't be enabled until we are within an xact */
-		if (StatementTimeout > 0)
-			enable_timeout_after(STATEMENT_TIMEOUT, StatementTimeout);
-		else
-			disable_timeout(STATEMENT_TIMEOUT, false);
-
 		xact_started = true;
 	}
+
+	/*
+	 * Start statement timeout if necessary.  Note that this'll intentionally
+	 * not reset the clock on an already started timeout, to avoid the timing
+	 * overhead when start_xact_command() is invoked repeatedly, without an
+	 * interceding finish_xact_command() (e.g. parse/bind/execute).  If that's
+	 * not desired, the timeout has to be disabled explicitly.
+	 */
+	enable_statement_timeout();
 }
 
 static void
 finish_xact_command(void)
 {
+	/* cancel active statement timeout after each command */
+	disable_statement_timeout();
+
 	if (xact_started)
 	{
-		/* Cancel any active statement timeout before committing */
-		disable_timeout(STATEMENT_TIMEOUT, false);
-
 		CommitTransactionCommand();
 
 #ifdef MEMORY_CONTEXT_CHECKING
@@ -2927,26 +2949,24 @@ ProcessInterrupts(void)
 						 " database and repeat your command.")));
 	}
 
-	if (QueryCancelPending)
+	/*
+	 * Don't allow query cancel interrupts while reading input from the
+	 * client, because we might lose sync in the FE/BE protocol.  (Die
+	 * interrupts are OK, because we won't read any further messages from
+	 * the client in that case.)
+	 */
+	if (QueryCancelPending && QueryCancelHoldoffCount != 0)
+	{
+		/*
+		 * Re-arm InterruptPending so that we process the cancel request
+		 * as soon as we're done reading the message.
+		 */
+		InterruptPending = true;
+	}
+	else if (QueryCancelPending)
 	{
 		bool		lock_timeout_occurred;
 		bool		stmt_timeout_occurred;
-
-		/*
-		 * Don't allow query cancel interrupts while reading input from the
-		 * client, because we might lose sync in the FE/BE protocol.  (Die
-		 * interrupts are OK, because we won't read any further messages from
-		 * the client in that case.)
-		 */
-		if (QueryCancelHoldoffCount != 0)
-		{
-			/*
-			 * Re-arm InterruptPending so that we process the cancel request
-			 * as soon as we're done reading the message.
-			 */
-			InterruptPending = true;
-			return;
-		}
 
 		QueryCancelPending = false;
 
@@ -3717,6 +3737,9 @@ PostgresMain(int argc, char *argv[],
 		 */
 		CreateDataDirLockFile(false);
 
+		/* read control file (error checking and contains config ) */
+		LocalProcessControlFile(false);
+
 		/* Initialize MaxBackends (if under postmaster, was done already) */
 		InitializeMaxBackends();
 	}
@@ -3795,8 +3818,8 @@ PostgresMain(int argc, char *argv[],
 		StringInfoData buf;
 
 		pq_beginmessage(&buf, 'K');
-		pq_sendint(&buf, (int32) MyProcPid, sizeof(int32));
-		pq_sendint(&buf, (int32) MyCancelKey, sizeof(int32));
+		pq_sendint32(&buf, (int32) MyProcPid);
+		pq_sendint32(&buf, (int32) MyCancelKey);
 		pq_endmessage(&buf);
 		/* Need not flush since ReadyForQuery will do it. */
 	}
@@ -3814,6 +3837,19 @@ PostgresMain(int argc, char *argv[],
 	MessageContext = AllocSetContextCreate(TopMemoryContext,
 										   "MessageContext",
 										   ALLOCSET_DEFAULT_SIZES);
+
+	/*
+	 * Create memory context and buffer used for RowDescription messages. As
+	 * SendRowDescriptionMessage(), via exec_describe_statement_message(), is
+	 * frequently executed for ever single statement, we don't want to
+	 * allocate a separate buffer every time.
+	 */
+	row_description_context = AllocSetContextCreate(TopMemoryContext,
+													"RowDescriptionContext",
+													ALLOCSET_DEFAULT_SIZES);
+	MemoryContextSwitchTo(row_description_context);
+	initStringInfo(&row_description_buf);
+	MemoryContextSwitchTo(TopMemoryContext);
 
 	/*
 	 * Remember stand-alone backend startup time
@@ -4533,4 +4569,43 @@ log_disconnections(int code, Datum arg)
 					hours, minutes, seconds, msecs,
 					port->user_name, port->database_name, port->remote_host,
 					port->remote_port[0] ? " port=" : "", port->remote_port)));
+}
+
+/*
+ * Start statement timeout timer, if enabled.
+ *
+ * If there's already a timeout running, don't restart the timer.  That
+ * enables compromises between accuracy of timeouts and cost of starting a
+ * timeout.
+ */
+static void
+enable_statement_timeout(void)
+{
+	/* must be within an xact */
+	Assert(xact_started);
+
+	if (StatementTimeout > 0)
+	{
+		if (!stmt_timeout_active)
+		{
+			enable_timeout_after(STATEMENT_TIMEOUT, StatementTimeout);
+			stmt_timeout_active = true;
+		}
+	}
+	else
+		disable_timeout(STATEMENT_TIMEOUT, false);
+}
+
+/*
+ * Disable statement timeout, if active.
+ */
+static void
+disable_statement_timeout(void)
+{
+	if (stmt_timeout_active)
+	{
+		disable_timeout(STATEMENT_TIMEOUT, false);
+
+		stmt_timeout_active = false;
+	}
 }

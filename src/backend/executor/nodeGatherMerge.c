@@ -194,7 +194,7 @@ ExecGatherMerge(PlanState *pstate)
 		 * Sometimes we might have to run without parallelism; but if parallel
 		 * mode is active then we can try to fire up some workers.
 		 */
-		if (gm->num_workers > 0 && IsInParallelMode())
+		if (gm->num_workers > 0 && estate->es_use_parallel_mode)
 		{
 			ParallelContext *pcxt;
 
@@ -217,7 +217,7 @@ ExecGatherMerge(PlanState *pstate)
 			/* Set up tuple queue readers to read the results. */
 			if (pcxt->nworkers_launched > 0)
 			{
-				ExecParallelCreateReaders(node->pei, node->tupDesc);
+				ExecParallelCreateReaders(node->pei);
 				/* Make a working array showing the active readers */
 				node->nreaders = pcxt->nworkers_launched;
 				node->reader = (TupleQueueReader **)

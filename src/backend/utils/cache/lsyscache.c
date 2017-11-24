@@ -2398,12 +2398,26 @@ get_typtype(Oid typid)
  * type_is_rowtype
  *
  *		Convenience function to determine whether a type OID represents
- *		a "rowtype" type --- either RECORD or a named composite type.
+ *		a "rowtype" type --- either RECORD or a named composite type
+ *		(including a domain over a named composite type).
  */
 bool
 type_is_rowtype(Oid typid)
 {
-	return (typid == RECORDOID || get_typtype(typid) == TYPTYPE_COMPOSITE);
+	if (typid == RECORDOID)
+		return true;			/* easy case */
+	switch (get_typtype(typid))
+	{
+		case TYPTYPE_COMPOSITE:
+			return true;
+		case TYPTYPE_DOMAIN:
+			if (get_typtype(getBaseType(typid)) == TYPTYPE_COMPOSITE)
+				return true;
+			break;
+		default:
+			break;
+	}
+	return false;
 }
 
 /*
@@ -3092,19 +3106,22 @@ get_range_subtype(Oid rangeOid)
 /*
  * get_typsubsparse
  *
- *		Given the type OID, return the type's typsubsparse procedure, if any.
+ *		Given the type OID, return the type's subscripting procedures, if any,
+ *		through pointers in arguments.
  */
-RegProcedure
-get_typsubsparse(Oid typid)
+void
+get_typsubsprocs(Oid typid, RegProcedure *parse,
+				 RegProcedure *assign, RegProcedure *fetch)
 {
 	HeapTuple		tp;
-	RegProcedure	result = InvalidOid;
 
 	tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
 	if (HeapTupleIsValid(tp))
 	{
-		result = ((Form_pg_type) GETSTRUCT(tp))->typsubsparse;
+		*parse = ((Form_pg_type) GETSTRUCT(tp))->typsubsparse;
+		*assign = ((Form_pg_type) GETSTRUCT(tp))->typsubsassign;
+		*fetch = ((Form_pg_type) GETSTRUCT(tp))->typsubsfetch;
+
 		ReleaseSysCache(tp);
 	}
-	return result;
 }
