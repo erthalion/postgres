@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * buffile.c
- *	  Management of large buffered files, primarily temporary files.
+ *	  Management of large buffered temporary files.
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -20,8 +20,8 @@
  * of opening/closing file descriptors.
  *
  * Note that BufFile structs are allocated with palloc(), and therefore
- * will go away automatically at transaction end.  If the underlying
- * virtual File is made with OpenTemporaryFile, then all resources for
+ * will go away automatically at query/transaction end.  Since the underlying
+ * virtual Files are made with OpenTemporaryFile, all resources for
  * the file are certain to be cleaned up even if processing is aborted
  * by ereport(ERROR).  The data structures required are made in the
  * palloc context that was current when the BufFile was created, and
@@ -45,8 +45,8 @@
 
 /*
  * We break BufFiles into gigabyte-sized segments, regardless of RELSEG_SIZE.
- * The reason is that we'd like large temporary BufFiles to be spread across
- * multiple tablespaces when available.
+ * The reason is that we'd like large BufFiles to be spread across multiple
+ * tablespaces when available.
  */
 #define MAX_PHYSICAL_FILESIZE	0x40000000
 #define BUFFILE_SEG_SIZE		(MAX_PHYSICAL_FILESIZE / BLCKSZ)
@@ -68,7 +68,6 @@ struct BufFile
 	 * avoid making redundant FileSeek calls.
 	 */
 
-	bool		isTemp;			/* can only add files if this is TRUE */
 	bool		isInterXact;	/* keep open over transactions? */
 	bool		dirty;			/* does buffer need to be written? */
 
@@ -99,7 +98,7 @@ static int	BufFileFlush(BufFile *file);
 
 /*
  * Create a BufFile given the first underlying physical file.
- * NOTE: caller must set isTemp and isInterXact if appropriate.
+ * NOTE: caller must set isInterXact if appropriate.
  */
 static BufFile *
 makeBufFile(File firstfile)
@@ -111,7 +110,6 @@ makeBufFile(File firstfile)
 	file->files[0] = firstfile;
 	file->offsets = (off_t *) palloc(sizeof(off_t));
 	file->offsets[0] = 0L;
-	file->isTemp = false;
 	file->isInterXact = false;
 	file->dirty = false;
 	file->resowner = CurrentResourceOwner;
@@ -136,7 +134,6 @@ extendBufFile(BufFile *file)
 	oldowner = CurrentResourceOwner;
 	CurrentResourceOwner = file->resowner;
 
-	Assert(file->isTemp);
 	pfile = OpenTemporaryFile(file->isInterXact);
 	Assert(pfile >= 0);
 
@@ -173,26 +170,10 @@ BufFileCreateTemp(bool interXact)
 	Assert(pfile >= 0);
 
 	file = makeBufFile(pfile);
-	file->isTemp = true;
 	file->isInterXact = interXact;
 
 	return file;
 }
-
-#ifdef NOT_USED
-/*
- * Create a BufFile and attach it to an already-opened virtual File.
- *
- * This is comparable to fdopen() in stdio.  This is the only way at present
- * to attach a BufFile to a non-temporary file.  Note that BufFiles created
- * in this way CANNOT be expanded into multiple files.
- */
-BufFile *
-BufFileCreate(File file)
-{
-	return makeBufFile(file);
-}
-#endif
 
 /*
  * Close a BufFile
@@ -206,7 +187,7 @@ BufFileClose(BufFile *file)
 
 	/* flush any unwritten data */
 	BufFileFlush(file);
-	/* close the underlying file(s) (with delete if it's a temp file) */
+	/* close and delete the underlying file(s) */
 	for (i = 0; i < file->numFiles; i++)
 		FileClose(file->files[i]);
 	/* release the buffer space */
@@ -229,10 +210,6 @@ BufFileLoadBuffer(BufFile *file)
 
 	/*
 	 * Advance to next component file if necessary and possible.
-	 *
-	 * This path can only be taken if there is more than one component, so it
-	 * won't interfere with reading a non-temp file that is over
-	 * MAX_PHYSICAL_FILESIZE.
 	 */
 	if (file->curOffset >= MAX_PHYSICAL_FILESIZE &&
 		file->curFile + 1 < file->numFiles)
@@ -288,10 +265,12 @@ BufFileDumpBuffer(BufFile *file)
 	 */
 	while (wpos < file->nbytes)
 	{
+		off_t		availbytes;
+
 		/*
 		 * Advance to next component file if necessary and possible.
 		 */
-		if (file->curOffset >= MAX_PHYSICAL_FILESIZE && file->isTemp)
+		if (file->curOffset >= MAX_PHYSICAL_FILESIZE)
 		{
 			while (file->curFile + 1 >= file->numFiles)
 				extendBufFile(file);
@@ -300,17 +279,13 @@ BufFileDumpBuffer(BufFile *file)
 		}
 
 		/*
-		 * Enforce per-file size limit only for temp files, else just try to
-		 * write as much as asked...
+		 * Determine how much we need to write into this file.
 		 */
 		bytestowrite = file->nbytes - wpos;
-		if (file->isTemp)
-		{
-			off_t		availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
+		availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
 
-			if ((off_t) bytestowrite > availbytes)
-				bytestowrite = (int) availbytes;
-		}
+		if ((off_t) bytestowrite > availbytes)
+			bytestowrite = (int) availbytes;
 
 		/*
 		 * May need to reposition physical file.
@@ -476,8 +451,8 @@ BufFileFlush(BufFile *file)
  * BufFileSeek
  *
  * Like fseek(), except that target position needs two values in order to
- * work when logical filesize exceeds maximum value representable by long.
- * We do not support relative seeks across more than LONG_MAX, however.
+ * work when logical filesize exceeds maximum value representable by off_t.
+ * We do not support relative seeks across more than that, however.
  *
  * Result is 0 if OK, EOF if not.  Logical position is not moved if an
  * impossible seek is attempted.
@@ -543,20 +518,18 @@ BufFileSeek(BufFile *file, int fileno, off_t offset, int whence)
 	 * above flush could have created a new segment, so checking sooner would
 	 * not work (at least not with this code).
 	 */
-	if (file->isTemp)
+
+	/* convert seek to "start of next seg" to "end of last seg" */
+	if (newFile == file->numFiles && newOffset == 0)
 	{
-		/* convert seek to "start of next seg" to "end of last seg" */
-		if (newFile == file->numFiles && newOffset == 0)
-		{
-			newFile--;
-			newOffset = MAX_PHYSICAL_FILESIZE;
-		}
-		while (newOffset > MAX_PHYSICAL_FILESIZE)
-		{
-			if (++newFile >= file->numFiles)
-				return EOF;
-			newOffset -= MAX_PHYSICAL_FILESIZE;
-		}
+		newFile--;
+		newOffset = MAX_PHYSICAL_FILESIZE;
+	}
+	while (newOffset > MAX_PHYSICAL_FILESIZE)
+	{
+		if (++newFile >= file->numFiles)
+			return EOF;
+		newOffset -= MAX_PHYSICAL_FILESIZE;
 	}
 	if (newFile >= file->numFiles)
 		return EOF;

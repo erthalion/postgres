@@ -27,6 +27,7 @@
 #include "commands/copy.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
+#include "executor/execPartition.h"
 #include "executor/executor.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -88,7 +89,7 @@ typedef enum EolType
  * characters, else we might find a false match to a trailing byte. In
  * supported server encodings, there is no possibility of a false match, and
  * it's faster to make useless comparisons to trailing bytes than it is to
- * invoke pg_encoding_mblen() to skip over them. encoding_embeds_ascii is TRUE
+ * invoke pg_encoding_mblen() to skip over them. encoding_embeds_ascii is true
  * when we have to do it the hard way.
  */
 typedef struct CopyStateData
@@ -167,7 +168,7 @@ typedef struct CopyStateData
 	PartitionDispatch *partition_dispatch_info;
 	int			num_dispatch;	/* Number of entries in the above array */
 	int			num_partitions; /* Number of members in the following arrays */
-	ResultRelInfo **partitions;	/* Per partition result relation pointers */
+	ResultRelInfo **partitions; /* Per partition result relation pointers */
 	TupleConversionMap **partition_tupconv_maps;
 	TupleTableSlot *partition_tuple_slot;
 	TransitionCaptureState *transition_capture;
@@ -359,7 +360,7 @@ SendCopyBegin(CopyState cstate)
 		pq_sendbyte(&buf, format);	/* overall format */
 		pq_sendint16(&buf, natts);
 		for (i = 0; i < natts; i++)
-			pq_sendint16(&buf, format);	/* per-column formats */
+			pq_sendint16(&buf, format); /* per-column formats */
 		pq_endmessage(&buf);
 		cstate->copy_dest = COPY_NEW_FE;
 	}
@@ -392,7 +393,7 @@ ReceiveCopyBegin(CopyState cstate)
 		pq_sendbyte(&buf, format);	/* overall format */
 		pq_sendint16(&buf, natts);
 		for (i = 0; i < natts; i++)
-			pq_sendint16(&buf, format);	/* per-column formats */
+			pq_sendint16(&buf, format); /* per-column formats */
 		pq_endmessage(&buf);
 		cstate->copy_dest = COPY_NEW_FE;
 		cstate->fe_msgbuf = makeStringInfo();
@@ -726,7 +727,7 @@ CopyGetInt16(CopyState cstate, int16 *val)
 /*
  * CopyLoadRawBuf loads some more data into raw_buf
  *
- * Returns TRUE if able to obtain at least one more byte, else FALSE.
+ * Returns true if able to obtain at least one more byte, else false.
  *
  * If raw_buf_index < raw_buf_len, the unprocessed bytes are transferred
  * down to the start of the buffer and then we load more data after that.
@@ -763,7 +764,7 @@ CopyLoadRawBuf(CopyState cstate)
  *	 DoCopy executes the SQL COPY statement
  *
  * Either unload or reload contents of table <relation>, depending on <from>.
- * (<from> = TRUE means we are inserting into the table.)  In the "TO" case
+ * (<from> = true means we are inserting into the table.)  In the "TO" case
  * we also support copying the output of an arbitrary SELECT, INSERT, UPDATE
  * or DELETE query.
  *
@@ -2477,7 +2478,8 @@ CopyFrom(CopyState cstate)
 		int			num_parted,
 					num_partitions;
 
-		ExecSetupPartitionTupleRouting(cstate->rel,
+		ExecSetupPartitionTupleRouting(NULL,
+									   cstate->rel,
 									   1,
 									   estate,
 									   &partition_dispatch_info,

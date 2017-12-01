@@ -97,7 +97,7 @@ _copyPlannedStmt(const PlannedStmt *from)
 	COPY_NODE_FIELD(rowMarks);
 	COPY_NODE_FIELD(relationOids);
 	COPY_NODE_FIELD(invalItems);
-	COPY_SCALAR_FIELD(nParamExec);
+	COPY_NODE_FIELD(paramExecTypes);
 	COPY_NODE_FIELD(utilityStmt);
 	COPY_LOCATION_FIELD(stmt_location);
 	COPY_LOCATION_FIELD(stmt_len);
@@ -364,6 +364,7 @@ _copyGather(const Gather *from)
 	COPY_SCALAR_FIELD(rescan_param);
 	COPY_SCALAR_FIELD(single_copy);
 	COPY_SCALAR_FIELD(invisible);
+	COPY_BITMAPSET_FIELD(initParam);
 
 	return newnode;
 }
@@ -391,6 +392,7 @@ _copyGatherMerge(const GatherMerge *from)
 	COPY_POINTER_FIELD(sortOperators, from->numCols * sizeof(Oid));
 	COPY_POINTER_FIELD(collations, from->numCols * sizeof(Oid));
 	COPY_POINTER_FIELD(nullsFirst, from->numCols * sizeof(bool));
+	COPY_BITMAPSET_FIELD(initParam);
 
 	return newnode;
 }
@@ -3208,6 +3210,16 @@ _copyClosePortalStmt(const ClosePortalStmt *from)
 	return newnode;
 }
 
+static CallStmt *
+_copyCallStmt(const CallStmt *from)
+{
+	CallStmt *newnode = makeNode(CallStmt);
+
+	COPY_NODE_FIELD(funccall);
+
+	return newnode;
+}
+
 static ClusterStmt *
 _copyClusterStmt(const ClusterStmt *from)
 {
@@ -3409,6 +3421,7 @@ _copyCreateFunctionStmt(const CreateFunctionStmt *from)
 	COPY_NODE_FIELD(funcname);
 	COPY_NODE_FIELD(parameters);
 	COPY_NODE_FIELD(returnType);
+	COPY_SCALAR_FIELD(is_procedure);
 	COPY_NODE_FIELD(options);
 	COPY_NODE_FIELD(withClause);
 
@@ -3433,6 +3446,7 @@ _copyAlterFunctionStmt(const AlterFunctionStmt *from)
 {
 	AlterFunctionStmt *newnode = makeNode(AlterFunctionStmt);
 
+	COPY_SCALAR_FIELD(objtype);
 	COPY_NODE_FIELD(func);
 	COPY_NODE_FIELD(actions);
 
@@ -4461,6 +4475,8 @@ _copyPartitionBoundSpec(const PartitionBoundSpec *from)
 
 	COPY_SCALAR_FIELD(strategy);
 	COPY_SCALAR_FIELD(is_default);
+	COPY_SCALAR_FIELD(modulus);
+	COPY_SCALAR_FIELD(remainder);
 	COPY_NODE_FIELD(listdatums);
 	COPY_NODE_FIELD(lowerdatums);
 	COPY_NODE_FIELD(upperdatums);
@@ -5099,6 +5115,9 @@ copyObjectImpl(const void *from)
 			break;
 		case T_ClosePortalStmt:
 			retval = _copyClosePortalStmt(from);
+			break;
+		case T_CallStmt:
+			retval = _copyCallStmt(from);
 			break;
 		case T_ClusterStmt:
 			retval = _copyClusterStmt(from);

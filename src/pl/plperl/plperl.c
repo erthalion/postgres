@@ -293,7 +293,7 @@ static void plperl_return_next_internal(SV *sv);
 static char *hek2cstr(HE *he);
 static SV **hv_store_string(HV *hv, const char *key, SV *val);
 static SV **hv_fetch_string(HV *hv, const char *key);
-static void plperl_create_sub(plperl_proc_desc *desc, char *s, Oid fn_oid);
+static void plperl_create_sub(plperl_proc_desc *desc, const char *s, Oid fn_oid);
 static SV  *plperl_call_perl_func(plperl_proc_desc *desc,
 					  FunctionCallInfo fcinfo);
 static void plperl_compile_callback(void *arg);
@@ -1915,7 +1915,7 @@ plperl_inline_handler(PG_FUNCTION_ARGS)
 	desc.fn_retistuple = false;
 	desc.fn_retisset = false;
 	desc.fn_retisarray = false;
-	desc.result_oid = VOIDOID;
+	desc.result_oid = InvalidOid;
 	desc.nargs = 0;
 	desc.reference = NULL;
 
@@ -2083,7 +2083,7 @@ plperlu_validator(PG_FUNCTION_ARGS)
  * supplied in s, and returns a reference to it
  */
 static void
-plperl_create_sub(plperl_proc_desc *prodesc, char *s, Oid fn_oid)
+plperl_create_sub(plperl_proc_desc *prodesc, const char *s, Oid fn_oid)
 {
 	dTHX;
 	dSP;
@@ -2481,7 +2481,7 @@ plperl_func_handler(PG_FUNCTION_ARGS)
 		}
 		retval = (Datum) 0;
 	}
-	else
+	else if (prodesc->result_oid)
 	{
 		retval = plperl_sv_to_datum(perlret,
 									prodesc->result_oid,
@@ -2826,7 +2826,7 @@ compile_plperl_function(Oid fn_oid, bool is_trigger, bool is_event_trigger)
 		 * Get the required information for input conversion of the
 		 * return value.
 		 ************************************************************/
-		if (!is_trigger && !is_event_trigger)
+		if (!is_trigger && !is_event_trigger && procStruct->prorettype)
 		{
 			Oid			rettype = procStruct->prorettype;
 
@@ -3343,7 +3343,7 @@ plperl_return_next_internal(SV *sv)
 
 		tuplestore_puttuple(current_call_data->tuple_store, tuple);
 	}
-	else
+	else if (prodesc->result_oid)
 	{
 		Datum		ret[1];
 		bool		isNull[1];

@@ -23,6 +23,7 @@
 #include "executor/tqueue.h"
 #include "lib/binaryheap.h"
 #include "miscadmin.h"
+#include "optimizer/planmain.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -115,10 +116,19 @@ ExecInitGatherMerge(GatherMerge *node, EState *estate, int eflags)
 	outerPlanState(gm_state) = ExecInitNode(outerNode, estate, eflags);
 
 	/*
+	 * Store the tuple descriptor into gather merge state, so we can use it
+	 * while initializing the gather merge slots.
+	 */
+	if (!ExecContextForcesOids(outerPlanState(gm_state), &hasoid))
+		hasoid = false;
+	tupDesc = ExecTypeFromTL(outerNode->targetlist, hasoid);
+	gm_state->tupDesc = tupDesc;
+
+	/*
 	 * Initialize result tuple type and projection info.
 	 */
 	ExecAssignResultTypeFromTL(&gm_state->ps);
-	ExecAssignProjectionInfo(&gm_state->ps, NULL);
+	ExecConditionalAssignProjectionInfo(&gm_state->ps, tupDesc, OUTER_VAR);
 
 	/*
 	 * initialize sort-key information
@@ -149,15 +159,6 @@ ExecInitGatherMerge(GatherMerge *node, EState *estate, int eflags)
 			PrepareSortSupportFromOrderingOp(node->sortOperators[i], sortKey);
 		}
 	}
-
-	/*
-	 * Store the tuple descriptor into gather merge state, so we can use it
-	 * while initializing the gather merge slots.
-	 */
-	if (!ExecContextForcesOids(&gm_state->ps, &hasoid))
-		hasoid = false;
-	tupDesc = ExecTypeFromTL(outerNode->targetlist, hasoid);
-	gm_state->tupDesc = tupDesc;
 
 	/* Now allocate the workspace for gather merge */
 	gather_merge_setup(gm_state);
@@ -202,11 +203,13 @@ ExecGatherMerge(PlanState *pstate)
 			if (!node->pei)
 				node->pei = ExecInitParallelPlan(node->ps.lefttree,
 												 estate,
+												 gm->initParam,
 												 gm->num_workers,
 												 node->tuples_needed);
 			else
 				ExecParallelReinitialize(node->ps.lefttree,
-										 node->pei);
+										 node->pei,
+										 gm->initParam);
 
 			/* Try to launch workers. */
 			pcxt = node->pei->pcxt;
@@ -233,8 +236,9 @@ ExecGatherMerge(PlanState *pstate)
 			}
 		}
 
-		/* always allow leader to participate */
-		node->need_to_scan_locally = true;
+		/* allow leader to participate if enabled or no choice */
+		if (parallel_leader_participation || node->nreaders == 0)
+			node->need_to_scan_locally = true;
 		node->initialized = true;
 	}
 
@@ -252,6 +256,10 @@ ExecGatherMerge(PlanState *pstate)
 	slot = gather_merge_getnext(node);
 	if (TupIsNull(slot))
 		return NULL;
+
+	/* If no projection is required, we're done. */
+	if (node->ps.ps_ProjInfo == NULL)
+		return slot;
 
 	/*
 	 * Form the result tuple using ExecProject(), and return it.
