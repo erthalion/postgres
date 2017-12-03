@@ -1051,6 +1051,11 @@ ExecBitmapHeapInitializeDSM(BitmapHeapScanState *node,
 {
 	ParallelBitmapHeapState *pstate;
 	EState	   *estate = node->ss.ps.state;
+	dsa_area   *dsa = node->ss.ps.state->es_query_dsa;
+
+	/* If there's no DSA, there are no workers; initialize nothing. */
+	if (dsa == NULL)
+		return;
 
 	pstate = shm_toc_allocate(pcxt->toc, node->pscan_len);
 
@@ -1083,6 +1088,10 @@ ExecBitmapHeapReInitializeDSM(BitmapHeapScanState *node,
 	ParallelBitmapHeapState *pstate = node->pstate;
 	dsa_area   *dsa = node->ss.ps.state->es_query_dsa;
 
+	/* If there's no DSA, there are no workers; do nothing. */
+	if (dsa == NULL)
+		return;
+
 	pstate->state = BM_INITIAL;
 
 	if (DsaPointerIsValid(pstate->tbmiterator))
@@ -1102,12 +1111,15 @@ ExecBitmapHeapReInitializeDSM(BitmapHeapScanState *node,
  * ----------------------------------------------------------------
  */
 void
-ExecBitmapHeapInitializeWorker(BitmapHeapScanState *node, shm_toc *toc)
+ExecBitmapHeapInitializeWorker(BitmapHeapScanState *node,
+							   ParallelWorkerContext *pwcxt)
 {
 	ParallelBitmapHeapState *pstate;
 	Snapshot	snapshot;
 
-	pstate = shm_toc_lookup(toc, node->ss.ps.plan->plan_node_id, false);
+	Assert(node->ss.ps.state->es_query_dsa != NULL);
+
+	pstate = shm_toc_lookup(pwcxt->toc, node->ss.ps.plan->plan_node_id, false);
 	node->pstate = pstate;
 
 	snapshot = RestoreSnapshot(pstate->phs_snapshot_data);

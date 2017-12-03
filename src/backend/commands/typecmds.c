@@ -104,7 +104,7 @@ static void checkEnumOwner(HeapTuple tup);
 static char *domainAddConstraint(Oid domainOid, Oid domainNamespace,
 					Oid baseTypeOid,
 					int typMod, Constraint *constr,
-					char *domainName, ObjectAddress *constrAddr);
+					const char *domainName, ObjectAddress *constrAddr);
 static Node *replace_domain_constraint_value(ParseState *pstate,
 								ColumnRef *cref);
 
@@ -2742,7 +2742,7 @@ AlterDomainAddConstraint(List *names, Node *newConstraint,
  * Implements the ALTER DOMAIN .. VALIDATE CONSTRAINT statement.
  */
 ObjectAddress
-AlterDomainValidateConstraint(List *names, char *constrName)
+AlterDomainValidateConstraint(List *names, const char *constrName)
 {
 	TypeName   *typename;
 	Oid			domainoid;
@@ -3153,7 +3153,7 @@ checkDomainOwner(HeapTuple tup)
 static char *
 domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 					int typMod, Constraint *constr,
-					char *domainName, ObjectAddress *constrAddr)
+					const char *domainName, ObjectAddress *constrAddr)
 {
 	Node	   *expr;
 	char	   *ccsrc;
@@ -3492,9 +3492,9 @@ AlterTypeOwner(List *names, Oid newOwnerId, ObjectType objecttype)
  * AlterTypeOwner_oid - change type owner unconditionally
  *
  * This function recurses to handle a pg_class entry, if necessary.  It
- * invokes any necessary access object hooks.  If hasDependEntry is TRUE, this
+ * invokes any necessary access object hooks.  If hasDependEntry is true, this
  * function modifies the pg_shdepend entry appropriately (this should be
- * passed as FALSE only for table rowtypes and array types).
+ * passed as false only for table rowtypes and array types).
  *
  * This is used by ALTER TABLE/TYPE OWNER commands, as well as by REASSIGN
  * OWNED BY.  It assumes the caller has done all needed check.
@@ -3660,10 +3660,10 @@ AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses *objsMoved)
  * Caller must have already checked privileges.
  *
  * The function automatically recurses to process the type's array type,
- * if any.  isImplicitArray should be TRUE only when doing this internal
+ * if any.  isImplicitArray should be true only when doing this internal
  * recursion (outside callers must never try to move an array type directly).
  *
- * If errorOnTableType is TRUE, the function errors out if the type is
+ * If errorOnTableType is true, the function errors out if the type is
  * a table type.  ALTER TABLE has to be used to move a table to a new
  * namespace.
  *

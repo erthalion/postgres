@@ -52,9 +52,9 @@ typedef struct
 } basebackup_options;
 
 
-static int64 sendDir(char *path, int basepathlen, bool sizeonly,
+static int64 sendDir(const char *path, int basepathlen, bool sizeonly,
 		List *tablespaces, bool sendtblspclinks);
-static bool sendFile(char *readfilename, char *tarfilename,
+static bool sendFile(const char *readfilename, const char *tarfilename,
 		 struct stat *statbuf, bool missing_ok);
 static void sendFileWithContent(const char *filename, const char *content);
 static int64 _tarWriteHeader(const char *filename, const char *linktarget,
@@ -278,7 +278,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 			/* Send CopyOutResponse message */
 			pq_beginmessage(&buf, 'H');
 			pq_sendbyte(&buf, 0);	/* overall format */
-			pq_sendint16(&buf, 0); /* natts */
+			pq_sendint16(&buf, 0);	/* natts */
 			pq_endmessage(&buf);
 
 			if (ti->path == NULL)
@@ -744,7 +744,7 @@ SendBackupHeader(List *tablespaces)
 	pq_sendstring(&buf, "spcoid");
 	pq_sendint32(&buf, 0);		/* table oid */
 	pq_sendint16(&buf, 0);		/* attnum */
-	pq_sendint32(&buf, OIDOID);	/* type oid */
+	pq_sendint32(&buf, OIDOID); /* type oid */
 	pq_sendint16(&buf, 4);		/* typlen */
 	pq_sendint32(&buf, 0);		/* typmod */
 	pq_sendint16(&buf, 0);		/* format code */
@@ -774,10 +774,10 @@ SendBackupHeader(List *tablespaces)
 
 		/* Send one datarow message */
 		pq_beginmessage(&buf, 'D');
-		pq_sendint16(&buf, 3); /* number of columns */
+		pq_sendint16(&buf, 3);	/* number of columns */
 		if (ti->path == NULL)
 		{
-			pq_sendint32(&buf, -1);	/* Length = -1 ==> NULL */
+			pq_sendint32(&buf, -1); /* Length = -1 ==> NULL */
 			pq_sendint32(&buf, -1);
 		}
 		else
@@ -795,7 +795,7 @@ SendBackupHeader(List *tablespaces)
 		if (ti->size >= 0)
 			send_int8_string(&buf, ti->size / 1024);
 		else
-			pq_sendint32(&buf, -1);	/* NULL */
+			pq_sendint32(&buf, -1); /* NULL */
 
 		pq_endmessage(&buf);
 	}
@@ -962,7 +962,7 @@ sendTablespace(char *path, bool sizeonly)
  * as it will be sent separately in the tablespace_map file.
  */
 static int64
-sendDir(char *path, int basepathlen, bool sizeonly, List *tablespaces,
+sendDir(const char *path, int basepathlen, bool sizeonly, List *tablespaces,
 		bool sendtblspclinks)
 {
 	DIR		   *dir;
@@ -1207,7 +1207,7 @@ sendDir(char *path, int basepathlen, bool sizeonly, List *tablespaces,
  * and the file did not exist.
  */
 static bool
-sendFile(char *readfilename, char *tarfilename, struct stat *statbuf,
+sendFile(const char *readfilename, const char *tarfilename, struct stat *statbuf,
 		 bool missing_ok)
 {
 	FILE	   *fp;

@@ -38,6 +38,7 @@
 #include "executor/nodeSubplan.h"
 #include "executor/tqueue.h"
 #include "miscadmin.h"
+#include "optimizer/planmain.h"
 #include "pgstat.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -73,7 +74,8 @@ ExecInitGather(Gather *node, EState *estate, int eflags)
 	gatherstate->ps.ExecProcNode = ExecGather;
 
 	gatherstate->initialized = false;
-	gatherstate->need_to_scan_locally = !node->single_copy;
+	gatherstate->need_to_scan_locally =
+		!node->single_copy && parallel_leader_participation;
 	gatherstate->tuples_needed = -1;
 
 	/*
@@ -102,18 +104,18 @@ ExecInitGather(Gather *node, EState *estate, int eflags)
 	outerPlanState(gatherstate) = ExecInitNode(outerNode, estate, eflags);
 
 	/*
-	 * Initialize result tuple type and projection info.
-	 */
-	ExecAssignResultTypeFromTL(&gatherstate->ps);
-	ExecAssignProjectionInfo(&gatherstate->ps, NULL);
-
-	/*
 	 * Initialize funnel slot to same tuple descriptor as outer plan.
 	 */
-	if (!ExecContextForcesOids(&gatherstate->ps, &hasoid))
+	if (!ExecContextForcesOids(outerPlanState(gatherstate), &hasoid))
 		hasoid = false;
 	tupDesc = ExecTypeFromTL(outerNode->targetlist, hasoid);
 	ExecSetSlotDescriptor(gatherstate->funnel_slot, tupDesc);
+
+	/*
+	 * Initialize result tuple type and projection info.
+	 */
+	ExecAssignResultTypeFromTL(&gatherstate->ps);
+	ExecConditionalAssignProjectionInfo(&gatherstate->ps, tupDesc, OUTER_VAR);
 
 	return gatherstate;
 }
@@ -158,11 +160,13 @@ ExecGather(PlanState *pstate)
 			if (!node->pei)
 				node->pei = ExecInitParallelPlan(node->ps.lefttree,
 												 estate,
+												 gather->initParam,
 												 gather->num_workers,
 												 node->tuples_needed);
 			else
 				ExecParallelReinitialize(node->ps.lefttree,
-										 node->pei);
+										 node->pei,
+										 gather->initParam);
 
 			/*
 			 * Register backend workers. We might not get as many as we
@@ -193,9 +197,9 @@ ExecGather(PlanState *pstate)
 			node->nextreader = 0;
 		}
 
-		/* Run plan locally if no workers or not single-copy. */
+		/* Run plan locally if no workers or enabled and not single-copy. */
 		node->need_to_scan_locally = (node->nreaders == 0)
-			|| !gather->single_copy;
+			|| (!gather->single_copy && parallel_leader_participation);
 		node->initialized = true;
 	}
 
@@ -216,6 +220,10 @@ ExecGather(PlanState *pstate)
 	slot = gather_getnext(node);
 	if (TupIsNull(slot))
 		return NULL;
+
+	/* If no projection is required, we're done. */
+	if (node->ps.ps_ProjInfo == NULL)
+		return slot;
 
 	/*
 	 * Form the result tuple using ExecProject(), and return it.
