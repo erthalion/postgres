@@ -94,7 +94,7 @@ static Oid	findTypeSendFunction(List *procname, Oid typeOid);
 static Oid	findTypeTypmodinFunction(List *procname);
 static Oid	findTypeTypmodoutFunction(List *procname);
 static Oid	findTypeAnalyzeFunction(List *procname, Oid typeOid);
-static Oid	findTypeSubscriptingFunction(List *procname);
+static Oid	findTypeSubscriptingFunction(List *procname, Oid typeOid, bool parseFunc);
 static Oid	findRangeSubOpclass(List *opcname, Oid subtype);
 static Oid	findRangeCanonicalFunction(List *procname, Oid typeOid);
 static Oid	findRangeSubtypeDiffFunction(List *procname, Oid subtype);
@@ -538,13 +538,16 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 		analyzeOid = findTypeAnalyzeFunction(analyzeName, typoid);
 
 	if (subscriptingParseName)
-		subscriptingParseOid = findTypeSubscriptingFunction(subscriptingParseName);
+		subscriptingParseOid = findTypeSubscriptingFunction(subscriptingParseName,
+															typoid, true);
 
 	if (subscriptingAssignName)
-		subscriptingAssignOid = findTypeSubscriptingFunction(subscriptingAssignName);
+		subscriptingAssignOid = findTypeSubscriptingFunction(subscriptingAssignName,
+															 typoid, false);
 
 	if (subscriptingFetchName)
-		subscriptingFetchOid = findTypeSubscriptingFunction(subscriptingFetchName);
+		subscriptingFetchOid = findTypeSubscriptingFunction(subscriptingFetchName,
+															typoid, false);
 
 	/*
 	 * Check permissions on functions.  We choose to require the creator/owner
@@ -2023,28 +2026,38 @@ findTypeAnalyzeFunction(List *procname, Oid typeOid)
 }
 
 static Oid
-findTypeSubscriptingFunction(List *procname)
+findTypeSubscriptingFunction(List *procname, Oid typeOid, bool parseFunc)
 {
-	Oid			argList[1];
+	Oid			argList[2];
 	Oid			procOid;
+	int			nargs;
 
-	/*
-	 * Subscripting functions always take one INTERNAL argument and return INTERNAL.
-	 */
-	argList[0] = INTERNALOID;
+	if (parseFunc)
+	{
+		/*
+		 * Subscripting function parse always take two INTERNAL argument and
+		 * return INTERNAL.
+		 */
+		argList[0] = INTERNALOID;
+		nargs = 1;
+	}
+	else
+	{
+		/*
+		 * Subscripting functions fetch/assign always take one typeOid
+		 * argument, one INTERNAL argument and return typeOid.
+		 */
+		argList[0] = typeOid;
+		argList[1] = INTERNALOID;
+		nargs = 2;
+	}
 
-	procOid = LookupFuncName(procname, 1, argList, true);
+	procOid = LookupFuncName(procname, nargs, argList, true);
 	if (!OidIsValid(procOid))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_FUNCTION),
 				 errmsg("function %s does not exist",
-						func_signature_string(procname, 1, NIL, argList))));
-
-	if (get_func_rettype(procOid) != INTERNALOID)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("type subscripting function %s must return type %s",
-						NameListToString(procname), "internal")));
+						func_signature_string(procname, nargs, NIL, argList))));
 
 	return procOid;
 }
