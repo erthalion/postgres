@@ -40,6 +40,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
 #include "optimizer/var.h"
+#include "parser/parse_coerce.h"
 #include "rewrite/rewriteManip.h"
 #include "storage/lmgr.h"
 #include "utils/array.h"
@@ -170,8 +171,6 @@ static int32 partition_bound_cmp(PartitionKey key,
 static int partition_bound_bsearch(PartitionKey key,
 						PartitionBoundInfo boundinfo,
 						void *probe, bool probe_is_bound, bool *is_equal);
-static void get_partition_dispatch_recurse(Relation rel, Relation parent,
-							   List **pds, List **leaf_part_oids);
 static int	get_partition_bound_num_indexes(PartitionBoundInfo b);
 static int	get_greatest_modulus(PartitionBoundInfo b);
 static uint64 compute_hash_value(PartitionKey key, Datum *values, bool *isnull);
@@ -752,15 +751,13 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
 
 	if (b1->strategy == PARTITION_STRATEGY_HASH)
 	{
-		int			greatest_modulus;
+		int			greatest_modulus = get_greatest_modulus(b1);
 
 		/*
 		 * If two hash partitioned tables have different greatest moduli,
-		 * their partition schemes don't match.  For hash partitioned table,
-		 * the greatest modulus is given by the last datum and number of
-		 * partitions is given by ndatums.
+		 * their partition schemes don't match.
 		 */
-		if (b1->datums[b1->ndatums - 1][0] != b2->datums[b2->ndatums - 1][0])
+		if (greatest_modulus != get_greatest_modulus(b2))
 			return false;
 
 		/*
@@ -774,7 +771,6 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
 		 * their indexes array will be same.  So, it suffices to compare
 		 * indexes array.
 		 */
-		greatest_modulus = get_greatest_modulus(b1);
 		for (i = 0; i < greatest_modulus; i++)
 			if (b1->indexes[i] != b2->indexes[i])
 				return false;
@@ -1530,148 +1526,6 @@ get_partition_qual_relid(Oid relid)
 	return result;
 }
 
-/*
- * RelationGetPartitionDispatchInfo
- *		Returns information necessary to route tuples down a partition tree
- *
- * The number of elements in the returned array (that is, the number of
- * PartitionDispatch objects for the partitioned tables in the partition tree)
- * is returned in *num_parted and a list of the OIDs of all the leaf
- * partitions of rel is returned in *leaf_part_oids.
- *
- * All the relations in the partition tree (including 'rel') must have been
- * locked (using at least the AccessShareLock) by the caller.
- */
-PartitionDispatch *
-RelationGetPartitionDispatchInfo(Relation rel,
-								 int *num_parted, List **leaf_part_oids)
-{
-	List	   *pdlist = NIL;
-	PartitionDispatchData **pd;
-	ListCell   *lc;
-	int			i;
-
-	Assert(rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
-
-	*num_parted = 0;
-	*leaf_part_oids = NIL;
-
-	get_partition_dispatch_recurse(rel, NULL, &pdlist, leaf_part_oids);
-	*num_parted = list_length(pdlist);
-	pd = (PartitionDispatchData **) palloc(*num_parted *
-										   sizeof(PartitionDispatchData *));
-	i = 0;
-	foreach(lc, pdlist)
-	{
-		pd[i++] = lfirst(lc);
-	}
-
-	return pd;
-}
-
-/*
- * get_partition_dispatch_recurse
- *		Recursively expand partition tree rooted at rel
- *
- * As the partition tree is expanded in a depth-first manner, we maintain two
- * global lists: of PartitionDispatch objects corresponding to partitioned
- * tables in *pds and of the leaf partition OIDs in *leaf_part_oids.
- *
- * Note that the order of OIDs of leaf partitions in leaf_part_oids matches
- * the order in which the planner's expand_partitioned_rtentry() processes
- * them.  It's not necessarily the case that the offsets match up exactly,
- * because constraint exclusion might prune away some partitions on the
- * planner side, whereas we'll always have the complete list; but unpruned
- * partitions will appear in the same order in the plan as they are returned
- * here.
- */
-static void
-get_partition_dispatch_recurse(Relation rel, Relation parent,
-							   List **pds, List **leaf_part_oids)
-{
-	TupleDesc	tupdesc = RelationGetDescr(rel);
-	PartitionDesc partdesc = RelationGetPartitionDesc(rel);
-	PartitionKey partkey = RelationGetPartitionKey(rel);
-	PartitionDispatch pd;
-	int			i;
-
-	check_stack_depth();
-
-	/* Build a PartitionDispatch for this table and add it to *pds. */
-	pd = (PartitionDispatch) palloc(sizeof(PartitionDispatchData));
-	*pds = lappend(*pds, pd);
-	pd->reldesc = rel;
-	pd->key = partkey;
-	pd->keystate = NIL;
-	pd->partdesc = partdesc;
-	if (parent != NULL)
-	{
-		/*
-		 * For every partitioned table other than the root, we must store a
-		 * tuple table slot initialized with its tuple descriptor and a tuple
-		 * conversion map to convert a tuple from its parent's rowtype to its
-		 * own. That is to make sure that we are looking at the correct row
-		 * using the correct tuple descriptor when computing its partition key
-		 * for tuple routing.
-		 */
-		pd->tupslot = MakeSingleTupleTableSlot(tupdesc);
-		pd->tupmap = convert_tuples_by_name(RelationGetDescr(parent),
-											tupdesc,
-											gettext_noop("could not convert row type"));
-	}
-	else
-	{
-		/* Not required for the root partitioned table */
-		pd->tupslot = NULL;
-		pd->tupmap = NULL;
-	}
-
-	/*
-	 * Go look at each partition of this table.  If it's a leaf partition,
-	 * simply add its OID to *leaf_part_oids.  If it's a partitioned table,
-	 * recursively call get_partition_dispatch_recurse(), so that its
-	 * partitions are processed as well and a corresponding PartitionDispatch
-	 * object gets added to *pds.
-	 *
-	 * About the values in pd->indexes: for a leaf partition, it contains the
-	 * leaf partition's position in the global list *leaf_part_oids minus 1,
-	 * whereas for a partitioned table partition, it contains the partition's
-	 * position in the global list *pds multiplied by -1.  The latter is
-	 * multiplied by -1 to distinguish partitioned tables from leaf partitions
-	 * when going through the values in pd->indexes.  So, for example, when
-	 * using it during tuple-routing, encountering a value >= 0 means we found
-	 * a leaf partition.  It is immediately returned as the index in the array
-	 * of ResultRelInfos of all the leaf partitions, using which we insert the
-	 * tuple into that leaf partition.  A negative value means we found a
-	 * partitioned table.  The value multiplied by -1 is returned as the index
-	 * in the array of PartitionDispatch objects of all partitioned tables in
-	 * the tree.  This value is used to continue the search in the next level
-	 * of the partition tree.
-	 */
-	pd->indexes = (int *) palloc(partdesc->nparts * sizeof(int));
-	for (i = 0; i < partdesc->nparts; i++)
-	{
-		Oid			partrelid = partdesc->oids[i];
-
-		if (get_rel_relkind(partrelid) != RELKIND_PARTITIONED_TABLE)
-		{
-			*leaf_part_oids = lappend_oid(*leaf_part_oids, partrelid);
-			pd->indexes[i] = list_length(*leaf_part_oids) - 1;
-		}
-		else
-		{
-			/*
-			 * We assume all tables in the partition tree were already locked
-			 * by the caller.
-			 */
-			Relation	partrel = heap_open(partrelid, NoLock);
-
-			pd->indexes[i] = -list_length(*pds);
-			get_partition_dispatch_recurse(partrel, rel, pds, leaf_part_oids);
-		}
-	}
-}
-
 /* Module-local functions */
 
 /*
@@ -2277,12 +2131,29 @@ get_qual_for_range(Relation parent, PartitionBoundSpec *spec,
 
 		if (or_expr_args != NIL)
 		{
-			/* OR all the non-default partition constraints; then negate it */
-			result = lappend(result,
-							 list_length(or_expr_args) > 1
-							 ? makeBoolExpr(OR_EXPR, or_expr_args, -1)
-							 : linitial(or_expr_args));
-			result = list_make1(makeBoolExpr(NOT_EXPR, result, -1));
+			Expr	   *other_parts_constr;
+
+			/*
+			 * Combine the constraints obtained for non-default partitions
+			 * using OR.  As requested, each of the OR's args doesn't include
+			 * the NOT NULL test for partition keys (which is to avoid its
+			 * useless repetition).  Add the same now.
+			 */
+			other_parts_constr =
+				makeBoolExpr(AND_EXPR,
+							 lappend(get_range_nulltest(key),
+									 list_length(or_expr_args) > 1
+									 ? makeBoolExpr(OR_EXPR, or_expr_args,
+													-1)
+									 : linitial(or_expr_args)),
+							 -1);
+
+			/*
+			 * Finally, the default partition contains everything *NOT*
+			 * contained in the non-default partitions.
+			 */
+			result = list_make1(makeBoolExpr(NOT_EXPR,
+											 list_make1(other_parts_constr), -1));
 		}
 
 		return result;
@@ -2617,259 +2488,106 @@ generate_partition_qual(Relation rel)
 	return result;
 }
 
-/* ----------------
- *		FormPartitionKeyDatum
- *			Construct values[] and isnull[] arrays for the partition key
- *			of a tuple.
- *
- *	pd				Partition dispatch object of the partitioned table
- *	slot			Heap tuple from which to extract partition key
- *	estate			executor state for evaluating any partition key
- *					expressions (must be non-NULL)
- *	values			Array of partition key Datums (output area)
- *	isnull			Array of is-null indicators (output area)
- *
- * the ecxt_scantuple slot of estate's per-tuple expr context must point to
- * the heap tuple passed in.
- * ----------------
- */
-void
-FormPartitionKeyDatum(PartitionDispatch pd,
-					  TupleTableSlot *slot,
-					  EState *estate,
-					  Datum *values,
-					  bool *isnull)
-{
-	ListCell   *partexpr_item;
-	int			i;
-
-	if (pd->key->partexprs != NIL && pd->keystate == NIL)
-	{
-		/* Check caller has set up context correctly */
-		Assert(estate != NULL &&
-			   GetPerTupleExprContext(estate)->ecxt_scantuple == slot);
-
-		/* First time through, set up expression evaluation state */
-		pd->keystate = ExecPrepareExprList(pd->key->partexprs, estate);
-	}
-
-	partexpr_item = list_head(pd->keystate);
-	for (i = 0; i < pd->key->partnatts; i++)
-	{
-		AttrNumber	keycol = pd->key->partattrs[i];
-		Datum		datum;
-		bool		isNull;
-
-		if (keycol != 0)
-		{
-			/* Plain column; get the value directly from the heap tuple */
-			datum = slot_getattr(slot, keycol, &isNull);
-		}
-		else
-		{
-			/* Expression; need to evaluate it */
-			if (partexpr_item == NULL)
-				elog(ERROR, "wrong number of partition key expressions");
-			datum = ExecEvalExprSwitchContext((ExprState *) lfirst(partexpr_item),
-											  GetPerTupleExprContext(estate),
-											  &isNull);
-			partexpr_item = lnext(partexpr_item);
-		}
-		values[i] = datum;
-		isnull[i] = isNull;
-	}
-
-	if (partexpr_item != NULL)
-		elog(ERROR, "wrong number of partition key expressions");
-}
-
 /*
  * get_partition_for_tuple
- *		Finds a leaf partition for tuple contained in *slot
+ *		Finds partition of relation which accepts the partition key specified
+ *		in values and isnull
  *
- * Returned value is the sequence number of the leaf partition thus found,
- * or -1 if no leaf partition is found for the tuple.  *failed_at is set
- * to the OID of the partitioned table whose partition was not found in
- * the latter case.
+ * Return value is index of the partition (>= 0 and < partdesc->nparts) if one
+ * found or -1 if none found.
  */
 int
-get_partition_for_tuple(PartitionDispatch *pd,
-						TupleTableSlot *slot,
-						EState *estate,
-						PartitionDispatchData **failed_at,
-						TupleTableSlot **failed_slot)
+get_partition_for_tuple(Relation relation, Datum *values, bool *isnull)
 {
-	PartitionDispatch parent;
-	Datum		values[PARTITION_MAX_KEYS];
-	bool		isnull[PARTITION_MAX_KEYS];
-	int			result;
-	ExprContext *ecxt = GetPerTupleExprContext(estate);
-	TupleTableSlot *ecxt_scantuple_old = ecxt->ecxt_scantuple;
+	int			bound_offset;
+	int			part_index = -1;
+	PartitionKey key = RelationGetPartitionKey(relation);
+	PartitionDesc partdesc = RelationGetPartitionDesc(relation);
 
-	/* start with the root partitioned table */
-	parent = pd[0];
-	while (true)
+	/* Route as appropriate based on partitioning strategy. */
+	switch (key->strategy)
 	{
-		PartitionKey key = parent->key;
-		PartitionDesc partdesc = parent->partdesc;
-		TupleTableSlot *myslot = parent->tupslot;
-		TupleConversionMap *map = parent->tupmap;
-		int			cur_index = -1;
+		case PARTITION_STRATEGY_HASH:
+			{
+				PartitionBoundInfo boundinfo = partdesc->boundinfo;
+				int			greatest_modulus = get_greatest_modulus(boundinfo);
+				uint64		rowHash = compute_hash_value(key, values, isnull);
 
-		if (myslot != NULL && map != NULL)
-		{
-			HeapTuple	tuple = ExecFetchSlotTuple(slot);
+				part_index = boundinfo->indexes[rowHash % greatest_modulus];
+			}
+			break;
 
-			ExecClearTuple(myslot);
-			tuple = do_convert_tuple(tuple, map);
-			ExecStoreTuple(tuple, myslot, InvalidBuffer, true);
-			slot = myslot;
-		}
+		case PARTITION_STRATEGY_LIST:
+			if (isnull[0])
+			{
+				if (partition_bound_accepts_nulls(partdesc->boundinfo))
+					part_index = partdesc->boundinfo->null_index;
+			}
+			else
+			{
+				bool		equal = false;
 
-		/* Quick exit */
-		if (partdesc->nparts == 0)
-		{
-			*failed_at = parent;
-			*failed_slot = slot;
-			result = -1;
-			goto error_exit;
-		}
+				bound_offset = partition_bound_bsearch(key,
+													   partdesc->boundinfo,
+													   values,
+													   false,
+													   &equal);
+				if (bound_offset >= 0 && equal)
+					part_index = partdesc->boundinfo->indexes[bound_offset];
+			}
+			break;
 
-		/*
-		 * Extract partition key from tuple. Expression evaluation machinery
-		 * that FormPartitionKeyDatum() invokes expects ecxt_scantuple to
-		 * point to the correct tuple slot.  The slot might have changed from
-		 * what was used for the parent table if the table of the current
-		 * partitioning level has different tuple descriptor from the parent.
-		 * So update ecxt_scantuple accordingly.
-		 */
-		ecxt->ecxt_scantuple = slot;
-		FormPartitionKeyDatum(parent, slot, estate, values, isnull);
+		case PARTITION_STRATEGY_RANGE:
+			{
+				bool		equal = false,
+							range_partkey_has_null = false;
+				int			i;
 
-		/* Route as appropriate based on partitioning strategy. */
-		switch (key->strategy)
-		{
-			case PARTITION_STRATEGY_HASH:
+				/*
+				 * No range includes NULL, so this will be accepted by the
+				 * default partition if there is one, and otherwise rejected.
+				 */
+				for (i = 0; i < key->partnatts; i++)
 				{
-					PartitionBoundInfo boundinfo = partdesc->boundinfo;
-					int			greatest_modulus = get_greatest_modulus(boundinfo);
-					uint64		rowHash = compute_hash_value(key, values,
-															 isnull);
-
-					cur_index = boundinfo->indexes[rowHash % greatest_modulus];
-				}
-				break;
-
-			case PARTITION_STRATEGY_LIST:
-
-				if (isnull[0])
-				{
-					if (partition_bound_accepts_nulls(partdesc->boundinfo))
-						cur_index = partdesc->boundinfo->null_index;
-				}
-				else
-				{
-					bool		equal = false;
-					int			cur_offset;
-
-					cur_offset = partition_bound_bsearch(key,
-														 partdesc->boundinfo,
-														 values,
-														 false,
-														 &equal);
-					if (cur_offset >= 0 && equal)
-						cur_index = partdesc->boundinfo->indexes[cur_offset];
-				}
-				break;
-
-			case PARTITION_STRATEGY_RANGE:
-				{
-					bool		equal = false,
-								range_partkey_has_null = false;
-					int			cur_offset;
-					int			i;
-
-					/*
-					 * No range includes NULL, so this will be accepted by the
-					 * default partition if there is one, and otherwise
-					 * rejected.
-					 */
-					for (i = 0; i < key->partnatts; i++)
+					if (isnull[i])
 					{
-						if (isnull[i] &&
-							partition_bound_has_default(partdesc->boundinfo))
-						{
-							range_partkey_has_null = true;
-							break;
-						}
-						else if (isnull[i])
-						{
-							*failed_at = parent;
-							*failed_slot = slot;
-							result = -1;
-							goto error_exit;
-						}
-					}
-
-					/*
-					 * No need to search for partition, as the null key will
-					 * be routed to the default partition.
-					 */
-					if (range_partkey_has_null)
+						range_partkey_has_null = true;
 						break;
+					}
+				}
 
-					cur_offset = partition_bound_bsearch(key,
-														 partdesc->boundinfo,
-														 values,
-														 false,
-														 &equal);
+				if (!range_partkey_has_null)
+				{
+					bound_offset = partition_bound_bsearch(key,
+														   partdesc->boundinfo,
+														   values,
+														   false,
+														   &equal);
 
 					/*
-					 * The offset returned is such that the bound at
-					 * cur_offset is less than or equal to the tuple value, so
-					 * the bound at offset+1 is the upper bound.
+					 * The bound at bound_offset is less than or equal to the
+					 * tuple value, so the bound at offset+1 is the upper
+					 * bound of the partition we're looking for, if there
+					 * actually exists one.
 					 */
-					cur_index = partdesc->boundinfo->indexes[cur_offset + 1];
+					part_index = partdesc->boundinfo->indexes[bound_offset + 1];
 				}
-				break;
-
-			default:
-				elog(ERROR, "unexpected partition strategy: %d",
-					 (int) key->strategy);
-		}
-
-		/*
-		 * cur_index < 0 means we failed to find a partition of this parent.
-		 * Use the default partition, if there is one.
-		 */
-		if (cur_index < 0)
-			cur_index = partdesc->boundinfo->default_index;
-
-		/*
-		 * If cur_index is still less than 0 at this point, there's no
-		 * partition for this tuple.  Otherwise, we either found the leaf
-		 * partition, or a child partitioned table through which we have to
-		 * route the tuple.
-		 */
-		if (cur_index < 0)
-		{
-			result = -1;
-			*failed_at = parent;
-			*failed_slot = slot;
+			}
 			break;
-		}
-		else if (parent->indexes[cur_index] >= 0)
-		{
-			result = parent->indexes[cur_index];
-			break;
-		}
-		else
-			parent = pd[-parent->indexes[cur_index]];
+
+		default:
+			elog(ERROR, "unexpected partition strategy: %d",
+				 (int) key->strategy);
 	}
 
-error_exit:
-	ecxt->ecxt_scantuple = ecxt_scantuple_old;
-	return result;
+	/*
+	 * part_index < 0 means we failed to find a partition of this parent. Use
+	 * the default partition, if there is one.
+	 */
+	if (part_index < 0)
+		part_index = partdesc->boundinfo->default_index;
+
+	return part_index;
 }
 
 /*
@@ -2981,7 +2699,7 @@ qsort_partition_rbound_cmp(const void *a, const void *b, void *arg)
 /*
  * partition_rbound_cmp
  *
- * Return for two range bounds whether the 1st one (specified in datum1,
+ * Return for two range bounds whether the 1st one (specified in datums1,
  * kind1, and lower1) is <, =, or > the bound specified in *b2.
  *
  * Note that if the values of the two range bounds compare equal, then we take
@@ -3380,9 +3098,11 @@ compute_hash_value(PartitionKey key, Datum *values, bool *isnull)
 /*
  * satisfies_hash_partition
  *
- * This is a SQL-callable function for use in hash partition constraints takes
- * an already computed hash values of each partition key attribute, and combine
- * them into a single hash value by calling hash_combine64.
+ * This is an SQL-callable function for use in hash partition constraints.
+ * The first three arguments are the parent table OID, modulus, and remainder.
+ * The remaining arguments are the value of the partitioning columns (or
+ * expressions); these are hashed and the results are combined into a single
+ * hash value by calling hash_combine64.
  *
  * Returns true if remainder produced when this computed single hash value is
  * divided by the given modulus is equal to given remainder, otherwise false.
@@ -3395,64 +3115,203 @@ satisfies_hash_partition(PG_FUNCTION_ARGS)
 	typedef struct ColumnsHashData
 	{
 		Oid			relid;
-		int16		nkeys;
+		int			nkeys;
+		Oid			variadic_type;
+		int16		variadic_typlen;
+		bool		variadic_typbyval;
+		char		variadic_typalign;
 		FmgrInfo	partsupfunc[PARTITION_MAX_KEYS];
-	}			ColumnsHashData;
-	Oid			parentId = PG_GETARG_OID(0);
-	int			modulus = PG_GETARG_INT32(1);
-	int			remainder = PG_GETARG_INT32(2);
-	short		nkeys = PG_NARGS() - 3;
-	int			i;
+	} ColumnsHashData;
+	Oid			parentId;
+	int			modulus;
+	int			remainder;
 	Datum		seed = UInt64GetDatum(HASH_PARTITION_SEED);
 	ColumnsHashData *my_extra;
 	uint64		rowHash = 0;
+
+	/* Return null if the parent OID, modulus, or remainder is NULL. */
+	if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2))
+		PG_RETURN_NULL();
+	parentId = PG_GETARG_OID(0);
+	modulus = PG_GETARG_INT32(1);
+	remainder = PG_GETARG_INT32(2);
+
+	/* Sanity check modulus and remainder. */
+	if (modulus <= 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("modulus for hash partition must be a positive integer")));
+	if (remainder < 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remainder for hash partition must be a non-negative integer")));
+	if (remainder >= modulus)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remainder for hash partition must be less than modulus")));
 
 	/*
 	 * Cache hash function information.
 	 */
 	my_extra = (ColumnsHashData *) fcinfo->flinfo->fn_extra;
-	if (my_extra == NULL || my_extra->nkeys != nkeys ||
-		my_extra->relid != parentId)
+	if (my_extra == NULL || my_extra->relid != parentId)
 	{
 		Relation	parent;
 		PartitionKey key;
-		int j;
-
-		fcinfo->flinfo->fn_extra =
-			MemoryContextAllocZero(fcinfo->flinfo->fn_mcxt,
-								   offsetof(ColumnsHashData, partsupfunc) +
-								   sizeof(FmgrInfo) * nkeys);
-		my_extra = (ColumnsHashData *) fcinfo->flinfo->fn_extra;
-		my_extra->nkeys = nkeys;
-		my_extra->relid = parentId;
+		int			j;
 
 		/* Open parent relation and fetch partition keyinfo */
-		parent = heap_open(parentId, AccessShareLock);
+		parent = try_relation_open(parentId, AccessShareLock);
+		if (parent == NULL)
+			PG_RETURN_NULL();
 		key = RelationGetPartitionKey(parent);
 
-		Assert(key->partnatts == nkeys);
-		for (j = 0; j < nkeys; ++j)
-			fmgr_info_copy(&my_extra->partsupfunc[j],
-						   key->partsupfunc,
+		/* Reject parent table that is not hash-partitioned. */
+		if (parent->rd_rel->relkind != RELKIND_PARTITIONED_TABLE ||
+			key->strategy != PARTITION_STRATEGY_HASH)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("\"%s\" is not a hash partitioned table",
+							get_rel_name(parentId))));
+
+		if (!get_fn_expr_variadic(fcinfo->flinfo))
+		{
+			int			nargs = PG_NARGS() - 3;
+
+			/* complain if wrong number of column values */
+			if (key->partnatts != nargs)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("number of partitioning columns (%d) does not match number of partition keys provided (%d)",
+								key->partnatts, nargs)));
+
+			/* allocate space for our cache */
+			fcinfo->flinfo->fn_extra =
+				MemoryContextAllocZero(fcinfo->flinfo->fn_mcxt,
+									   offsetof(ColumnsHashData, partsupfunc) +
+									   sizeof(FmgrInfo) * nargs);
+			my_extra = (ColumnsHashData *) fcinfo->flinfo->fn_extra;
+			my_extra->relid = parentId;
+			my_extra->nkeys = key->partnatts;
+
+			/* check argument types and save fmgr_infos */
+			for (j = 0; j < key->partnatts; ++j)
+			{
+				Oid			argtype = get_fn_expr_argtype(fcinfo->flinfo, j + 3);
+
+				if (argtype != key->parttypid[j] && !IsBinaryCoercible(argtype, key->parttypid[j]))
+					ereport(ERROR,
+							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+							 errmsg("column %d of the partition key has type \"%s\", but supplied value is of type \"%s\"",
+									j + 1, format_type_be(key->parttypid[j]), format_type_be(argtype))));
+
+				fmgr_info_copy(&my_extra->partsupfunc[j],
+							   &key->partsupfunc[j],
+							   fcinfo->flinfo->fn_mcxt);
+			}
+
+		}
+		else
+		{
+			ArrayType  *variadic_array = PG_GETARG_ARRAYTYPE_P(3);
+
+			/* allocate space for our cache -- just one FmgrInfo in this case */
+			fcinfo->flinfo->fn_extra =
+				MemoryContextAllocZero(fcinfo->flinfo->fn_mcxt,
+									   offsetof(ColumnsHashData, partsupfunc) +
+									   sizeof(FmgrInfo));
+			my_extra = (ColumnsHashData *) fcinfo->flinfo->fn_extra;
+			my_extra->relid = parentId;
+			my_extra->nkeys = key->partnatts;
+			my_extra->variadic_type = ARR_ELEMTYPE(variadic_array);
+			get_typlenbyvalalign(my_extra->variadic_type,
+								 &my_extra->variadic_typlen,
+								 &my_extra->variadic_typbyval,
+								 &my_extra->variadic_typalign);
+
+			/* check argument types */
+			for (j = 0; j < key->partnatts; ++j)
+				if (key->parttypid[j] != my_extra->variadic_type)
+					ereport(ERROR,
+							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+							 errmsg("column %d of the partition key has type \"%s\", but supplied value is of type \"%s\"",
+									j + 1,
+									format_type_be(key->parttypid[j]),
+									format_type_be(my_extra->variadic_type))));
+
+			fmgr_info_copy(&my_extra->partsupfunc[0],
+						   &key->partsupfunc[0],
 						   fcinfo->flinfo->fn_mcxt);
+		}
 
 		/* Hold lock until commit */
-		heap_close(parent, NoLock);
+		relation_close(parent, NoLock);
 	}
 
-	for (i = 0; i < nkeys; i++)
+	if (!OidIsValid(my_extra->variadic_type))
 	{
-		/* keys start from fourth argument of function. */
-		int			argno = i + 3;
+		int			nkeys = my_extra->nkeys;
+		int			i;
 
-		if (!PG_ARGISNULL(argno))
+		/*
+		 * For a non-variadic call, neither the number of arguments nor their
+		 * types can change across calls, so avoid the expense of rechecking
+		 * here.
+		 */
+
+		for (i = 0; i < nkeys; i++)
 		{
 			Datum		hash;
+
+			/* keys start from fourth argument of function. */
+			int			argno = i + 3;
+
+			if (PG_ARGISNULL(argno))
+				continue;
 
 			Assert(OidIsValid(my_extra->partsupfunc[i].fn_oid));
 
 			hash = FunctionCall2(&my_extra->partsupfunc[i],
 								 PG_GETARG_DATUM(argno),
+								 seed);
+
+			/* Form a single 64-bit hash value */
+			rowHash = hash_combine64(rowHash, DatumGetUInt64(hash));
+		}
+	}
+	else
+	{
+		ArrayType  *variadic_array = PG_GETARG_ARRAYTYPE_P(3);
+		int			i;
+		int			nelems;
+		Datum	   *datum;
+		bool	   *isnull;
+
+		deconstruct_array(variadic_array,
+						  my_extra->variadic_type,
+						  my_extra->variadic_typlen,
+						  my_extra->variadic_typbyval,
+						  my_extra->variadic_typalign,
+						  &datum, &isnull, &nelems);
+
+		/* complain if wrong number of column values */
+		if (nelems != my_extra->nkeys)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("number of partitioning columns (%d) does not match number of partition keys provided (%d)",
+							my_extra->nkeys, nelems)));
+
+		for (i = 0; i < nelems; i++)
+		{
+			Datum		hash;
+
+			if (isnull[i])
+				continue;
+
+			Assert(OidIsValid(my_extra->partsupfunc[0].fn_oid));
+
+			hash = FunctionCall2(&my_extra->partsupfunc[0],
+								 datum[i],
 								 seed);
 
 			/* Form a single 64-bit hash value */

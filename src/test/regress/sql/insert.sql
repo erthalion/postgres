@@ -90,6 +90,10 @@ create table range_parted (
 	a text,
 	b int
 ) partition by range (a, (b+0));
+
+-- no partitions, so fail
+insert into range_parted values ('a', 11);
+
 create table part1 partition of range_parted for values from ('a', 1) to ('a', 10);
 create table part2 partition of range_parted for values from ('a', 10) to ('a', 20);
 create table part3 partition of range_parted for values from ('b', 1) to ('b', 10);
@@ -251,6 +255,10 @@ insert into hpart3 values(11);
 -- view data
 select tableoid::regclass as part, a, a%4 as "remainder = a % 4"
 from hash_parted order by part;
+
+-- test \d+ output on a table which has both partitioned and unpartitioned
+-- partitions
+\d+ list_parted
 
 -- cleanup
 drop table range_parted, list_parted;
@@ -416,6 +424,9 @@ create table mcrparted2 partition of mcrparted for values from (10, 6, minvalue)
 create table mcrparted3 partition of mcrparted for values from (11, 1, 1) to (20, 10, 10);
 create table mcrparted4 partition of mcrparted for values from (21, minvalue, minvalue) to (30, 20, maxvalue);
 create table mcrparted5 partition of mcrparted for values from (30, 21, 20) to (maxvalue, maxvalue, maxvalue);
+
+-- null not allowed in range partition
+insert into mcrparted values (null, null, null);
 
 -- routed to mcrparted0
 insert into mcrparted values (0, 1, 1);

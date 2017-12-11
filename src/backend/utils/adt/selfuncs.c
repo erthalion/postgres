@@ -2767,29 +2767,67 @@ neqjoinsel(PG_FUNCTION_ARGS)
 	List	   *args = (List *) PG_GETARG_POINTER(2);
 	JoinType	jointype = (JoinType) PG_GETARG_INT16(3);
 	SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) PG_GETARG_POINTER(4);
-	Oid			eqop;
 	float8		result;
 
-	/*
-	 * We want 1 - eqjoinsel() where the equality operator is the one
-	 * associated with this != operator, that is, its negator.
-	 */
-	eqop = get_negator(operator);
-	if (eqop)
+	if (jointype == JOIN_SEMI || jointype == JOIN_ANTI)
 	{
-		result = DatumGetFloat8(DirectFunctionCall5(eqjoinsel,
-													PointerGetDatum(root),
-													ObjectIdGetDatum(eqop),
-													PointerGetDatum(args),
-													Int16GetDatum(jointype),
-													PointerGetDatum(sjinfo)));
+		/*
+		 * For semi-joins, if there is more than one distinct value in the RHS
+		 * relation then every non-null LHS row must find a row to join since
+		 * it can only be equal to one of them.  We'll assume that there is
+		 * always more than one distinct RHS value for the sake of stability,
+		 * though in theory we could have special cases for empty RHS
+		 * (selectivity = 0) and single-distinct-value RHS (selectivity =
+		 * fraction of LHS that has the same value as the single RHS value).
+		 *
+		 * For anti-joins, if we use the same assumption that there is more
+		 * than one distinct key in the RHS relation, then every non-null LHS
+		 * row must be suppressed by the anti-join.
+		 *
+		 * So either way, the selectivity estimate should be 1 - nullfrac.
+		 */
+		VariableStatData leftvar;
+		VariableStatData rightvar;
+		bool		reversed;
+		HeapTuple	statsTuple;
+		double		nullfrac;
+
+		get_join_variables(root, args, sjinfo, &leftvar, &rightvar, &reversed);
+		statsTuple = reversed ? rightvar.statsTuple : leftvar.statsTuple;
+		if (HeapTupleIsValid(statsTuple))
+			nullfrac = ((Form_pg_statistic) GETSTRUCT(statsTuple))->stanullfrac;
+		else
+			nullfrac = 0.0;
+		ReleaseVariableStats(leftvar);
+		ReleaseVariableStats(rightvar);
+
+		result = 1.0 - nullfrac;
 	}
 	else
 	{
-		/* Use default selectivity (should we raise an error instead?) */
-		result = DEFAULT_EQ_SEL;
+		/*
+		 * We want 1 - eqjoinsel() where the equality operator is the one
+		 * associated with this != operator, that is, its negator.
+		 */
+		Oid			eqop = get_negator(operator);
+
+		if (eqop)
+		{
+			result = DatumGetFloat8(DirectFunctionCall5(eqjoinsel,
+														PointerGetDatum(root),
+														ObjectIdGetDatum(eqop),
+														PointerGetDatum(args),
+														Int16GetDatum(jointype),
+														PointerGetDatum(sjinfo)));
+		}
+		else
+		{
+			/* Use default selectivity (should we raise an error instead?) */
+			result = DEFAULT_EQ_SEL;
+		}
+		result = 1.0 - result;
 	}
-	result = 1.0 - result;
+
 	PG_RETURN_FLOAT8(result);
 }
 
@@ -3361,6 +3399,7 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
 					List **pgset)
 {
 	List	   *varinfos = NIL;
+	double		srf_multiplier = 1.0;
 	double		numdistinct;
 	ListCell   *l;
 	int			i;
@@ -3394,6 +3433,7 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
 	foreach(l, groupExprs)
 	{
 		Node	   *groupexpr = (Node *) lfirst(l);
+		double		this_srf_multiplier;
 		VariableStatData vardata;
 		List	   *varshere;
 		ListCell   *l2;
@@ -3401,6 +3441,21 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
 		/* is expression in this grouping set? */
 		if (pgset && !list_member_int(*pgset, i++))
 			continue;
+
+		/*
+		 * Set-returning functions in grouping columns are a bit problematic.
+		 * The code below will effectively ignore their SRF nature and come up
+		 * with a numdistinct estimate as though they were scalar functions.
+		 * We compensate by scaling up the end result by the largest SRF
+		 * rowcount estimate.  (This will be an overestimate if the SRF
+		 * produces multiple copies of any output value, but it seems best to
+		 * assume the SRF's outputs are distinct.  In any case, it's probably
+		 * pointless to worry too much about this without much better
+		 * estimates for SRF output rowcounts than we have today.)
+		 */
+		this_srf_multiplier = expression_returns_set_rows(groupexpr);
+		if (srf_multiplier < this_srf_multiplier)
+			srf_multiplier = this_srf_multiplier;
 
 		/* Short-circuit for expressions returning boolean */
 		if (exprType(groupexpr) == BOOLOID)
@@ -3467,9 +3522,15 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
 	 */
 	if (varinfos == NIL)
 	{
+		/* Apply SRF multiplier as we would do in the long path */
+		numdistinct *= srf_multiplier;
+		/* Round off */
+		numdistinct = ceil(numdistinct);
 		/* Guard against out-of-range answers */
 		if (numdistinct > input_rows)
 			numdistinct = input_rows;
+		if (numdistinct < 1.0)
+			numdistinct = 1.0;
 		return numdistinct;
 	}
 
@@ -3638,6 +3699,10 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
 		varinfos = newvarinfos;
 	} while (varinfos != NIL);
 
+	/* Now we can account for the effects of any SRFs */
+	numdistinct *= srf_multiplier;
+
+	/* Round off */
 	numdistinct = ceil(numdistinct);
 
 	/* Guard against out-of-range answers */

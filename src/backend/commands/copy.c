@@ -27,6 +27,7 @@
 #include "commands/copy.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
+#include "executor/execPartition.h"
 #include "executor/executor.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -167,7 +168,7 @@ typedef struct CopyStateData
 	PartitionDispatch *partition_dispatch_info;
 	int			num_dispatch;	/* Number of entries in the above array */
 	int			num_partitions; /* Number of members in the following arrays */
-	ResultRelInfo **partitions;	/* Per partition result relation pointers */
+	ResultRelInfo **partitions; /* Per partition result relation pointers */
 	TupleConversionMap **partition_tupconv_maps;
 	TupleTableSlot *partition_tuple_slot;
 	TransitionCaptureState *transition_capture;
@@ -359,7 +360,7 @@ SendCopyBegin(CopyState cstate)
 		pq_sendbyte(&buf, format);	/* overall format */
 		pq_sendint16(&buf, natts);
 		for (i = 0; i < natts; i++)
-			pq_sendint16(&buf, format);	/* per-column formats */
+			pq_sendint16(&buf, format); /* per-column formats */
 		pq_endmessage(&buf);
 		cstate->copy_dest = COPY_NEW_FE;
 	}
@@ -392,7 +393,7 @@ ReceiveCopyBegin(CopyState cstate)
 		pq_sendbyte(&buf, format);	/* overall format */
 		pq_sendint16(&buf, natts);
 		for (i = 0; i < natts; i++)
-			pq_sendint16(&buf, format);	/* per-column formats */
+			pq_sendint16(&buf, format); /* per-column formats */
 		pq_endmessage(&buf);
 		cstate->copy_dest = COPY_NEW_FE;
 		cstate->fe_msgbuf = makeStringInfo();
@@ -2477,7 +2478,8 @@ CopyFrom(CopyState cstate)
 		int			num_parted,
 					num_partitions;
 
-		ExecSetupPartitionTupleRouting(cstate->rel,
+		ExecSetupPartitionTupleRouting(NULL,
+									   cstate->rel,
 									   1,
 									   estate,
 									   &partition_dispatch_info,
