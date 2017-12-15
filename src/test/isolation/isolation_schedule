@@ -44,6 +44,7 @@ test: update-locked-tuple
 test: propagate-lock-delete
 test: tuplelock-conflict
 test: tuplelock-update
+test: freeze-the-dead
 test: nowait
 test: nowait-2
 test: nowait-3
@@ -62,3 +63,4 @@ test: sequence-ddl
 test: async-notify
 test: vacuum-reltuples
 test: timeouts
+test: vacuum-concurrent-drop

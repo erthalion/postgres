@@ -669,9 +669,10 @@ RelationBuildRuleLock(Relation relation)
 	/*
 	 * Make the private context.  Assume it'll not contain much data.
 	 */
-	rulescxt = AllocSetContextCreate(CacheMemoryContext,
-									 RelationGetRelationName(relation),
-									 ALLOCSET_SMALL_SIZES);
+	rulescxt = AllocSetContextCreateExtended(CacheMemoryContext,
+											 RelationGetRelationName(relation),
+											 MEMCONTEXT_COPY_NAME,
+											 ALLOCSET_SMALL_SIZES);
 	relation->rd_rulescxt = rulescxt;
 
 	/*
@@ -984,9 +985,10 @@ RelationBuildPartitionKey(Relation relation)
 	ReleaseSysCache(tuple);
 
 	/* Success --- now copy to the cache memory */
-	partkeycxt = AllocSetContextCreate(CacheMemoryContext,
-									   RelationGetRelationName(relation),
-									   ALLOCSET_SMALL_SIZES);
+	partkeycxt = AllocSetContextCreateExtended(CacheMemoryContext,
+											   RelationGetRelationName(relation),
+											   MEMCONTEXT_COPY_NAME,
+											   ALLOCSET_SMALL_SIZES);
 	relation->rd_partkeycxt = partkeycxt;
 	oldcxt = MemoryContextSwitchTo(relation->rd_partkeycxt);
 	relation->rd_partkey = copy_partition_key(key);
@@ -1566,9 +1568,10 @@ RelationInitIndexAccessInfo(Relation relation)
 	 * a context, and not just a couple of pallocs, is so that we won't leak
 	 * any subsidiary info attached to fmgr lookup records.
 	 */
-	indexcxt = AllocSetContextCreate(CacheMemoryContext,
-									 RelationGetRelationName(relation),
-									 ALLOCSET_SMALL_SIZES);
+	indexcxt = AllocSetContextCreateExtended(CacheMemoryContext,
+											 RelationGetRelationName(relation),
+											 MEMCONTEXT_COPY_NAME,
+											 ALLOCSET_SMALL_SIZES);
 	relation->rd_indexcxt = indexcxt;
 
 	/*
@@ -5537,9 +5540,11 @@ load_relcache_init_file(bool shared)
 			 * prepare index info context --- parameters should match
 			 * RelationInitIndexAccessInfo
 			 */
-			indexcxt = AllocSetContextCreate(CacheMemoryContext,
-											 RelationGetRelationName(rel),
-											 ALLOCSET_SMALL_SIZES);
+			indexcxt =
+				AllocSetContextCreateExtended(CacheMemoryContext,
+											  RelationGetRelationName(rel),
+											  MEMCONTEXT_COPY_NAME,
+											  ALLOCSET_SMALL_SIZES);
 			rel->rd_indexcxt = indexcxt;
 
 			/*
@@ -6119,14 +6124,8 @@ RelationCacheInitFileRemove(void)
 
 	/* Scan the tablespace link directory to find non-default tablespaces */
 	dir = AllocateDir(tblspcdir);
-	if (dir == NULL)
-	{
-		elog(LOG, "could not open tablespace link directory \"%s\": %m",
-			 tblspcdir);
-		return;
-	}
 
-	while ((de = ReadDir(dir, tblspcdir)) != NULL)
+	while ((de = ReadDirExtended(dir, tblspcdir, LOG)) != NULL)
 	{
 		if (strspn(de->d_name, "0123456789") == strlen(de->d_name))
 		{
@@ -6150,14 +6149,8 @@ RelationCacheInitFileRemoveInDir(const char *tblspcpath)
 
 	/* Scan the tablespace directory to find per-database directories */
 	dir = AllocateDir(tblspcpath);
-	if (dir == NULL)
-	{
-		elog(LOG, "could not open tablespace directory \"%s\": %m",
-			 tblspcpath);
-		return;
-	}
 
-	while ((de = ReadDir(dir, tblspcpath)) != NULL)
+	while ((de = ReadDirExtended(dir, tblspcpath, LOG)) != NULL)
 	{
 		if (strspn(de->d_name, "0123456789") == strlen(de->d_name))
 		{

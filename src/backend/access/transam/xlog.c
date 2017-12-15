@@ -3764,10 +3764,16 @@ PreallocXlogFiles(XLogRecPtr endptr)
  * existed while the server has been running, as this function always
  * succeeds if no WAL segments have been removed since startup.
  * 'tli' is only used in the error message.
+ *
+ * Note: this function guarantees to keep errno unchanged on return.
+ * This supports callers that use this to possibly deliver a better
+ * error message about a missing file, while still being able to throw
+ * a normal file-access error afterwards, if this does return.
  */
 void
 CheckXLogRemoved(XLogSegNo segno, TimeLineID tli)
 {
+	int			save_errno = errno;
 	XLogSegNo	lastRemovedSegNo;
 
 	SpinLockAcquire(&XLogCtl->info_lck);
@@ -3779,11 +3785,13 @@ CheckXLogRemoved(XLogSegNo segno, TimeLineID tli)
 		char		filename[MAXFNAMELEN];
 
 		XLogFileName(filename, tli, segno, wal_segment_size);
+		errno = save_errno;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("requested WAL segment %s has already been removed",
 						filename)));
 	}
+	errno = save_errno;
 }
 
 /*
@@ -3837,13 +3845,6 @@ RemoveOldXlogFiles(XLogSegNo segno, XLogRecPtr PriorRedoPtr, XLogRecPtr endptr)
 	struct dirent *xlde;
 	char		lastoff[MAXFNAMELEN];
 
-	xldir = AllocateDir(XLOGDIR);
-	if (xldir == NULL)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not open write-ahead log directory \"%s\": %m",
-						XLOGDIR)));
-
 	/*
 	 * Construct a filename of the last segment to be kept. The timeline ID
 	 * doesn't matter, we ignore that in the comparison. (During recovery,
@@ -3853,6 +3854,8 @@ RemoveOldXlogFiles(XLogSegNo segno, XLogRecPtr PriorRedoPtr, XLogRecPtr endptr)
 
 	elog(DEBUG2, "attempting to remove WAL segments older than log file %s",
 		 lastoff);
+
+	xldir = AllocateDir(XLOGDIR);
 
 	while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL)
 	{
@@ -3912,13 +3915,6 @@ RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
 
 	XLByteToPrevSeg(switchpoint, endLogSegNo, wal_segment_size);
 
-	xldir = AllocateDir(XLOGDIR);
-	if (xldir == NULL)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not open write-ahead log directory \"%s\": %m",
-						XLOGDIR)));
-
 	/*
 	 * Construct a filename of the last segment to be kept.
 	 */
@@ -3926,6 +3922,8 @@ RemoveNonParentXlogFiles(XLogRecPtr switchpoint, TimeLineID newTLI)
 
 	elog(DEBUG2, "attempting to remove WAL segments newer than log file %s",
 		 switchseg);
+
+	xldir = AllocateDir(XLOGDIR);
 
 	while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL)
 	{
@@ -4108,11 +4106,6 @@ CleanupBackupHistory(void)
 	char		path[MAXPGPATH + sizeof(XLOGDIR)];
 
 	xldir = AllocateDir(XLOGDIR);
-	if (xldir == NULL)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not open write-ahead log directory \"%s\": %m",
-						XLOGDIR)));
 
 	while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL)
 	{
@@ -7875,7 +7868,7 @@ CheckRecoveryConsistency(void)
 	/*
 	 * Have we passed our safe starting point? Note that minRecoveryPoint is
 	 * known to be incorrectly set if ControlFile->backupEndRequired, until
-	 * the XLOG_BACKUP_RECORD arrives to advise us of the correct
+	 * the XLOG_BACKUP_END arrives to advise us of the correct
 	 * minRecoveryPoint. All we know prior to that is that we're not
 	 * consistent yet.
 	 */
@@ -10213,7 +10206,7 @@ XLogFileNameP(TimeLineID tli, XLogSegNo segno)
  */
 XLogRecPtr
 do_pg_start_backup(const char *backupidstr, bool fast, TimeLineID *starttli_p,
-				   StringInfo labelfile, DIR *tblspcdir, List **tablespaces,
+				   StringInfo labelfile, List **tablespaces,
 				   StringInfo tblspcmapfile, bool infotbssize,
 				   bool needtblspcmapfile)
 {
@@ -10304,6 +10297,7 @@ do_pg_start_backup(const char *backupidstr, bool fast, TimeLineID *starttli_p,
 	PG_ENSURE_ERROR_CLEANUP(pg_start_backup_callback, (Datum) BoolGetDatum(exclusive));
 	{
 		bool		gotUniqueStartpoint = false;
+		DIR		   *tblspcdir;
 		struct dirent *de;
 		tablespaceinfo *ti;
 		int			datadirpathlen;
@@ -10435,6 +10429,7 @@ do_pg_start_backup(const char *backupidstr, bool fast, TimeLineID *starttli_p,
 		datadirpathlen = strlen(DataDir);
 
 		/* Collect information about all tablespaces */
+		tblspcdir = AllocateDir("pg_tblspc");
 		while ((de = ReadDir(tblspcdir, "pg_tblspc")) != NULL)
 		{
 			char		fullpath[MAXPGPATH + 10];
@@ -10483,7 +10478,6 @@ do_pg_start_backup(const char *backupidstr, bool fast, TimeLineID *starttli_p,
 				appendStringInfoChar(&buflinkpath, *s++);
 			}
 
-
 			/*
 			 * Relpath holds the relative path of the tablespace directory
 			 * when it's located within PGDATA, or NULL if it's located
@@ -10518,6 +10512,7 @@ do_pg_start_backup(const char *backupidstr, bool fast, TimeLineID *starttli_p,
 					 errmsg("tablespaces are not supported on this platform")));
 #endif
 		}
+		FreeDir(tblspcdir);
 
 		/*
 		 * Construct backup label file
