@@ -3633,6 +3633,35 @@ ANY <replaceable class="parameter">num_sync</replaceable> ( <replaceable class="
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-enable-parallel-append" xreflabel="enable_parallel_append">
+      <term><varname>enable_parallel_append</varname> (<type>boolean</type>)
+      <indexterm>
+       <primary><varname>enable_parallel_append</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Enables or disables the query planner's use of parallel-aware
+        append plan types. The default is <literal>on</literal>.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-enable-parallel-hash" xreflabel="enable_parallel_hash">
+      <term><varname>enable_parallel_hash</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>enable_parallel_hash</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Enables or disables the query planner's use of hash-join plan
+        types with parallel hash. Has no effect if hash-join plans are not
+        also enabled. The default is <literal>on</literal>.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-enable-partition-wise-join" xreflabel="enable_partition_wise_join">
       <term><varname>enable_partition_wise_join</varname> (<type>boolean</type>)
       <indexterm>
@@ -5926,8 +5955,8 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
         <literal>250ms</literal> then all automatic vacuums and analyzes that run
         250ms or longer will be logged.  In addition, when this parameter is
         set to any value other than <literal>-1</literal>, a message will be
-        logged if an autovacuum action is skipped due to the existence of a
-        conflicting lock.  Enabling this parameter can be helpful
+        logged if an autovacuum action is skipped due to a conflicting lock or a
+        concurrently dropped relation.  Enabling this parameter can be helpful
         in tracking autovacuum activity.  This parameter can only be set in
         the <filename>postgresql.conf</filename> file or on the server command line;
         but the setting can be overridden for individual tables by

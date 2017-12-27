@@ -26,9 +26,12 @@
 #include "executor/execExpr.h"
 #include "executor/execParallel.h"
 #include "executor/executor.h"
+#include "executor/nodeAppend.h"
 #include "executor/nodeBitmapHeapscan.h"
 #include "executor/nodeCustom.h"
 #include "executor/nodeForeignscan.h"
+#include "executor/nodeHash.h"
+#include "executor/nodeHashjoin.h"
 #include "executor/nodeIndexscan.h"
 #include "executor/nodeIndexonlyscan.h"
 #include "executor/nodeSeqscan.h"
@@ -249,6 +252,11 @@ ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
 				ExecForeignScanEstimate((ForeignScanState *) planstate,
 										e->pcxt);
 			break;
+		case T_AppendState:
+			if (planstate->plan->parallel_aware)
+				ExecAppendEstimate((AppendState *) planstate,
+								   e->pcxt);
+			break;
 		case T_CustomScanState:
 			if (planstate->plan->parallel_aware)
 				ExecCustomScanEstimate((CustomScanState *) planstate,
@@ -259,8 +267,17 @@ ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
 				ExecBitmapHeapEstimate((BitmapHeapScanState *) planstate,
 									   e->pcxt);
 			break;
+		case T_HashJoinState:
+			if (planstate->plan->parallel_aware)
+				ExecHashJoinEstimate((HashJoinState *) planstate,
+									 e->pcxt);
+			break;
+		case T_HashState:
+			/* even when not parallel-aware, for EXPLAIN ANALYZE */
+			ExecHashEstimate((HashState *) planstate, e->pcxt);
+			break;
 		case T_SortState:
-			/* even when not parallel-aware */
+			/* even when not parallel-aware, for EXPLAIN ANALYZE */
 			ExecSortEstimate((SortState *) planstate, e->pcxt);
 			break;
 
@@ -319,7 +336,7 @@ EstimateParamExecSpace(EState *estate, Bitmapset *params)
  * parameter array) and then the datum as serialized by datumSerialize().
  */
 static dsa_pointer
-SerializeParamExecParams(EState *estate, Bitmapset *params)
+SerializeParamExecParams(EState *estate, Bitmapset *params, dsa_area *area)
 {
 	Size		size;
 	int			nparams;
@@ -330,8 +347,8 @@ SerializeParamExecParams(EState *estate, Bitmapset *params)
 
 	/* Allocate enough space for the current parameter values. */
 	size = EstimateParamExecSpace(estate, params);
-	handle = dsa_allocate(estate->es_query_dsa, size);
-	start_address = dsa_get_address(estate->es_query_dsa, handle);
+	handle = dsa_allocate(area, size);
+	start_address = dsa_get_address(area, handle);
 
 	/* First write the number of parameters as a 4-byte integer. */
 	nparams = bms_num_members(params);
@@ -448,6 +465,11 @@ ExecParallelInitializeDSM(PlanState *planstate,
 				ExecForeignScanInitializeDSM((ForeignScanState *) planstate,
 											 d->pcxt);
 			break;
+		case T_AppendState:
+			if (planstate->plan->parallel_aware)
+				ExecAppendInitializeDSM((AppendState *) planstate,
+										d->pcxt);
+			break;
 		case T_CustomScanState:
 			if (planstate->plan->parallel_aware)
 				ExecCustomScanInitializeDSM((CustomScanState *) planstate,
@@ -458,8 +480,17 @@ ExecParallelInitializeDSM(PlanState *planstate,
 				ExecBitmapHeapInitializeDSM((BitmapHeapScanState *) planstate,
 											d->pcxt);
 			break;
+		case T_HashJoinState:
+			if (planstate->plan->parallel_aware)
+				ExecHashJoinInitializeDSM((HashJoinState *) planstate,
+										  d->pcxt);
+			break;
+		case T_HashState:
+			/* even when not parallel-aware, for EXPLAIN ANALYZE */
+			ExecHashInitializeDSM((HashState *) planstate, d->pcxt);
+			break;
 		case T_SortState:
-			/* even when not parallel-aware */
+			/* even when not parallel-aware, for EXPLAIN ANALYZE */
 			ExecSortInitializeDSM((SortState *) planstate, d->pcxt);
 			break;
 
@@ -577,7 +608,7 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate,
 
 	/* Estimate space for query text. */
 	query_len = strlen(estate->es_sourceText);
-	shm_toc_estimate_chunk(&pcxt->estimator, query_len);
+	shm_toc_estimate_chunk(&pcxt->estimator, query_len + 1);
 	shm_toc_estimate_keys(&pcxt->estimator, 1);
 
 	/* Estimate space for serialized PlannedStmt. */
@@ -652,8 +683,8 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate,
 	shm_toc_insert(pcxt->toc, PARALLEL_KEY_EXECUTOR_FIXED, fpes);
 
 	/* Store query string */
-	query_string = shm_toc_allocate(pcxt->toc, query_len);
-	memcpy(query_string, estate->es_sourceText, query_len);
+	query_string = shm_toc_allocate(pcxt->toc, query_len + 1);
+	memcpy(query_string, estate->es_sourceText, query_len + 1);
 	shm_toc_insert(pcxt->toc, PARALLEL_KEY_QUERY_TEXT, query_string);
 
 	/* Store serialized PlannedStmt. */
@@ -717,12 +748,6 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate,
 										pcxt->seg);
 
 		/*
-		 * Make the area available to executor nodes running in the leader.
-		 * See also ParallelQueryMain which makes it available to workers.
-		 */
-		estate->es_query_dsa = pei->area;
-
-		/*
 		 * Serialize parameters, if any, using DSA storage.  We don't dare use
 		 * the main parallel query DSM for this because we might relaunch
 		 * workers after the values have changed (and thus the amount of
@@ -730,7 +755,8 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate,
 		 */
 		if (!bms_is_empty(sendParams))
 		{
-			pei->param_exec = SerializeParamExecParams(estate, sendParams);
+			pei->param_exec = SerializeParamExecParams(estate, sendParams,
+													   pei->area);
 			fpes->param_exec = pei->param_exec;
 		}
 	}
@@ -743,7 +769,11 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate,
 	d.pcxt = pcxt;
 	d.instrumentation = instrumentation;
 	d.nnodes = 0;
+
+	/* Install our DSA area while initializing the plan. */
+	estate->es_query_dsa = pei->area;
 	ExecParallelInitializeDSM(planstate, &d);
+	estate->es_query_dsa = NULL;
 
 	/*
 	 * Make sure that the world hasn't shifted under our feet.  This could
@@ -812,19 +842,22 @@ ExecParallelReinitialize(PlanState *planstate,
 	/* Free any serialized parameters from the last round. */
 	if (DsaPointerIsValid(fpes->param_exec))
 	{
-		dsa_free(estate->es_query_dsa, fpes->param_exec);
+		dsa_free(pei->area, fpes->param_exec);
 		fpes->param_exec = InvalidDsaPointer;
 	}
 
 	/* Serialize current parameter values if required. */
 	if (!bms_is_empty(sendParams))
 	{
-		pei->param_exec = SerializeParamExecParams(estate, sendParams);
+		pei->param_exec = SerializeParamExecParams(estate, sendParams,
+												   pei->area);
 		fpes->param_exec = pei->param_exec;
 	}
 
 	/* Traverse plan tree and let each child node reset associated state. */
+	estate->es_query_dsa = pei->area;
 	ExecParallelReInitializeDSM(planstate, pei->pcxt);
+	estate->es_query_dsa = NULL;
 }
 
 /*
@@ -862,6 +895,10 @@ ExecParallelReInitializeDSM(PlanState *planstate,
 				ExecForeignScanReInitializeDSM((ForeignScanState *) planstate,
 											   pcxt);
 			break;
+		case T_AppendState:
+			if (planstate->plan->parallel_aware)
+				ExecAppendReInitializeDSM((AppendState *) planstate, pcxt);
+			break;
 		case T_CustomScanState:
 			if (planstate->plan->parallel_aware)
 				ExecCustomScanReInitializeDSM((CustomScanState *) planstate,
@@ -872,9 +909,14 @@ ExecParallelReInitializeDSM(PlanState *planstate,
 				ExecBitmapHeapReInitializeDSM((BitmapHeapScanState *) planstate,
 											  pcxt);
 			break;
+		case T_HashJoinState:
+			if (planstate->plan->parallel_aware)
+				ExecHashJoinReInitializeDSM((HashJoinState *) planstate,
+											pcxt);
+			break;
+		case T_HashState:
 		case T_SortState:
-			/* even when not parallel-aware */
-			ExecSortReInitializeDSM((SortState *) planstate, pcxt);
+			/* these nodes have DSM state, but no reinitialization is required */
 			break;
 
 		default:
@@ -928,12 +970,18 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
 	planstate->worker_instrument->num_workers = instrumentation->num_workers;
 	memcpy(&planstate->worker_instrument->instrument, instrument, ibytes);
 
-	/*
-	 * Perform any node-type-specific work that needs to be done.  Currently,
-	 * only Sort nodes need to do anything here.
-	 */
-	if (IsA(planstate, SortState))
-		ExecSortRetrieveInstrumentation((SortState *) planstate);
+	/* Perform any node-type-specific work that needs to be done. */
+	switch (nodeTag(planstate))
+	{
+		case T_SortState:
+			ExecSortRetrieveInstrumentation((SortState *) planstate);
+			break;
+		case T_HashState:
+			ExecHashRetrieveInstrumentation((HashState *) planstate);
+			break;
+		default:
+			break;
+	}
 
 	return planstate_tree_walker(planstate, ExecParallelRetrieveInstrumentation,
 								 instrumentation);
@@ -941,7 +989,7 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
 
 /*
  * Finish parallel execution.  We wait for parallel workers to finish, and
- * accumulate their buffer usage and instrumentation.
+ * accumulate their buffer usage.
  */
 void
 ExecParallelFinish(ParallelExecutorInfo *pei)
@@ -987,23 +1035,23 @@ ExecParallelFinish(ParallelExecutorInfo *pei)
 	for (i = 0; i < nworkers; i++)
 		InstrAccumParallelQuery(&pei->buffer_usage[i]);
 
-	/* Finally, accumulate instrumentation, if any. */
-	if (pei->instrumentation)
-		ExecParallelRetrieveInstrumentation(pei->planstate,
-											pei->instrumentation);
-
 	pei->finished = true;
 }
 
 /*
- * Clean up whatever ParallelExecutorInfo resources still exist after
- * ExecParallelFinish.  We separate these routines because someone might
- * want to examine the contents of the DSM after ExecParallelFinish and
- * before calling this routine.
+ * Accumulate instrumentation, and then clean up whatever ParallelExecutorInfo
+ * resources still exist after ExecParallelFinish.  We separate these
+ * routines because someone might want to examine the contents of the DSM
+ * after ExecParallelFinish and before calling this routine.
  */
 void
 ExecParallelCleanup(ParallelExecutorInfo *pei)
 {
+	/* Accumulate instrumentation, if any. */
+	if (pei->instrumentation)
+		ExecParallelRetrieveInstrumentation(pei->planstate,
+											pei->instrumentation);
+
 	/* Free any serialized parameters. */
 	if (DsaPointerIsValid(pei->param_exec))
 	{
@@ -1150,6 +1198,10 @@ ExecParallelInitializeWorker(PlanState *planstate, ParallelWorkerContext *pwcxt)
 				ExecForeignScanInitializeWorker((ForeignScanState *) planstate,
 												pwcxt);
 			break;
+		case T_AppendState:
+			if (planstate->plan->parallel_aware)
+				ExecAppendInitializeWorker((AppendState *) planstate, pwcxt);
+			break;
 		case T_CustomScanState:
 			if (planstate->plan->parallel_aware)
 				ExecCustomScanInitializeWorker((CustomScanState *) planstate,
@@ -1160,8 +1212,17 @@ ExecParallelInitializeWorker(PlanState *planstate, ParallelWorkerContext *pwcxt)
 				ExecBitmapHeapInitializeWorker((BitmapHeapScanState *) planstate,
 											   pwcxt);
 			break;
+		case T_HashJoinState:
+			if (planstate->plan->parallel_aware)
+				ExecHashJoinInitializeWorker((HashJoinState *) planstate,
+											 pwcxt);
+			break;
+		case T_HashState:
+			/* even when not parallel-aware, for EXPLAIN ANALYZE */
+			ExecHashInitializeWorker((HashState *) planstate, pwcxt);
+			break;
 		case T_SortState:
-			/* even when not parallel-aware */
+			/* even when not parallel-aware, for EXPLAIN ANALYZE */
 			ExecSortInitializeWorker((SortState *) planstate, pwcxt);
 			break;
 

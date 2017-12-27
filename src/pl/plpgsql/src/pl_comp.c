@@ -545,7 +545,7 @@ do_compile(FunctionCallInfo fcinfo,
 				{
 					if (rettypeid == VOIDOID ||
 						rettypeid == RECORDOID)
-						/* okay */ ;
+						 /* okay */ ;
 					else if (rettypeid == TRIGGEROID || rettypeid == EVTTRIGGEROID)
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2350,48 +2350,30 @@ plpgsql_adddatum(PLpgSQL_datum *new)
 
 /* ----------
  * plpgsql_finish_datums	Copy completed datum info into function struct.
- *
- * This is also responsible for building resettable_datums, a bitmapset
- * of the dnos of all ROW, REC, and RECFIELD datums in the function.
  * ----------
  */
 static void
 plpgsql_finish_datums(PLpgSQL_function *function)
 {
-	Bitmapset  *resettable_datums = NULL;
 	int			i;
 
 	function->ndatums = plpgsql_nDatums;
 	function->datums = palloc(sizeof(PLpgSQL_datum *) * plpgsql_nDatums);
 	for (i = 0; i < plpgsql_nDatums; i++)
-	{
 		function->datums[i] = plpgsql_Datums[i];
-		switch (function->datums[i]->dtype)
-		{
-			case PLPGSQL_DTYPE_ROW:
-			case PLPGSQL_DTYPE_REC:
-			case PLPGSQL_DTYPE_RECFIELD:
-				resettable_datums = bms_add_member(resettable_datums, i);
-				break;
-
-			default:
-				break;
-		}
-	}
-	function->resettable_datums = resettable_datums;
 }
 
 
 /* ----------
  * plpgsql_add_initdatums		Make an array of the datum numbers of
- *					all the simple VAR datums created since the last call
+ *					all the initializable datums created since the last call
  *					to this function.
  *
  * If varnos is NULL, we just forget any datum entries created since the
  * last call.
  *
- * This is used around a DECLARE section to create a list of the VARs
- * that have to be initialized at block entry.  Note that VARs can also
+ * This is used around a DECLARE section to create a list of the datums
+ * that have to be initialized at block entry.  Note that datums can also
  * be created elsewhere than DECLARE, eg by a FOR-loop, but it is then
  * the responsibility of special-purpose code to initialize them.
  * ----------
@@ -2402,11 +2384,16 @@ plpgsql_add_initdatums(int **varnos)
 	int			i;
 	int			n = 0;
 
+	/*
+	 * The set of dtypes recognized here must match what exec_stmt_block()
+	 * cares about (re)initializing at block entry.
+	 */
 	for (i = datums_last; i < plpgsql_nDatums; i++)
 	{
 		switch (plpgsql_Datums[i]->dtype)
 		{
 			case PLPGSQL_DTYPE_VAR:
+			case PLPGSQL_DTYPE_REC:
 				n++;
 				break;
 
@@ -2427,6 +2414,7 @@ plpgsql_add_initdatums(int **varnos)
 				switch (plpgsql_Datums[i]->dtype)
 				{
 					case PLPGSQL_DTYPE_VAR:
+					case PLPGSQL_DTYPE_REC:
 						(*varnos)[n++] = plpgsql_Datums[i]->dno;
 
 					default:

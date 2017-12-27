@@ -1542,6 +1542,10 @@ ParallelBitmapHeapState
 ParallelCompletionPtr
 ParallelContext
 ParallelExecutorInfo
+ParallelHashGrowth
+ParallelHashJoinBatch
+ParallelHashJoinBatchAccessor
+ParallelHashJoinState
 ParallelHeapScanDesc
 ParallelIndexScanDesc
 ParallelSlot
@@ -2038,6 +2042,8 @@ SharedRecordTableEntry
 SharedRecordTableKey
 SharedRecordTypmodRegistry
 SharedSortInfo
+SharedTuplestore
+SharedTuplestoreAccessor
 SharedTypmodTableEntry
 ShellTypeInfo
 ShippableCacheEntry

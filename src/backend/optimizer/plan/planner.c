@@ -3680,9 +3680,12 @@ create_grouping_paths(PlannerInfo *root,
 			path = (Path *)
 				create_append_path(grouped_rel,
 								   paths,
+								   NIL,
 								   NULL,
 								   0,
-								   NIL);
+								   false,
+								   NIL,
+								   -1);
 			path->pathtarget = target;
 		}
 		else
@@ -5056,7 +5059,7 @@ create_ordered_paths(PlannerInfo *root,
 											 ordered_rel,
 											 cheapest_partial_path,
 											 root->sort_pathkeys,
-											 -1.0);
+											 limit_tuples);
 
 			total_groups = cheapest_partial_path->rows *
 				cheapest_partial_path->parallel_workers;

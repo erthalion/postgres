@@ -4014,6 +4014,29 @@ select scope_test();
 
 drop function scope_test();
 
+-- Check that variables are reinitialized on block re-entry.
+
+\set VERBOSITY terse   \\ -- needed for output stability
+do $$
+begin
+  for i in 1..3 loop
+    declare
+      x int;
+      y int := i;
+      r record;
+    begin
+      if i = 1 then
+        x := 42;
+        r := row(i, i+1);
+      end if;
+      raise notice 'x = %', x;
+      raise notice 'y = %', y;
+      raise notice 'r = %', r;
+    end;
+  end loop;
+end$$;
+\set VERBOSITY default
+
 -- Check handling of conflicts between plpgsql vars and table columns.
 
 set plpgsql.variable_conflict = error;
@@ -4820,52 +4843,3 @@ BEGIN
   GET DIAGNOSTICS x = ROW_COUNT;
   RETURN;
 END; $$ LANGUAGE plpgsql;
-
-
---
--- Procedures
---
-
-CREATE PROCEDURE test_proc1()
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NULL;
-END;
-$$;
-
-CALL test_proc1();
-
-
--- error: can't return non-NULL
-CREATE PROCEDURE test_proc2()
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    RETURN 5;
-END;
-$$;
-
-CALL test_proc2();
-
-
-CREATE TABLE proc_test1 (a int);
-
-CREATE PROCEDURE test_proc3(x int)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO proc_test1 VALUES (x);
-END;
-$$;
-
-CALL test_proc3(55);
-
-SELECT * FROM proc_test1;
-
-
-DROP PROCEDURE test_proc1;
-DROP PROCEDURE test_proc2;
-DROP PROCEDURE test_proc3;
-
-DROP TABLE proc_test1;

@@ -1602,6 +1602,7 @@ _readAppend(void)
 
 	READ_NODE_FIELD(partitioned_rels);
 	READ_NODE_FIELD(appendplans);
+	READ_INT_FIELD(first_partial_plan);
 
 	READ_DONE();
 }
@@ -2214,6 +2215,7 @@ _readHash(void)
 	READ_OID_FIELD(skewTable);
 	READ_INT_FIELD(skewColumn);
 	READ_BOOL_FIELD(skewInherit);
+	READ_FLOAT_FIELD(rows_total);
 
 	READ_DONE();
 }

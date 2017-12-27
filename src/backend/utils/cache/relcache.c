@@ -262,7 +262,6 @@ static Relation AllocateRelationDesc(Form_pg_class relp);
 static void RelationParseRelOptions(Relation relation, HeapTuple tuple);
 static void RelationBuildTupleDesc(Relation relation);
 static void RelationBuildPartitionKey(Relation relation);
-static PartitionKey copy_partition_key(PartitionKey fromkey);
 static Relation RelationBuildDesc(Oid targetRelId, bool insertIt);
 static void RelationInitPhysicalAddr(Relation relation);
 static void load_critical_index(Oid indexoid, Oid heapoid);
@@ -669,9 +668,10 @@ RelationBuildRuleLock(Relation relation)
 	/*
 	 * Make the private context.  Assume it'll not contain much data.
 	 */
-	rulescxt = AllocSetContextCreate(CacheMemoryContext,
-									 RelationGetRelationName(relation),
-									 ALLOCSET_SMALL_SIZES);
+	rulescxt = AllocSetContextCreateExtended(CacheMemoryContext,
+											 RelationGetRelationName(relation),
+											 MEMCONTEXT_COPY_NAME,
+											 ALLOCSET_SMALL_SIZES);
 	relation->rd_rulescxt = rulescxt;
 
 	/*
@@ -846,6 +846,12 @@ RelationBuildPartitionKey(Relation relation)
 	if (!HeapTupleIsValid(tuple))
 		return;
 
+	partkeycxt = AllocSetContextCreateExtended(CurTransactionContext,
+											   RelationGetRelationName(relation),
+											   MEMCONTEXT_COPY_NAME,
+											   ALLOCSET_SMALL_SIZES);
+	oldcxt = MemoryContextSwitchTo(partkeycxt);
+
 	key = (PartitionKey) palloc0(sizeof(PartitionKeyData));
 
 	/* Fixed-length attributes */
@@ -983,68 +989,11 @@ RelationBuildPartitionKey(Relation relation)
 
 	ReleaseSysCache(tuple);
 
-	/* Success --- now copy to the cache memory */
-	partkeycxt = AllocSetContextCreate(CacheMemoryContext,
-									   RelationGetRelationName(relation),
-									   ALLOCSET_SMALL_SIZES);
+	/* Success --- make the relcache point to the newly constructed key */
+	MemoryContextSetParent(partkeycxt, CacheMemoryContext);
 	relation->rd_partkeycxt = partkeycxt;
-	oldcxt = MemoryContextSwitchTo(relation->rd_partkeycxt);
-	relation->rd_partkey = copy_partition_key(key);
+	relation->rd_partkey = key;
 	MemoryContextSwitchTo(oldcxt);
-}
-
-/*
- * copy_partition_key
- *
- * The copy is allocated in the current memory context.
- */
-static PartitionKey
-copy_partition_key(PartitionKey fromkey)
-{
-	PartitionKey newkey;
-	int			n;
-
-	newkey = (PartitionKey) palloc(sizeof(PartitionKeyData));
-
-	newkey->strategy = fromkey->strategy;
-	newkey->partnatts = n = fromkey->partnatts;
-
-	newkey->partattrs = (AttrNumber *) palloc(n * sizeof(AttrNumber));
-	memcpy(newkey->partattrs, fromkey->partattrs, n * sizeof(AttrNumber));
-
-	newkey->partexprs = copyObject(fromkey->partexprs);
-
-	newkey->partopfamily = (Oid *) palloc(n * sizeof(Oid));
-	memcpy(newkey->partopfamily, fromkey->partopfamily, n * sizeof(Oid));
-
-	newkey->partopcintype = (Oid *) palloc(n * sizeof(Oid));
-	memcpy(newkey->partopcintype, fromkey->partopcintype, n * sizeof(Oid));
-
-	newkey->partsupfunc = (FmgrInfo *) palloc(n * sizeof(FmgrInfo));
-	memcpy(newkey->partsupfunc, fromkey->partsupfunc, n * sizeof(FmgrInfo));
-
-	newkey->partcollation = (Oid *) palloc(n * sizeof(Oid));
-	memcpy(newkey->partcollation, fromkey->partcollation, n * sizeof(Oid));
-
-	newkey->parttypid = (Oid *) palloc(n * sizeof(Oid));
-	memcpy(newkey->parttypid, fromkey->parttypid, n * sizeof(Oid));
-
-	newkey->parttypmod = (int32 *) palloc(n * sizeof(int32));
-	memcpy(newkey->parttypmod, fromkey->parttypmod, n * sizeof(int32));
-
-	newkey->parttyplen = (int16 *) palloc(n * sizeof(int16));
-	memcpy(newkey->parttyplen, fromkey->parttyplen, n * sizeof(int16));
-
-	newkey->parttypbyval = (bool *) palloc(n * sizeof(bool));
-	memcpy(newkey->parttypbyval, fromkey->parttypbyval, n * sizeof(bool));
-
-	newkey->parttypalign = (char *) palloc(n * sizeof(bool));
-	memcpy(newkey->parttypalign, fromkey->parttypalign, n * sizeof(char));
-
-	newkey->parttypcoll = (Oid *) palloc(n * sizeof(Oid));
-	memcpy(newkey->parttypcoll, fromkey->parttypcoll, n * sizeof(Oid));
-
-	return newkey;
 }
 
 /*
@@ -1566,9 +1515,10 @@ RelationInitIndexAccessInfo(Relation relation)
 	 * a context, and not just a couple of pallocs, is so that we won't leak
 	 * any subsidiary info attached to fmgr lookup records.
 	 */
-	indexcxt = AllocSetContextCreate(CacheMemoryContext,
-									 RelationGetRelationName(relation),
-									 ALLOCSET_SMALL_SIZES);
+	indexcxt = AllocSetContextCreateExtended(CacheMemoryContext,
+											 RelationGetRelationName(relation),
+											 MEMCONTEXT_COPY_NAME,
+											 ALLOCSET_SMALL_SIZES);
 	relation->rd_indexcxt = indexcxt;
 
 	/*
@@ -5537,9 +5487,11 @@ load_relcache_init_file(bool shared)
 			 * prepare index info context --- parameters should match
 			 * RelationInitIndexAccessInfo
 			 */
-			indexcxt = AllocSetContextCreate(CacheMemoryContext,
-											 RelationGetRelationName(rel),
-											 ALLOCSET_SMALL_SIZES);
+			indexcxt =
+				AllocSetContextCreateExtended(CacheMemoryContext,
+											  RelationGetRelationName(rel),
+											  MEMCONTEXT_COPY_NAME,
+											  ALLOCSET_SMALL_SIZES);
 			rel->rd_indexcxt = indexcxt;
 
 			/*
@@ -6119,14 +6071,8 @@ RelationCacheInitFileRemove(void)
 
 	/* Scan the tablespace link directory to find non-default tablespaces */
 	dir = AllocateDir(tblspcdir);
-	if (dir == NULL)
-	{
-		elog(LOG, "could not open tablespace link directory \"%s\": %m",
-			 tblspcdir);
-		return;
-	}
 
-	while ((de = ReadDir(dir, tblspcdir)) != NULL)
+	while ((de = ReadDirExtended(dir, tblspcdir, LOG)) != NULL)
 	{
 		if (strspn(de->d_name, "0123456789") == strlen(de->d_name))
 		{
@@ -6150,14 +6096,8 @@ RelationCacheInitFileRemoveInDir(const char *tblspcpath)
 
 	/* Scan the tablespace directory to find per-database directories */
 	dir = AllocateDir(tblspcpath);
-	if (dir == NULL)
-	{
-		elog(LOG, "could not open tablespace directory \"%s\": %m",
-			 tblspcpath);
-		return;
-	}
 
-	while ((de = ReadDir(dir, tblspcpath)) != NULL)
+	while ((de = ReadDirExtended(dir, tblspcpath, LOG)) != NULL)
 	{
 		if (strspn(de->d_name, "0123456789") == strlen(de->d_name))
 		{

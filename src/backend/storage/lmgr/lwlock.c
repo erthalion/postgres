@@ -516,7 +516,10 @@ RegisterLWLockTranches(void)
 						  "session_record_table");
 	LWLockRegisterTranche(LWTRANCHE_SESSION_TYPMOD_TABLE,
 						  "session_typmod_table");
+	LWLockRegisterTranche(LWTRANCHE_SHARED_TUPLESTORE,
+						  "shared_tuplestore");
 	LWLockRegisterTranche(LWTRANCHE_TBM, "tbm");
+	LWLockRegisterTranche(LWTRANCHE_PARALLEL_APPEND, "parallel_append");
 
 	/* Register named tranches. */
 	for (i = 0; i < NamedLWLockTrancheRequests; i++)

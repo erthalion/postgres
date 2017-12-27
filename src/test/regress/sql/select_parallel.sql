@@ -15,9 +15,39 @@ set parallel_tuple_cost=0;
 set min_parallel_table_scan_size=0;
 set max_parallel_workers_per_gather=4;
 
+-- Parallel Append with partial-subplans
 explain (costs off)
-  select count(*) from a_star;
-select count(*) from a_star;
+  select round(avg(aa)), sum(aa) from a_star;
+select round(avg(aa)), sum(aa) from a_star a1;
+
+-- Parallel Append with both partial and non-partial subplans
+alter table c_star set (parallel_workers = 0);
+alter table d_star set (parallel_workers = 0);
+explain (costs off)
+  select round(avg(aa)), sum(aa) from a_star;
+select round(avg(aa)), sum(aa) from a_star a2;
+
+-- Parallel Append with only non-partial subplans
+alter table a_star set (parallel_workers = 0);
+alter table b_star set (parallel_workers = 0);
+alter table e_star set (parallel_workers = 0);
+alter table f_star set (parallel_workers = 0);
+explain (costs off)
+  select round(avg(aa)), sum(aa) from a_star;
+select round(avg(aa)), sum(aa) from a_star a3;
+
+-- Disable Parallel Append
+alter table a_star reset (parallel_workers);
+alter table b_star reset (parallel_workers);
+alter table c_star reset (parallel_workers);
+alter table d_star reset (parallel_workers);
+alter table e_star reset (parallel_workers);
+alter table f_star reset (parallel_workers);
+set enable_parallel_append to off;
+explain (costs off)
+  select round(avg(aa)), sum(aa) from a_star;
+select round(avg(aa)), sum(aa) from a_star a4;
+reset enable_parallel_append;
 
 -- test with leader participation disabled
 set parallel_leader_participation = off;
@@ -149,14 +179,40 @@ insert into bmscantest select r, 'fooooooooooooooooooooooooooooooooooooooooooooo
 create index i_bmtest ON bmscantest(a);
 select count(*) from bmscantest where a>1;
 
+-- test accumulation of stats for parallel nodes
 reset enable_seqscan;
+alter table tenk2 set (parallel_workers = 0);
+explain (analyze, timing off, summary off, costs off)
+   select count(*) from tenk1, tenk2 where tenk1.hundred > 1
+        and tenk2.thousand=0;
+alter table tenk2 reset (parallel_workers);
+
+reset work_mem;
+create function explain_parallel_sort_stats() returns setof text
+language plpgsql as
+$$
+declare ln text;
+begin
+    for ln in
+        explain (analyze, timing off, summary off, costs off)
+          select * from
+          (select ten from tenk1 where ten < 100 order by ten) ss
+          right join (values (1),(2),(3)) v(x) on true
+    loop
+        ln := regexp_replace(ln, 'Memory: \S*',  'Memory: xxx');
+        return next ln;
+    end loop;
+end;
+$$;
+select * from explain_parallel_sort_stats();
+
 reset enable_indexscan;
 reset enable_hashjoin;
 reset enable_mergejoin;
 reset enable_material;
 reset effective_io_concurrency;
-reset work_mem;
 drop table bmscantest;
+drop function explain_parallel_sort_stats();
 
 -- test parallel merge join path.
 set enable_hashjoin to off;

@@ -399,6 +399,7 @@ _outAppend(StringInfo str, const Append *node)
 
 	WRITE_NODE_FIELD(partitioned_rels);
 	WRITE_NODE_FIELD(appendplans);
+	WRITE_INT_FIELD(first_partial_plan);
 }
 
 static void
@@ -926,6 +927,7 @@ _outHash(StringInfo str, const Hash *node)
 	WRITE_OID_FIELD(skewTable);
 	WRITE_INT_FIELD(skewColumn);
 	WRITE_BOOL_FIELD(skewInherit);
+	WRITE_FLOAT_FIELD(rows_total, "%.0f");
 }
 
 static void
