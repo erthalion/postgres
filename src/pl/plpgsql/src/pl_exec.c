@@ -462,7 +462,7 @@ plpgsql_exec_function(PLpgSQL_function *func, FunctionCallInfo fcinfo,
 	estate.err_text = NULL;
 	estate.err_stmt = (PLpgSQL_stmt *) (func->action);
 	rc = exec_stmt_block(&estate, func->action);
-	if (rc != PLPGSQL_RC_RETURN)
+	if (rc != PLPGSQL_RC_RETURN && func->fn_rettype)
 	{
 		estate.err_stmt = NULL;
 		estate.err_text = NULL;
@@ -509,6 +509,12 @@ plpgsql_exec_function(PLpgSQL_function *func, FunctionCallInfo fcinfo,
 	}
 	else if (!estate.retisnull)
 	{
+		if (!func->fn_rettype)
+		{
+			ereport(ERROR,
+					(errmsg("cannot return a value from a procedure")));
+		}
+
 		if (estate.retistuple)
 		{
 			/*
@@ -5491,12 +5497,12 @@ loop_exit:
  *								a Datum by directly calling ExecEvalExpr().
  *
  * If successful, store results into *result, *isNull, *rettype, *rettypmod
- * and return TRUE.  If the expression cannot be handled by simple evaluation,
- * return FALSE.
+ * and return true.  If the expression cannot be handled by simple evaluation,
+ * return false.
  *
  * Because we only store one execution tree for a simple expression, we
  * can't handle recursion cases.  So, if we see the tree is already busy
- * with an evaluation in the current xact, we just return FALSE and let the
+ * with an evaluation in the current xact, we just return false and let the
  * caller run the expression the hard way.  (Other alternatives such as
  * creating a new tree for a recursive call either introduce memory leaks,
  * or add enough bookkeeping to be doubtful wins anyway.)  Another case that
@@ -6309,7 +6315,7 @@ exec_cast_value(PLpgSQL_execstate *estate,
  * or NULL if the cast is a mere no-op relabeling.  If there's work to be
  * done, the cast_exprstate field contains an expression evaluation tree
  * based on a CaseTestExpr input, and the cast_in_use field should be set
- * TRUE while executing it.
+ * true while executing it.
  * ----------
  */
 static plpgsql_CastHashEntry *
@@ -6616,8 +6622,8 @@ exec_save_simple_expr(PLpgSQL_expr *expr, CachedPlan *cplan)
 			if (IsA(tle_expr, Const))
 				break;
 			/* Otherwise, it had better be a Param or an outer Var */
-			Assert(IsA(tle_expr, Param) || (IsA(tle_expr, Var) &&
-					((Var *) tle_expr)->varno == OUTER_VAR));
+			Assert(IsA(tle_expr, Param) ||(IsA(tle_expr, Var) &&
+										   ((Var *) tle_expr)->varno == OUTER_VAR));
 			/* Descend to the child node */
 			plan = plan->lefttree;
 		}

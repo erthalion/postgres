@@ -711,7 +711,7 @@ ArrayCount(const char *str, int *dim, char typdelim)
  * Outputs:
  *	values[]: filled with converted data values.
  *	nulls[]: filled with is-null markers.
- *	*hasnulls: set TRUE iff there are any null elements.
+ *	*hasnulls: set true iff there are any null elements.
  *	*nbytes: set to total size of data area needed (including alignment
  *		padding but not including array header overhead).
  *
@@ -951,7 +951,7 @@ ReadArrayStr(char *arrayStr,
  * nulls: array of is-null flags (can be NULL if no nulls)
  * nitems: number of Datums to be copied
  * typbyval, typlen, typalign: info about element datatype
- * freedata: if TRUE and element type is pass-by-ref, pfree data values
+ * freedata: if true and element type is pass-by-ref, pfree data values
  * referenced by Datums after copying them.
  *
  * If the input data is of varlena type, the caller must have ensured that
@@ -1424,7 +1424,7 @@ array_recv(PG_FUNCTION_ARGS)
  * Outputs:
  *	values[]: filled with converted data values.
  *	nulls[]: filled with is-null markers.
- *	*hasnulls: set TRUE iff there are any null elements.
+ *	*hasnulls: set true iff there are any null elements.
  *	*nbytes: set to total size of data area needed (including alignment
  *		padding but not including array header overhead).
  *

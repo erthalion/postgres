@@ -114,7 +114,7 @@ typedef struct PlannerGlobal
 
 	List	   *invalItems;		/* other dependencies, as PlanInvalItems */
 
-	int			nParamExec;		/* number of PARAM_EXEC Params used */
+	List	   *paramExecTypes; /* type OIDs for PARAM_EXEC Params */
 
 	Index		lastPHId;		/* highest PlaceHolderVar ID assigned */
 
@@ -660,7 +660,7 @@ typedef struct RelOptInfo
 	struct RelOptInfo **part_rels;	/* Array of RelOptInfos of partitions,
 									 * stored in the same order of bounds */
 	List	  **partexprs;		/* Non-nullable partition key expressions. */
-	List	  **nullable_partexprs;	/* Nullable partition key expressions. */
+	List	  **nullable_partexprs; /* Nullable partition key expressions. */
 } RelOptInfo;
 
 /*
@@ -1423,14 +1423,14 @@ typedef JoinPath NestPath;
  * mergejoin.  If it is not NIL then it is a PathKeys list describing
  * the ordering that must be created by an explicit Sort node.
  *
- * skip_mark_restore is TRUE if the executor need not do mark/restore calls.
+ * skip_mark_restore is true if the executor need not do mark/restore calls.
  * Mark/restore overhead is usually required, but can be skipped if we know
  * that the executor need find only one match per outer tuple, and that the
  * mergeclauses are sufficient to identify a match.  In such cases the
  * executor can immediately advance the outer relation after processing a
  * match, and therefoere it need never back up the inner relation.
  *
- * materialize_inner is TRUE if a Material node should be placed atop the
+ * materialize_inner is true if a Material node should be placed atop the
  * inner input.  This may appear with or without an inner Sort step.
  */
 
@@ -1834,15 +1834,15 @@ typedef struct RestrictInfo
 
 	Expr	   *clause;			/* the represented clause of WHERE or JOIN */
 
-	bool		is_pushed_down; /* TRUE if clause was pushed down in level */
+	bool		is_pushed_down; /* true if clause was pushed down in level */
 
-	bool		outerjoin_delayed;	/* TRUE if delayed by lower outer join */
+	bool		outerjoin_delayed;	/* true if delayed by lower outer join */
 
 	bool		can_join;		/* see comment above */
 
 	bool		pseudoconstant; /* see comment above */
 
-	bool		leakproof;		/* TRUE if known to contain no leaked Vars */
+	bool		leakproof;		/* true if known to contain no leaked Vars */
 
 	Index		security_level; /* see comment above */
 
@@ -1973,7 +1973,7 @@ typedef struct PlaceHolderVar
  * syntactically below this special join.  (These are needed to help compute
  * min_lefthand and min_righthand for higher joins.)
  *
- * delay_upper_joins is set TRUE if we detect a pushed-down clause that has
+ * delay_upper_joins is set true if we detect a pushed-down clause that has
  * to be evaluated after this join is formed (because it references the RHS).
  * Any outer joins that have such a clause and this join in their RHS cannot
  * commute with this join, because that would leave noplace to check the
@@ -2219,8 +2219,8 @@ typedef struct MinMaxAggInfo
  * from subplans (values that are setParam items for those subplans).  These
  * IDs need not be tracked via PlannerParamItems, since we do not need any
  * duplicate-elimination nor later processing of the represented expressions.
- * Instead, we just record the assignment of the slot number by incrementing
- * root->glob->nParamExec.
+ * Instead, we just record the assignment of the slot number by appending to
+ * root->glob->paramExecTypes.
  */
 typedef struct PlannerParamItem
 {

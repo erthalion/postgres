@@ -51,13 +51,13 @@ CREATE FUNCTION custom_subscripting_parse(internal)
    AS '_OBJWD_/subscripting'
    LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION custom_subscripting_fetch(internal)
-   RETURNS internal
+CREATE FUNCTION custom_subscripting_fetch(custom, internal)
+   RETURNS integer
    AS '_OBJWD_/subscripting'
    LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION custom_subscripting_assign(internal)
-   RETURNS internal
+CREATE FUNCTION custom_subscripting_assign(custom, internal)
+   RETURNS custom
    AS '_OBJWD_/subscripting'
    LANGUAGE C IMMUTABLE STRICT;
 

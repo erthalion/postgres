@@ -132,7 +132,7 @@ static PQExpBuffer recoveryconfcontents = NULL;
 
 /* Function headers */
 static void usage(void);
-static void disconnect_and_exit(int code);
+static void disconnect_and_exit(int code) pg_attribute_noreturn();
 static void verify_dir_is_empty_or_create(char *dirname, bool *created, bool *found);
 static void progress_report(int tablespacenum, const char *filename, bool force);
 
@@ -811,7 +811,10 @@ progress_report(int tablespacenum, const char *filename, bool force)
 				totaldone_str, totalsize_str, percent,
 				tablespacenum, tablespacecount);
 
-	fprintf(stderr, "\r");
+	if (isatty(fileno(stderr)))
+		fprintf(stderr, "\r");
+	else
+		fprintf(stderr, "\n");
 }
 
 static int32
@@ -1796,7 +1799,13 @@ BaseBackup(void)
 				progname);
 
 	if (showprogress && !verbose)
-		fprintf(stderr, "waiting for checkpoint\r");
+	{
+		fprintf(stderr, "waiting for checkpoint");
+		if (isatty(fileno(stderr)))
+			fprintf(stderr, "\r");
+		else
+			fprintf(stderr, "\n");
+	}
 
 	basebkp =
 		psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s",
@@ -1929,7 +1938,8 @@ BaseBackup(void)
 	if (showprogress)
 	{
 		progress_report(PQntuples(res), NULL, true);
-		fprintf(stderr, "\n");	/* Need to move to next line */
+		if (isatty(fileno(stderr)))
+			fprintf(stderr, "\n");	/* Need to move to next line */
 	}
 
 	PQclear(res);
