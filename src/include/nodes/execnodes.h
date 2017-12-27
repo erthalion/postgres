@@ -25,11 +25,19 @@
 #include "utils/hsearch.h"
 #include "utils/queryenvironment.h"
 #include "utils/reltrigger.h"
+#include "utils/sharedtuplestore.h"
 #include "utils/sortsupport.h"
 #include "utils/tuplestore.h"
 #include "utils/tuplesort.h"
 #include "nodes/tidbitmap.h"
 #include "storage/condition_variable.h"
+
+
+struct PlanState;				/* forward references in this file */
+struct ParallelHashJoinState;
+struct ExprState;
+struct ExprContext;
+struct ExprEvalStep;			/* avoid including execExpr.h everywhere */
 
 
 /* ----------------
@@ -39,10 +47,6 @@
  * It contains instructions (in ->steps) to evaluate the expression.
  * ----------------
  */
-struct ExprState;				/* forward references in this file */
-struct ExprContext;
-struct ExprEvalStep;			/* avoid including execExpr.h everywhere */
-
 typedef Datum (*ExprStateEvalFunc) (struct ExprState *expression,
 									struct ExprContext *econtext,
 									bool *isNull);
@@ -84,11 +88,15 @@ typedef struct ExprState
 	Expr	   *expr;
 
 	/*
-	 * XXX: following only needed during "compilation", could be thrown away.
+	 * XXX: following fields only needed during "compilation" (ExecInitExpr);
+	 * could be thrown away afterwards.
 	 */
 
 	int			steps_len;		/* number of steps currently */
 	int			steps_alloc;	/* allocated length of steps array */
+
+	struct PlanState *parent;	/* parent PlanState node, if any */
+	ParamListInfo ext_params;	/* for compiling PARAM_EXTERN nodes */
 
 	Datum	   *innermost_caseval;
 	bool	   *innermost_casenull;
@@ -823,8 +831,6 @@ typedef struct DomainConstraintState
  * that describes the plan.
  * ----------------------------------------------------------------
  */
-
-struct PlanState;
 
 /* ----------------
  *	 ExecProcNodeMtd
@@ -2026,6 +2032,9 @@ typedef struct HashState
 
 	SharedHashInfo *shared_info;	/* one entry per worker */
 	HashInstrumentation *hinstrument;	/* this worker's entry */
+
+	/* Parallel hash state. */
+	struct ParallelHashJoinState *parallel_state;
 } HashState;
 
 /* ----------------

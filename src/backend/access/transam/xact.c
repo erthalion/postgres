@@ -683,12 +683,12 @@ GetCurrentCommandId(bool used)
 	if (used)
 	{
 		/*
-		 * Forbid setting currentCommandIdUsed in parallel mode, because we
-		 * have no provision for communicating this back to the master.  We
+		 * Forbid setting currentCommandIdUsed in a parallel worker, because
+		 * we have no provision for communicating this back to the master.  We
 		 * could relax this restriction when currentCommandIdUsed was already
 		 * true at the start of the parallel operation.
 		 */
-		Assert(CurrentTransactionState->parallelModeLevel == 0);
+		Assert(!IsParallelWorker());
 		currentCommandIdUsed = true;
 	}
 	return currentCommandId;
@@ -4716,6 +4716,9 @@ AbortSubTransaction(void)
 
 	/* Reset WAL record construction state */
 	XLogResetInsertion();
+
+	/* Cancel condition variable sleep */
+	ConditionVariableCancelSleep();
 
 	/*
 	 * Also clean up any open wait for lock, since the lock manager will choke
