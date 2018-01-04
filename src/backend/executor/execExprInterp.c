@@ -2750,7 +2750,7 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 {
-	/* Should not get here if source array (or any subscript) is null */
+	/* Should not get here if source container (or any subscript) is null */
 	Assert(!(*op->resnull));
 
 	*op->resvalue = FunctionCall2(op->d.sbsref.eval_finfo,
@@ -2759,7 +2759,7 @@ ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 }
 
 /*
- * Compute old array element/slice value for a SubscriptingRef assignment
+ * Compute old container element/slice value for a SubscriptingRef assignment
  * expression. Will only be generated if the new-value subexpression
  * contains SubscriptingRef or FieldStore. The value is stored into the
  * SubscriptingRefState's prevvalue/prevnull fields.
@@ -2771,7 +2771,7 @@ ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 
 	if (*op->resnull)
 	{
-		/* whole array is null, so any element or slice is too */
+		/* whole container is null, so any element or slice is too */
 		sbsrefstate->prevvalue = (Datum) 0;
 		sbsrefstate->prevnull = true;
 	}
@@ -2798,9 +2798,9 @@ ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
 	/*
-	 * For an assignment to a fixed-length array type, both the original array
-	 * and the value to be assigned into it must be non-NULL, else we punt and
-	 * return the original array.
+	 * For an assignment to a fixed-length container type, both the original
+	 * container and the value to be assigned into it must be non-NULL, else we
+	 * punt and return the original container.
 	 */
 	if (sbsrefstate->refattrlength > 0)
 	{

@@ -183,13 +183,13 @@ typedef enum ExprEvalOp
 	 */
 	EEOP_FIELDSTORE_FORM,
 
-	/* Process an array subscript; short-circuit expression to NULL if NULL */
+	/* Process a container subscript; short-circuit expression to NULL if NULL */
 	EEOP_SBSREF_SUBSCRIPT,
 
 	/*
-	 * Compute old array element/slice when a SubscriptingRef assignment expression
-	 * contains SubscriptingRef/FieldStore subexpressions. Value is accessed using
-	 * the CaseTest mechanism.
+	 * Compute old container element/slice when a SubscriptingRef assignment
+	 * expression contains SubscriptingRef/FieldStore subexpressions. Value is
+	 * accessed using the CaseTest mechanism.
 	 */
 	EEOP_SBSREF_OLD,
 
