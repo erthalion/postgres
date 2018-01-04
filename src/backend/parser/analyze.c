@@ -968,6 +968,10 @@ transformInsertRow(ParseState *pstate, List *exprlist,
 				else if (IsA(expr, SubscriptingRef) && IsAssignment(expr))
 				{
 					SubscriptingRef   *sbsref = (SubscriptingRef *) expr;
+
+					if (sbsref->refassgnexpr == NULL)
+						break;
+
 					expr = sbsref->refassgnexpr;
 				}
 				else

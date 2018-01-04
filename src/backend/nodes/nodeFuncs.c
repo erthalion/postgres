@@ -1933,9 +1933,6 @@ expression_tree_walker(Node *node,
 				if (walker(sbsref->refexpr, context))
 					return true;
 
-				if (!IsAssignment(node))
-					break;
-
 				if (walker(sbsref->refassgnexpr, context))
 					return true;
 			}

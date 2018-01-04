@@ -1350,8 +1350,11 @@ contain_nonstrict_functions_walker(Node *node, void *context)
 	}
 	if (IsA(node, SubscriptingRef))
 	{
-		/* array assignment is nonstrict, but subscripting is strict */
-		return true;
+		/* subscripting assignment is nonstrict, but subscripting is strict */
+		if (((SubscriptingRef *) node)->refassgnexpr != NULL)
+			return true;
+
+		/* else fall through to check args */
 	}
 	if (IsA(node, DistinctExpr))
 	{
@@ -3314,7 +3317,7 @@ eval_const_expressions_mutator(Node *node,
 				else
 					return copyObject(node);
 			}
-		case T_ArrayRef:
+		case T_SubscriptingRef:
 		case T_ArrayExpr:
 		case T_RowExpr:
 			{

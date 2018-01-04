@@ -1100,6 +1100,10 @@ get_assignment_input(Node *node)
 	else if (IsA(node, SubscriptingRef) && IsAssignment(node))
 	{
 		SubscriptingRef   *sbsref = (SubscriptingRef *) node;
+
+		if (sbsref->refassgnexpr == NULL)
+			return NULL;
+
 		return (Node *) sbsref->refexpr;
 	}
 

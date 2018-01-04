@@ -6272,6 +6272,10 @@ get_update_query_targetlist_def(Query *query, List *targetList,
 				else if (IsA(expr, SubscriptingRef) && IsAssignment(expr))
 				{
 					SubscriptingRef   *sbsref = (SubscriptingRef *) expr;
+
+					if (sbsref->refassgnexpr == NULL)
+						break;
+
 					expr = (Node *) sbsref->refassgnexpr;
 				}
 				else if (IsA(expr, CoerceToDomain))
@@ -10340,6 +10344,9 @@ processIndirection(Node *node, deparse_context *context)
 		else if (IsA(node, SubscriptingRef) && IsAssignment(node))
 		{
 			SubscriptingRef   *sbsref = (SubscriptingRef *) node;
+
+			if (sbsref->refassgnexpr == NULL)
+				break;
 
 			printSubscripts(sbsref, context);
 
