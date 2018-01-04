@@ -64,7 +64,8 @@ static void ExecInitExprSlots(ExprState *state, Node *node);
 static bool get_last_attnums_walker(Node *node, LastAttnumInfo *info);
 static void ExecInitWholeRowVar(ExprEvalStep *scratch, Var *variable,
 					ExprState *state);
-static void ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
+static void ExecInitSubscriptingRef(ExprEvalStep *scratch,
+				 SubscriptingRef *sbsref,
 				 ExprState *state,
 				 Datum *resv, bool *resnull);
 static bool isAssignmentIndirectionExpr(Expr *expr);
@@ -859,9 +860,9 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 		case T_SubscriptingRef:
 			{
-				SubscriptingRef   *aref = (SubscriptingRef *) node;
+				SubscriptingRef   *sbsref = (SubscriptingRef *) node;
 
-				ExecInitSubscriptingRef(&scratch, aref, state, resv, resnull);
+				ExecInitSubscriptingRef(&scratch, sbsref, state, resv, resnull);
 				break;
 			}
 
@@ -2401,32 +2402,32 @@ ExecInitWholeRowVar(ExprEvalStep *scratch, Var *variable, ExprState *state)
 }
 
 /*
- * Prepare evaluation of an SubscriptingRef expression.
+ * Prepare evaluation of a SubscriptingRef expression.
  */
 static void
-ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
+ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 				 ExprState *state, Datum *resv, bool *resnull)
 {
-	bool		isAssignment = (aref->refassgnexpr != NULL);
-	SubscriptingRefState *arefstate = palloc0(sizeof(SubscriptingRefState));
-	List	   *adjust_jumps = NIL;
-	ListCell   *lc;
-	int			i;
-	FmgrInfo   *eval_finfo, *nested_finfo;
+	bool				 isAssignment = (sbsref->refassgnexpr != NULL);
+	SubscriptingRefState *sbsrefstate = palloc0(sizeof(SubscriptingRefState));
+	List				 *adjust_jumps = NIL;
+	ListCell   			 *lc;
+	int		   			  i;
+	FmgrInfo   			 *eval_finfo, *nested_finfo;
 
 	eval_finfo = palloc0(sizeof(FmgrInfo));
 	nested_finfo = palloc0(sizeof(FmgrInfo));
 
-	fmgr_info(aref->refevalfunc, eval_finfo);
-	if (OidIsValid(aref->refnestedfunc))
+	fmgr_info(sbsref->refevalfunc, eval_finfo);
+	if (OidIsValid(sbsref->refnestedfunc))
 	{
-		fmgr_info(aref->refnestedfunc, nested_finfo);
+		fmgr_info(sbsref->refnestedfunc, nested_finfo);
 	}
 
 	/* Fill constant fields of SubscriptingRefState */
-	arefstate->isassignment = isAssignment;
-	arefstate->refelemtype = aref->refelemtype;
-	arefstate->refattrlength = get_typlen(aref->refcontainertype);
+	sbsrefstate->isassignment = isAssignment;
+	sbsrefstate->refelemtype = sbsref->refelemtype;
+	sbsrefstate->refattrlength = get_typlen(sbsref->refcontainertype);
 
 	/*
 	 * Evaluate array input.  It's safe to do so into resv/resnull, because we
@@ -2434,7 +2435,7 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 	 * be overwritten by the final EEOP_SBSREF_FETCH/ASSIGN step, which is
 	 * pushed last.
 	 */
-	ExecInitExprRec(aref->refexpr, state, resv, resnull);
+	ExecInitExprRec(sbsref->refexpr, state, resv, resnull);
 
 	/*
 	 * If refexpr yields NULL, and it's a fetch, then result is NULL.  We can
@@ -2452,41 +2453,41 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 	}
 
 	/* Verify subscript list lengths are within limit */
-	if (list_length(aref->refupperindexpr) > MAX_SUBSCRIPT_DEPTH)
+	if (list_length(sbsref->refupperindexpr) > MAX_SUBSCRIPT_DEPTH)
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(aref->refupperindexpr), MAX_SUBSCRIPT_DEPTH)));
+						list_length(sbsref->refupperindexpr), MAX_SUBSCRIPT_DEPTH)));
 
-	if (list_length(aref->reflowerindexpr) > MAX_SUBSCRIPT_DEPTH)
+	if (list_length(sbsref->reflowerindexpr) > MAX_SUBSCRIPT_DEPTH)
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(aref->reflowerindexpr), MAX_SUBSCRIPT_DEPTH)));
+						list_length(sbsref->reflowerindexpr), MAX_SUBSCRIPT_DEPTH)));
 
 	/* Evaluate upper subscripts */
 	i = 0;
-	foreach(lc, aref->refupperindexpr)
+	foreach(lc, sbsref->refupperindexpr)
 	{
 		Expr	   *e = (Expr *) lfirst(lc);
 
 		/* When slicing, individual subscript bounds can be omitted */
 		if (!e)
 		{
-			arefstate->upperprovided[i] = false;
+			sbsrefstate->upperprovided[i] = false;
 			i++;
 			continue;
 		}
 
-		arefstate->upperprovided[i] = true;
+		sbsrefstate->upperprovided[i] = true;
 
 		/* Each subscript is evaluated into subscriptvalue/subscriptnull */
 		ExecInitExprRec(e, state,
-						&arefstate->subscriptvalue, &arefstate->subscriptnull);
+						&sbsrefstate->subscriptvalue, &sbsrefstate->subscriptnull);
 
 		/* ... and then SBSREF_SUBSCRIPT saves it into step's workspace */
 		scratch->opcode = EEOP_SBSREF_SUBSCRIPT;
-		scratch->d.sbsref_subscript.state = arefstate;
+		scratch->d.sbsref_subscript.state = sbsrefstate;
 		scratch->d.sbsref_subscript.off = i;
 		scratch->d.sbsref_subscript.isupper = true;
 		scratch->d.sbsref_subscript.jumpdone = -1;	/* adjust later */
@@ -2496,31 +2497,31 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 								   state->steps_len - 1);
 		i++;
 	}
-	arefstate->numupper = i;
+	sbsrefstate->numupper = i;
 
 	/* Evaluate lower subscripts similarly */
 	i = 0;
-	foreach(lc, aref->reflowerindexpr)
+	foreach(lc, sbsref->reflowerindexpr)
 	{
 		Expr	   *e = (Expr *) lfirst(lc);
 
 		/* When slicing, individual subscript bounds can be omitted */
 		if (!e)
 		{
-			arefstate->lowerprovided[i] = false;
+			sbsrefstate->lowerprovided[i] = false;
 			i++;
 			continue;
 		}
 
-		arefstate->lowerprovided[i] = true;
+		sbsrefstate->lowerprovided[i] = true;
 
 		/* Each subscript is evaluated into subscriptvalue/subscriptnull */
 		ExecInitExprRec(e, state,
-						&arefstate->subscriptvalue, &arefstate->subscriptnull);
+						&sbsrefstate->subscriptvalue, &sbsrefstate->subscriptnull);
 
 		/* ... and then SBSREF_SUBSCRIPT saves it into step's workspace */
 		scratch->opcode = EEOP_SBSREF_SUBSCRIPT;
-		scratch->d.sbsref_subscript.state = arefstate;
+		scratch->d.sbsref_subscript.state = sbsrefstate;
 		scratch->d.sbsref_subscript.off = i;
 		scratch->d.sbsref_subscript.isupper = false;
 		scratch->d.sbsref_subscript.jumpdone = -1;	/* adjust later */
@@ -2530,11 +2531,11 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 								   state->steps_len - 1);
 		i++;
 	}
-	arefstate->numlower = i;
+	sbsrefstate->numlower = i;
 
 	/* Should be impossible if parser is sane, but check anyway: */
-	if (arefstate->numlower != 0 &&
-		arefstate->numupper != arefstate->numlower)
+	if (sbsrefstate->numlower != 0 &&
+		sbsrefstate->numupper != sbsrefstate->numlower)
 		elog(ERROR, "upper and lower index lists are not same length");
 
 	if (isAssignment)
@@ -2556,10 +2557,10 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 		 * Since fetching the old element might be a nontrivial expense, do it
 		 * only if the argument actually needs it.
 		 */
-		if (isAssignmentIndirectionExpr(aref->refassgnexpr))
+		if (isAssignmentIndirectionExpr(sbsref->refassgnexpr))
 		{
 			scratch->opcode = EEOP_SBSREF_OLD;
-			scratch->d.sbsref.state = arefstate;
+			scratch->d.sbsref.state = sbsrefstate;
 			scratch->d.sbsref.eval_finfo = eval_finfo;
 			scratch->d.sbsref.nested_finfo = nested_finfo;
 			ExprEvalPushStep(state, scratch);
@@ -2568,19 +2569,19 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 		/* SBSREF_OLD puts extracted value into prevvalue/prevnull */
 		save_innermost_caseval = state->innermost_caseval;
 		save_innermost_casenull = state->innermost_casenull;
-		state->innermost_caseval = &arefstate->prevvalue;
-		state->innermost_casenull = &arefstate->prevnull;
+		state->innermost_caseval = &sbsrefstate->prevvalue;
+		state->innermost_casenull = &sbsrefstate->prevnull;
 
 		/* evaluate replacement value into replacevalue/replacenull */
-		ExecInitExprRec(aref->refassgnexpr, state,
-						&arefstate->replacevalue, &arefstate->replacenull);
+		ExecInitExprRec(sbsref->refassgnexpr, state,
+						&sbsrefstate->replacevalue, &sbsrefstate->replacenull);
 
 		state->innermost_caseval = save_innermost_caseval;
 		state->innermost_casenull = save_innermost_casenull;
 
 		/* and perform the assignment */
 		scratch->opcode = EEOP_SBSREF_ASSIGN;
-		scratch->d.sbsref.state = arefstate;
+		scratch->d.sbsref.state = sbsrefstate;
 		scratch->d.sbsref.eval_finfo = eval_finfo;
 		scratch->d.sbsref.nested_finfo = nested_finfo;
 		ExprEvalPushStep(state, scratch);
@@ -2590,7 +2591,7 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *aref,
 	{
 		/* array fetch is much simpler */
 		scratch->opcode = EEOP_SBSREF_FETCH;
-		scratch->d.sbsref.state = arefstate;
+		scratch->d.sbsref.state = sbsrefstate;
 		scratch->d.sbsref.eval_finfo = eval_finfo;
 		scratch->d.sbsref.nested_finfo = nested_finfo;
 		ExprEvalPushStep(state, scratch);

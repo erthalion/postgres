@@ -226,7 +226,7 @@ transformArrayType(Oid *containerType, int32 *containerTypmod)
 
 	/*
 	 * If the input is a domain, smash to base type, and extract the actual
-	 * typmod to be applied to the base type.  Subscripting a domain is an
+	 * typmod to be applied to the base type. Subscripting a domain is an
 	 * operation that necessarily works on the base array type, not the domain
 	 * itself.  (Note that we provide no method whereby the creator of a
 	 * domain over an array type could hide its ability to be subscripted.)

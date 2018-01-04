@@ -451,7 +451,7 @@ static void get_tablesample_def(TableSampleClause *tablesample,
 static void get_opclass_name(Oid opclass, Oid actual_datatype,
 				 StringInfo buf);
 static Node *processIndirection(Node *node, deparse_context *context);
-static void printSubscripts(SubscriptingRef *aref, deparse_context *context);
+static void printSubscripts(SubscriptingRef *sbsref, deparse_context *context);
 static char *get_relation_name(Oid relid);
 static char *generate_relation_name(Oid relid, List *namespaces);
 static char *generate_qualified_relation_name(Oid relid);
@@ -7700,7 +7700,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				{
 					/*
 					 * If there's a refassgnexpr, we want to print the node in the
-					 * format "array[subscripts] := refassgnexpr".  This is not
+					 * format "container[subscripts] := refassgnexpr". This is not
 					 * legal SQL, so decompilation of INSERT or UPDATE statements
 					 * should always use processIndirection as part of the
 					 * statement-level syntax.  We should only see this when
@@ -7712,7 +7712,7 @@ get_rule_expr(Node *node, deparse_context *context,
 					/*
 					 * Use processIndirection to print this node's subscripts
 					 * as well as any additional field selections or
-					 * subscripting in immediate descendants.  It returns the
+					 * subscripting in immediate descendants. It returns the
 					 * RHS expr that is actually being "assigned".
 					 */
 					refassgnexpr = processIndirection(node, context);

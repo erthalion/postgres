@@ -187,8 +187,8 @@ typedef enum ExprEvalOp
 	EEOP_SBSREF_SUBSCRIPT,
 
 	/*
-	 * Compute old array element/slice when an SubscriptingRef assignment expression
-	 * contains SubscriptingRef/FieldStore subexpressions.  Value is accessed using
+	 * Compute old array element/slice when a SubscriptingRef assignment expression
+	 * contains SubscriptingRef/FieldStore subexpressions. Value is accessed using
 	 * the CaseTest mechanism.
 	 */
 	EEOP_SBSREF_OLD,
@@ -580,14 +580,14 @@ typedef struct ExprEvalStep
 } ExprEvalStep;
 
 
-/* Non-inline data for array operations */
+/* Non-inline data for container operations */
 typedef struct SubscriptingRefState
 {
 	bool		isassignment;	/* is it assignment, or just fetch? */
 
-	Oid			refelemtype;	/* OID of the array element type */
-	int16		refattrlength;	/* typlen of array type */
-	int16		refelemlength;	/* typlen of the array element type */
+	Oid			refelemtype;	/* OID of the container element type */
+	int16		refattrlength;	/* typlen of container type */
+	int16		refelemlength;	/* typlen of the container element type */
 	bool		refelembyval;	/* is the element type pass-by-value? */
 	char		refelemalign;	/* typalign of the element type */
 

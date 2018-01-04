@@ -2702,7 +2702,7 @@ ExecEvalFieldStoreForm(ExprState *state, ExprEvalStep *op, ExprContext *econtext
 }
 
 /*
- * Process a subscript in an SubscriptingRef expression.
+ * Process a subscript in a SubscriptingRef expression.
  *
  * If subscript is NULL, throw error in assignment case, or in fetch case
  * set result to NULL and return false (instructing caller to skip the rest
@@ -2715,14 +2715,14 @@ ExecEvalFieldStoreForm(ExprState *state, ExprEvalStep *op, ExprContext *econtext
 bool
 ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 {
-	SubscriptingRefState *arefstate = op->d.sbsref_subscript.state;
-	Datum		*indexes;
-	int			off;
+	SubscriptingRefState *sbsrefstate = op->d.sbsref_subscript.state;
+	Datum				 *indexes;
+	int					 off;
 
 	/* If any index expr yields NULL, result is NULL or error */
-	if (arefstate->subscriptnull)
+	if (sbsrefstate->subscriptnull)
 	{
-		if (arefstate->isassignment)
+		if (sbsrefstate->isassignment)
 			ereport(ERROR,
 					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 					 errmsg("subscript in assignment must not be null")));
@@ -2732,12 +2732,12 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 
 	/* Convert datum to int, save in appropriate place */
 	if (op->d.sbsref_subscript.isupper)
-		indexes = arefstate->upper;
+		indexes = sbsrefstate->upper;
 	else
-		indexes = arefstate->lower;
+		indexes = sbsrefstate->lower;
 	off = op->d.sbsref_subscript.off;
 
-	indexes[off] = arefstate->subscriptvalue;
+	indexes[off] = sbsrefstate->subscriptvalue;
 
 	return true;
 }
@@ -2745,7 +2745,7 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 /*
  * Evaluate SubscriptingRef fetch.
  *
- * Source array is in step's result variable.
+ * Source container is in step's result variable.
  */
 void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
@@ -2759,30 +2759,30 @@ ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 }
 
 /*
- * Compute old array element/slice value for an SubscriptingRef assignment
- * expression.  Will only be generated if the new-value subexpression
- * contains SubscriptingRef or FieldStore.  The value is stored into the
+ * Compute old array element/slice value for a SubscriptingRef assignment
+ * expression. Will only be generated if the new-value subexpression
+ * contains SubscriptingRef or FieldStore. The value is stored into the
  * SubscriptingRefState's prevvalue/prevnull fields.
  */
 void
 ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 {
-	SubscriptingRefState *arefstate = op->d.sbsref.state;
+	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
 
 	if (*op->resnull)
 	{
 		/* whole array is null, so any element or slice is too */
-		arefstate->prevvalue = (Datum) 0;
-		arefstate->prevnull = true;
+		sbsrefstate->prevvalue = (Datum) 0;
+		sbsrefstate->prevnull = true;
 	}
 	else
 	{
-		arefstate->prevvalue = FunctionCall2(op->d.sbsref.nested_finfo,
+		sbsrefstate->prevvalue = FunctionCall2(op->d.sbsref.nested_finfo,
 					  PointerGetDatum(*op->resvalue),
 					  PointerGetDatum(op));
 
-		if (arefstate->numlower != 0)
-			arefstate->prevnull = false;
+		if (sbsrefstate->numlower != 0)
+			sbsrefstate->prevnull = false;
 
 	}
 }
@@ -2790,27 +2790,27 @@ ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 /*
  * Evaluate SubscriptingRef assignment.
  *
- * Input array (possibly null) is in result area, replacement value is in
+ * Input container (possibly null) is in result area, replacement value is in
  * SubscriptingRefState's replacevalue/replacenull.
  */
 void
 ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 {
-	SubscriptingRefState *arefstate = op->d.sbsref.state;
+	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
 	/*
 	 * For an assignment to a fixed-length array type, both the original array
 	 * and the value to be assigned into it must be non-NULL, else we punt and
 	 * return the original array.
 	 */
-	if (arefstate->refattrlength > 0)
+	if (sbsrefstate->refattrlength > 0)
 	{
-		if (*op->resnull || arefstate->replacenull)
+		if (*op->resnull || sbsrefstate->replacenull)
 			return;
 	}
 
 	*op->resvalue = FunctionCall2(op->d.sbsref.eval_finfo,
-				  PointerGetDatum(*op->resvalue),
-				  PointerGetDatum(op));
+								  PointerGetDatum(*op->resvalue),
+								  PointerGetDatum(op));
 }
 
 /*

@@ -400,24 +400,24 @@ foreign_expr_walker(Node *node,
 			break;
 		case T_SubscriptingRef:
 			{
-				SubscriptingRef   *ar = (SubscriptingRef *) node;
+				SubscriptingRef   *sr = (SubscriptingRef *) node;
 
 				/* Assignment should not be in restrictions. */
-				if (ar->refassgnexpr != NULL)
+				if (sr->refassgnexpr != NULL)
 					return false;
 
 				/*
-				 * Recurse to remaining subexpressions.  Since the array
+				 * Recurse to remaining subexpressions. Since the container
 				 * subscripts must yield (noncollatable) integers, they won't
 				 * affect the inner_cxt state.
 				 */
-				if (!foreign_expr_walker((Node *) ar->refupperindexpr,
+				if (!foreign_expr_walker((Node *) sr->refupperindexpr,
 										 glob_cxt, &inner_cxt))
 					return false;
-				if (!foreign_expr_walker((Node *) ar->reflowerindexpr,
+				if (!foreign_expr_walker((Node *) sr->reflowerindexpr,
 										 glob_cxt, &inner_cxt))
 					return false;
-				if (!foreign_expr_walker((Node *) ar->refexpr,
+				if (!foreign_expr_walker((Node *) sr->refexpr,
 										 glob_cxt, &inner_cxt))
 					return false;
 
@@ -426,14 +426,14 @@ foreign_expr_walker(Node *node,
 				 * shippable, it can't be sent to remote because it might have
 				 * incompatible semantics on remote side.
 				 */
-				if (!is_shippable(ar->refevalfunc, ProcedureRelationId, fpinfo))
+				if (!is_shippable(sr->refevalfunc, ProcedureRelationId, fpinfo))
 					return false;
 
 				/*
-				 * Array subscripting should yield same collation as input,
+				 * Container subscripting should yield same collation as input,
 				 * but for safety use same logic as for function nodes.
 				 */
-				collation = ar->refcollid;
+				collation = sr->refcollid;
 				if (collation == InvalidOid)
 					state = FDW_COLLATE_NONE;
 				else if (inner_cxt.state == FDW_COLLATE_SAFE &&
@@ -2387,7 +2387,7 @@ deparseParam(Param *node, deparse_expr_cxt *context)
 }
 
 /*
- * Deparse an array subscript expression.
+ * Deparse a container subscript expression.
  */
 static void
 deparseSubscriptingRef(SubscriptingRef *node, deparse_expr_cxt *context)

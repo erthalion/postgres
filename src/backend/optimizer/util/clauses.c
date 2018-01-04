@@ -1350,7 +1350,10 @@ contain_nonstrict_functions_walker(Node *node, void *context)
 	}
 	if (IsA(node, SubscriptingRef))
 	{
-		/* subscripting assignment is nonstrict, but subscripting is strict */
+		/*
+		 * subscripting assignment is nonstrict,
+		 * but subscripting itself is strict
+		 */
 		if (((SubscriptingRef *) node)->refassgnexpr != NULL)
 			return true;
 

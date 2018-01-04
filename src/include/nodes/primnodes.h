@@ -367,7 +367,7 @@ typedef struct WindowFunc
 /* ----------------
  *	SubscriptingRef: describes a subscripting operation over a container
  *
- * An SubscriptingRef can describe fetching a single element from a container,
+ * A SubscriptingRef can describe fetching a single element from a container,
  * fetching a part of container (e.g. array slice), storing a single element into
  * a container, or storing a slice.  The "store" cases work with an
  * initial container value and a source value that is inserted into the

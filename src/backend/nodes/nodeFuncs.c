@@ -70,7 +70,7 @@ exprType(const Node *expr)
 			{
 				const SubscriptingRef *sbsref = (const SubscriptingRef *) expr;
 
-				/* slice and/or store operations yield the array type */
+				/* slice and/or store operations yield the container type */
 				if (IsAssignment(sbsref) || sbsref->reflowerindexpr)
 					type = sbsref->refcontainertype;
 				else
@@ -287,7 +287,7 @@ exprTypmod(const Node *expr)
 		case T_Param:
 			return ((const Param *) expr)->paramtypmod;
 		case T_SubscriptingRef:
-			/* typmod is the same for array or element */
+			/* typmod is the same for container or element */
 			return ((const SubscriptingRef *) expr)->reftypmod;
 		case T_FuncExpr:
 			{
@@ -1218,7 +1218,7 @@ exprLocation(const Node *expr)
 			loc = ((const WindowFunc *) expr)->location;
 			break;
 		case T_SubscriptingRef:
-			/* just use array argument's location */
+			/* just use container argument's location */
 			loc = exprLocation((Node *) ((const SubscriptingRef *) expr)->refexpr);
 			break;
 		case T_FuncExpr:
@@ -1922,7 +1922,7 @@ expression_tree_walker(Node *node,
 			{
 				SubscriptingRef   *sbsref = (SubscriptingRef *) node;
 
-				/* recurse directly for upper/lower array index lists */
+				/* recurse directly for upper/lower container index lists */
 				if (expression_tree_walker((Node *) sbsref->refupperindexpr,
 										   walker, context))
 					return true;
