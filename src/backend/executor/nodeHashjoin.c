@@ -3,7 +3,7 @@
  * nodeHashjoin.c
  *	  Routines to handle hash join nodes
  *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1186,12 +1186,6 @@ ExecParallelHashJoinNewBatch(HashJoinState *hjstate)
 					 * remain).
 					 */
 					BarrierDetach(batch_barrier);
-
-					/*
-					 * We didn't work on this batch, but we need to observe
-					 * its size for EXPLAIN.
-					 */
-					ExecParallelHashUpdateSpacePeak(hashtable, batchno);
 					hashtable->batches[batchno].done = true;
 					hashtable->curbatch = -1;
 					break;

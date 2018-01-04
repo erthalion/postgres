@@ -2,7 +2,7 @@
  *
  * pgbench.h
  *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *-------------------------------------------------------------------------
@@ -76,7 +76,8 @@ typedef enum PgBenchFunction
 	PGBENCH_RANDOM,
 	PGBENCH_RANDOM_GAUSSIAN,
 	PGBENCH_RANDOM_EXPONENTIAL,
-	PGBENCH_RANDOM_ZIPFIAN
+	PGBENCH_RANDOM_ZIPFIAN,
+	PGBENCH_POW
 } PgBenchFunction;
 
 typedef struct PgBenchExpr PgBenchExpr;

@@ -5,7 +5,7 @@
  * Originally written by Tatsuo Ishii and enhanced by many contributors.
  *
  * src/bin/pgbench/pgbench.c
- * Copyright (c) 2000-2017, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2018, PostgreSQL Global Development Group
  * ALL RIGHTS RESERVED;
  *
  * Permission to use, copy, modify, and distribute this software and its
@@ -1846,6 +1846,24 @@ evalFunc(TState *thread, CState *st,
 									getExponentialRand(thread, imin, imax, param));
 					}
 				}
+
+				return true;
+			}
+
+		case PGBENCH_POW:
+			{
+				PgBenchValue *lval = &vargs[0];
+				PgBenchValue *rval = &vargs[1];
+				double		ld,
+							rd;
+
+				Assert(nargs == 2);
+
+				if (!coerceToDouble(lval, &ld) ||
+					!coerceToDouble(rval, &rd))
+					return false;
+
+				setDoubleValue(retval, pow(ld, rd));
 
 				return true;
 			}

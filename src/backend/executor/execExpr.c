@@ -19,7 +19,7 @@
  *	and "Expression Evaluation" sections.
  *
  *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -680,20 +680,19 @@ ExecInitExprRec(Expr *node, ExprState *state,
 					/* regular user column */
 					scratch.d.var.attnum = variable->varattno - 1;
 					scratch.d.var.vartype = variable->vartype;
-					/* select EEOP_*_FIRST opcode to force one-time checks */
 					switch (variable->varno)
 					{
 						case INNER_VAR:
-							scratch.opcode = EEOP_INNER_VAR_FIRST;
+							scratch.opcode = EEOP_INNER_VAR;
 							break;
 						case OUTER_VAR:
-							scratch.opcode = EEOP_OUTER_VAR_FIRST;
+							scratch.opcode = EEOP_OUTER_VAR;
 							break;
 
 							/* INDEX_VAR is handled by default case */
 
 						default:
-							scratch.opcode = EEOP_SCAN_VAR_FIRST;
+							scratch.opcode = EEOP_SCAN_VAR;
 							break;
 					}
 				}

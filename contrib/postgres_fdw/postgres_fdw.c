@@ -3,7 +3,7 @@
  * postgres_fdw.c
  *		  Foreign-data wrapper for remote PostgreSQL servers
  *
- * Portions Copyright (c) 2012-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-2018, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  contrib/postgres_fdw/postgres_fdw.c
@@ -5115,7 +5115,7 @@ conversion_error_callback(void *arg)
 
 		/*
 		 * Target list can have Vars and expressions.  For Vars, we can get
-		 * it's relation, however for expressions we can't.  Thus for
+		 * its relation, however for expressions we can't.  Thus for
 		 * expressions, just show generic context message.
 		 */
 		if (IsA(tle->expr, Var))

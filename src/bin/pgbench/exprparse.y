@@ -4,7 +4,7 @@
  * exprparse.y
  *	  bison grammar for a simple expression syntax
  *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pgbench/exprparse.y
@@ -193,6 +193,12 @@ static const struct
 	},
 	{
 		"random_zipfian", 3, PGBENCH_RANDOM_ZIPFIAN
+	},
+	{
+		"pow", 2, PGBENCH_POW
+	},
+	{
+		"power", 2, PGBENCH_POW
 	},
 	/* keep as last array element */
 	{

@@ -4,7 +4,7 @@
  *	  definitions for executor state nodes
  *
  *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/nodes/execnodes.h
@@ -86,6 +86,9 @@ typedef struct ExprState
 
 	/* original expression tree, for debugging only */
 	Expr	   *expr;
+
+	/* private state for an evalfunc */
+	void	   *evalfunc_private;
 
 	/*
 	 * XXX: following fields only needed during "compilation" (ExecInitExpr);
@@ -1849,13 +1852,15 @@ typedef struct AggState
 	Tuplesortstate *sort_out;	/* input is copied here for next phase */
 	TupleTableSlot *sort_slot;	/* slot for sort results */
 	/* these fields are used in AGG_PLAIN and AGG_SORTED modes: */
-	AggStatePerGroup pergroup;	/* per-Aggref-per-group working state */
+	AggStatePerGroup *pergroups;	/* grouping set indexed array of per-group
+									 * pointers */
 	HeapTuple	grp_firstTuple; /* copy of first tuple of current group */
 	/* these fields are used in AGG_HASHED and AGG_MIXED modes: */
 	bool		table_filled;	/* hash table filled yet? */
 	int			num_hashes;
 	AggStatePerHash perhash;
-	AggStatePerGroup *hash_pergroup;	/* array of per-group pointers */
+	AggStatePerGroup *hash_pergroup;	/* grouping set indexed array of
+										 * per-group pointers */
 	/* support for evaluation of agg input expressions: */
 	ProjectionInfo *combinedproj;	/* projection machinery */
 } AggState;
