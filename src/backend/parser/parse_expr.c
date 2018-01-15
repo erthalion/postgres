@@ -442,7 +442,7 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 
 	/*
 	 * We have to split any field-selection operations apart from
-	 * subscripting.  Adjacent A_Indices nodes have to be treated as a single
+	 * subscripting. Adjacent A_Indices nodes have to be treated as a single
 	 * multidimensional subscript operation.
 	 */
 	foreach(i, ind->indirection)

@@ -6706,9 +6706,9 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 	/*
 	 * Caller may or may not have bothered to determine elementType.  Note
 	 * that if the caller did do so, containerType/containerTypMod must be as modified
-	 * by transformArrayType, ie, smash domain to base type.
+	 * by transformContainerType, ie, smash domain to base type.
 	 */
-	element_type_id = transformArrayType(&array_type, &array_typ_mode);
+	element_type_id = transformContainerType(&array_type, &array_typ_mode);
 	sbsref->refelemtype = element_type_id;
 
 	foreach(u, sbsref->refupperindexpr)

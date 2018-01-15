@@ -203,33 +203,27 @@ make_var(ParseState *pstate, RangeTblEntry *rte, int attrno, int location)
 }
 
 /*
- * transformArrayType()
- *		Identify the types involved in a subscripting operation for array
+ * transformContainerType()
+ *		Identify the types involved in a subscripting operation for container
  *
- * On entry, arrayType/arrayTypmod identify the type of the input value
- * to be subscripted (which could be a domain type).  These are modified
- * if necessary to identify the actual array type and typmod, and the
- * array's element type is returned.  An error is thrown if the input isn't
- * an array type.
- *
- * NOTE: This part of type-specific code is not separated into type-specific
- * subscripting procedure for now, but it does not affect on the whole logic,
- * since InvalidOid will be return in case of other types not an error.
- * An error will appears only if a subscripting procedure is not defined.
+ * On entry, containerType/containerTypmod identify the type of the input value
+ * to be subscripted (which could be a domain type). These are modified if
+ * necessary to identify the actual container type and typmod, and the
+ * container's element type is returned.
  */
 Oid
-transformArrayType(Oid *containerType, int32 *containerTypmod)
+transformContainerType(Oid *containerType, int32 *containerTypmod)
 {
 	Oid			elementType;
-	HeapTuple	type_tuple_array;
-	Form_pg_type type_struct_array;
+	HeapTuple	type_tuple_container;
+	Form_pg_type type_struct_container;
 
 	/*
 	 * If the input is a domain, smash to base type, and extract the actual
 	 * typmod to be applied to the base type. Subscripting a domain is an
-	 * operation that necessarily works on the base array type, not the domain
-	 * itself.  (Note that we provide no method whereby the creator of a
-	 * domain over an array type could hide its ability to be subscripted.)
+	 * operation that necessarily works on the base container type, not the
+	 * domain itself. (Note that we provide no method whereby the creator of a
+	 * domain over a container type could hide its ability to be subscripted.)
 	 */
 	*containerType = getBaseTypeAndTypmod(*containerType, containerTypmod);
 
@@ -245,17 +239,17 @@ transformArrayType(Oid *containerType, int32 *containerTypmod)
 	else if (*containerType == OIDVECTOROID)
 		*containerType = OIDARRAYOID;
 
-	/* Get the type tuple for the array */
-	type_tuple_array = SearchSysCache1(TYPEOID, ObjectIdGetDatum(*containerType));
-	if (!HeapTupleIsValid(type_tuple_array))
+	/* Get the type tuple for the container */
+	type_tuple_container = SearchSysCache1(TYPEOID, ObjectIdGetDatum(*containerType));
+	if (!HeapTupleIsValid(type_tuple_container))
 		elog(ERROR, "cache lookup failed for type %u", *containerType);
-	type_struct_array = (Form_pg_type) GETSTRUCT(type_tuple_array);
+	type_struct_container = (Form_pg_type) GETSTRUCT(type_tuple_container);
 
 	/* needn't check typisdefined since this will fail anyway */
 
-	elementType = type_struct_array->typelem;
+	elementType = type_struct_container->typelem;
 
-	ReleaseSysCache(type_tuple_array);
+	ReleaseSysCache(type_tuple_container);
 
 	return elementType;
 }
@@ -271,7 +265,7 @@ transformArrayType(Oid *containerType, int32 *containerTypmod)
  *
  * In a container assignment, we are given a destination container value plus a
  * source value that is to be assigned to a single element or a slice of that
- * container.  We produce an expression that represents the new container value
+ * container. We produce an expression that represents the new container value
  * with the source data inserted into the right part of the container.
  *
  * For both cases, this function contains only general subscripting logic while
@@ -280,7 +274,7 @@ transformArrayType(Oid *containerType, int32 *containerTypmod)
  * for now about domain-over-container, if the source container is of a
  * domain-over-container type, the result is of the base container type or its
  * element type; essentially, we must fold a domain to its base type before
- * applying subscripting.  (Note that int2vector and oidvector are treated as
+ * applying subscripting. (Note that int2vector and oidvector are treated as
  * domains here.) If domain verification failed we assume, that element type
  * must be the same as container type (e.g. in case of jsonb).
  * An error will appear in case if current container type doesn't have a
@@ -290,8 +284,8 @@ transformArrayType(Oid *containerType, int32 *containerTypmod)
  * containerBase	Already-transformed expression for the container as a whole
  * containerType	OID of container's datatype (should match type of containerBase,
  *					or be the base type of containerBase's domain type)
- * elementType		OID of container's element type (fetch with transformArrayType,
- *					or pass InvalidOid to do it here)
+ * elementType		OID of container's element type (fetch with
+ *					transformContainerType, or pass InvalidOid to do it here)
  * containerTypMod	typmod for the container (which is also typmod for the elements)
  * indirection		Untransformed list of subscripts (must not be NIL)
  * assignFrom		NULL for container fetch, else transformed expression for source.

@@ -270,7 +270,7 @@ extern void cancel_parser_errposition_callback(ParseCallbackState *pcbstate);
 
 extern Var *make_var(ParseState *pstate, RangeTblEntry *rte, int attrno,
 		 int location);
-extern Oid	transformArrayType(Oid *containerType, int32 *containerTypmod);
+extern Oid	transformContainerType(Oid *containerType, int32 *containerTypmod);
 
 extern Node *transformContainerSubscripts(ParseState *pstate,
 						 Node *containerBase,

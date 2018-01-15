@@ -884,7 +884,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	/* Identify the actual container type and element type involved */
 	containerType = targetTypeId;
 	containerTypMod = targetTypMod;
-	elementTypeId = transformArrayType(&containerType, &containerTypMod);
+	elementTypeId = transformContainerType(&containerType, &containerTypMod);
 
 	/* Identify type that RHS must provide */
 	typeNeeded = isSlice ? containerType : elementTypeId;
