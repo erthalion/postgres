@@ -851,7 +851,28 @@ transformAssignmentIndirection(ParseState *pstate,
 		result = rhs;
 
 	if (result == NULL)
-		result = rhs;
+	{
+		if (targetIsArray)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("array assignment to \"%s\" requires type %s"
+							" but expression is of type %s",
+							targetName,
+							format_type_be(targetTypeId),
+							format_type_be(exprType(rhs))),
+					 errhint("You will need to rewrite or cast the expression."),
+					 parser_errposition(pstate, location)));
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("subfield \"%s\" is of type %s"
+							" but expression is of type %s",
+							targetName,
+							format_type_be(targetTypeId),
+							format_type_be(exprType(rhs))),
+					 errhint("You will need to rewrite or cast the expression."),
+					 parser_errposition(pstate, location)));
+	}
 
 	return result;
 }
