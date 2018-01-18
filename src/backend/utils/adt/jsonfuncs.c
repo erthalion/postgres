@@ -5056,6 +5056,63 @@ jsonb_subscript_parse(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(sbsref);
 }
 
+SubscriptingRef *
+jsonb_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
+{
+	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
+	sbsref->refelemtype = JSONOID;
+	return sbsref;
+}
+
+SubscriptingRef *
+jsonb_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+						 ParseState *pstate)
+{
+	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
+	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
+	List			   *upperIndexpr = NIL;
+	ListCell		   *l;
+
+	if (sbsref->reflowerindexpr != NIL)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("jsonb subscript does not support slices"),
+				 parser_errposition(pstate, exprLocation(
+						 ((Node *)lfirst(sbsref->reflowerindexpr->head))))));
+
+	foreach(l, sbsref->refupperindexpr)
+	{
+		Node *subexpr = (Node *) lfirst(l);
+
+		if (subexpr == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("jsonb subscript does not support slices"),
+					 parser_errposition(pstate, exprLocation(
+						((Node *) lfirst(sbsref->refupperindexpr->head))))));
+
+		subexpr = coerce_to_target_type(pstate,
+										subexpr, exprType(subexpr),
+										TEXTOID, -1,
+										COERCION_ASSIGNMENT,
+										COERCE_IMPLICIT_CAST,
+										-1);
+		if (subexpr == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("jsonb subscript must have text type"),
+					 parser_errposition(pstate, exprLocation(subexpr))));
+
+		upperIndexpr = lappend(upperIndexpr, subexpr);
+	}
+
+	sbsref->refupperindexpr = upperIndexpr;
+
+	return sbsref;
+}
+
+
+
 /*
  * Iterate over jsonb string values or elements, and pass them together with an
  * iteration state to a specified JsonIterateStringValuesAction.

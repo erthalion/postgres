@@ -436,6 +436,8 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 {
 	Node	   *last_srf = pstate->p_last_srf;
 	Node	   *result = transformExprRecurse(pstate, ind->arg);
+	SubscriptingCallbacks *callbacks;
+	SubscriptingRef *sbsref;
 	List	   *subscripts = NIL;
 	int			location = exprLocation(result);
 	ListCell   *i;
@@ -466,13 +468,18 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 
 			/* process subscripts before this field selection */
 			if (subscripts)
-				result = (Node *) transformContainerSubscripts(pstate,
-															   result,
-															   exprType(result),
-															   InvalidOid,
-															   exprTypmod(result),
-															   subscripts,
-															   NULL);
+			{
+				callbacks = transformContainerSubscripts(pstate,
+													     result,
+													     exprType(result),
+													     InvalidOid,
+													     exprTypmod(result),
+													     subscripts,
+													     NULL);
+				sbsref = callbacks->prepare(false, callbacks->sbsref);
+				callbacks->validate(false, sbsref, pstate);
+				result = (Node *) sbsref;
+			}
 			subscripts = NIL;
 
 			newresult = ParseFuncOrColumn(pstate,
@@ -489,13 +496,19 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 	}
 	/* process trailing subscripts, if any */
 	if (subscripts)
-		result = (Node *) transformContainerSubscripts(pstate,
-													   result,
-													   exprType(result),
-													   InvalidOid,
-													   exprTypmod(result),
-													   subscripts,
-													   NULL);
+	{
+		callbacks = transformContainerSubscripts(pstate,
+												 result,
+												 exprType(result),
+												 InvalidOid,
+												 exprTypmod(result),
+												 subscripts,
+												 NULL);
+
+		sbsref = callbacks->prepare(false, callbacks->sbsref);
+		callbacks->validate(false, sbsref, pstate);
+		result = (Node *) sbsref;
+	}
 
 	return result;
 }
