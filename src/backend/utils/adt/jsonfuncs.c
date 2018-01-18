@@ -491,6 +491,13 @@ static void transform_string_values_object_field_start(void *state, char *fname,
 static void transform_string_values_array_element_start(void *state, bool isnull);
 static void transform_string_values_scalar(void *state, char *token, JsonTokenType tokentype);
 
+static SubscriptingRef * jsonb_subscript_prepare(bool isAssignment,
+												 SubscriptingRef *sbsref);
+
+static SubscriptingRef * jsonb_subscript_validate(bool isAssignment,
+											      SubscriptingRef *sbsref,
+												  ParseState *pstate);
+
 /*
  * SQL function json_object_keys
  *
@@ -5013,54 +5020,19 @@ jsonb_subscript_assign(PG_FUNCTION_ARGS)
 Datum
 jsonb_subscript_parse(PG_FUNCTION_ARGS)
 {
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
-	List			   *upperIndexpr = NIL;
-	ListCell		   *l;
+	SubscriptingCallbacks *callbacks = (SubscriptingCallbacks *)
+		palloc(sizeof(SubscriptingCallbacks));
 
-	if (sbsref->reflowerindexpr != NIL)
-		ereport(ERROR,
-				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("jsonb subscript does not support slices"),
-				 parser_errposition(pstate, exprLocation(
-						 ((Node *)lfirst(sbsref->reflowerindexpr->head))))));
+	callbacks->prepare = jsonb_subscript_prepare;
+	callbacks->validate = jsonb_subscript_validate;
 
-	foreach(l, sbsref->refupperindexpr)
-	{
-		Node *subexpr = (Node *) lfirst(l);
-
-		if (subexpr == NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("jsonb subscript does not support slices"),
-					 parser_errposition(pstate, exprLocation(
-						((Node *) lfirst(sbsref->refupperindexpr->head))))));
-
-		subexpr = coerce_to_target_type(pstate,
-										subexpr, exprType(subexpr),
-										TEXTOID, -1,
-										COERCION_ASSIGNMENT,
-										COERCE_IMPLICIT_CAST,
-										-1);
-		if (subexpr == NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("jsonb subscript must have text type"),
-					 parser_errposition(pstate, exprLocation(subexpr))));
-
-		upperIndexpr = lappend(upperIndexpr, subexpr);
-	}
-
-	sbsref->refupperindexpr = upperIndexpr;
-
-	PG_RETURN_POINTER(sbsref);
+	PG_RETURN_POINTER(callbacks);
 }
 
 SubscriptingRef *
 jsonb_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 {
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	sbsref->refelemtype = JSONOID;
+	sbsref->refelemtype = JSONBOID;
 	return sbsref;
 }
 
@@ -5068,8 +5040,8 @@ SubscriptingRef *
 jsonb_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 						 ParseState *pstate)
 {
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
+	Oid					typesource = InvalidOid;
+	Node				*new_from;
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
 
@@ -5108,10 +5080,32 @@ jsonb_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 
 	sbsref->refupperindexpr = upperIndexpr;
 
+	if (isAssignment)
+	{
+		SubscriptingRef *assignRef = (SubscriptingRef *) sbsref;
+		Node *assignExpr = (Node *) assignRef->refassgnexpr;
+
+		typesource = exprType(assignExpr);
+		new_from = coerce_to_target_type(pstate,
+										assignExpr, typesource,
+										sbsref->refelemtype, sbsref->reftypmod,
+										COERCION_ASSIGNMENT,
+										COERCE_IMPLICIT_CAST,
+										-1);
+		if (new_from == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("jsonb assignment requires type %s"
+							" but expression is of type %s",
+							format_type_be(sbsref->refelemtype),
+							format_type_be(typesource)),
+				 errhint("You will need to rewrite or cast the expression."),
+					 parser_errposition(pstate, exprLocation(assignExpr))));
+		assignRef->refassgnexpr = (Expr *) new_from;
+	}
+
 	return sbsref;
 }
-
-
 
 /*
  * Iterate over jsonb string values or elements, and pass them together with an

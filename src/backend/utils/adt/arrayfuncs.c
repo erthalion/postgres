@@ -6823,11 +6823,11 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
 					 errmsg("array assignment requires type %s"
 							" but expression is of type %s",
-							format_type_be(typeneeded),
+							format_type_be(sbsref->refelemtype),
 							format_type_be(typesource)),
 				 errhint("You will need to rewrite or cast the expression."),
 					 parser_errposition(pstate, exprLocation(assignExpr))));
-		assignRef->refassgnexpr = (Expr *)new_from;
+		assignRef->refassgnexpr = (Expr *) new_from;
 
 		if (array_type != sbsref->refcontainertype)
 		{

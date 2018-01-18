@@ -840,29 +840,17 @@ transformAssignmentIndirection(ParseState *pstate,
 
 	/* base case: just coerce RHS to match target type ID */
 
-	if (targetTypeId != InvalidOid)
+	if (!targetIsArray)
+	{
 		result = coerce_to_target_type(pstate,
 									   rhs, exprType(rhs),
 									   targetTypeId, targetTypMod,
 									   COERCION_ASSIGNMENT,
 									   COERCE_IMPLICIT_CAST,
 									   -1);
-	else
-		result = rhs;
 
-	if (result == NULL)
-	{
-		if (targetIsArray)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("array assignment to \"%s\" requires type %s"
-							" but expression is of type %s",
-							targetName,
-							format_type_be(targetTypeId),
-							format_type_be(exprType(rhs))),
-					 errhint("You will need to rewrite or cast the expression."),
-					 parser_errposition(pstate, location)));
-		else
+		if (result == NULL)
+		{
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
 					 errmsg("subfield \"%s\" is of type %s"
@@ -872,7 +860,10 @@ transformAssignmentIndirection(ParseState *pstate,
 							format_type_be(exprType(rhs))),
 					 errhint("You will need to rewrite or cast the expression."),
 					 parser_errposition(pstate, location)));
+		}
 	}
+	else
+		result = rhs;
 
 	return result;
 }
