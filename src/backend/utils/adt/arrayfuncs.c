@@ -164,6 +164,11 @@ static int width_bucket_array_variable(Datum operand,
 							ArrayType *thresholds,
 							Oid collation,
 							TypeCacheEntry *typentry);
+SubscriptingRef * array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref);
+SubscriptingRef * array_subscript_validate(bool isAssignment,
+										  SubscriptingRef *sbsref,
+										  ParseState *pstate);
+
 
 /*
  * array_in :
@@ -6687,9 +6692,31 @@ array_subscript_fetch(PG_FUNCTION_ARGS)
 Datum
 array_subscript_parse(PG_FUNCTION_ARGS)
 {
-	bool				isAssignment = PG_GETARG_BOOL(0);
-	SubscriptingRef		*sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState			*pstate = (ParseState *) PG_GETARG_POINTER(2);
+	SubscriptingCallbacks *callbacks = (SubscriptingCallbacks *)
+		palloc(sizeof(SubscriptingCallbacks));
+
+	callbacks->prepare = array_subscript_prepare;
+	callbacks->validate = array_subscript_validate;
+
+	PG_RETURN_POINTER(callbacks);
+}
+
+SubscriptingRef *
+array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
+{
+	Oid					array_type = sbsref->refcontainertype;
+	int32				array_typ_mode = (int32) sbsref->reftypmod;
+	Oid					element_type_id;
+
+	element_type_id = transformContainerType(&array_type, &array_typ_mode);
+	sbsref->refelemtype = element_type_id;
+	return sbsref;
+}
+
+SubscriptingRef *
+array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+					  ParseState *pstate)
+{
 	Node				*node = (Node *) sbsref;
 	Oid					array_type = sbsref->refcontainertype;
 	int32				array_typ_mode = (int32) sbsref->reftypmod;
@@ -6821,12 +6848,12 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 								format_type_be(sbsref->refcontainertype)),
 						 parser_errposition(pstate, 0)));
 
-			PG_RETURN_POINTER(node);
+			return node;
 		}
-
 	}
 
 	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_FETCH;
 
-	PG_RETURN_POINTER(sbsref);
+	/*PG_RETURN_POINTER(sbsref);*/
+	return sbsref;
 }

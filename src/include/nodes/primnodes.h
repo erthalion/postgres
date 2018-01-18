@@ -418,6 +418,21 @@ typedef struct SubscriptingRef
 
 #define IsAssignment(expr) ( ((SubscriptingRef*) expr)->refassgnexpr != NULL )
 
+struct ParseState;
+
+typedef SubscriptingRef * (*SubscriptingPrepare) (bool isAssignment, SubscriptingRef *sbsef);
+
+typedef SubscriptingRef * (*SubscriptingValidate) (bool isAssignment, SubscriptingRef *sbsef,
+												 struct ParseState *pstate);
+
+typedef struct SubscriptingCallbacks
+{
+	SubscriptingRef			*sbsref;
+	SubscriptingPrepare		prepare;
+	SubscriptingValidate	validate;
+
+} SubscriptingCallbacks;
+
 /*
  * CoercionContext - distinguishes the allowed set of type casts
  *

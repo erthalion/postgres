@@ -291,7 +291,7 @@ transformContainerType(Oid *containerType, int32 *containerTypmod)
  * assignFrom		NULL for container fetch, else transformed expression for source.
  */
 
-Node *
+SubscriptingCallbacks *
 transformContainerSubscripts(ParseState *pstate,
 							 Node *containerBase,
 							 Oid containerType,
@@ -306,6 +306,7 @@ transformContainerSubscripts(ParseState *pstate,
 	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
+	SubscriptingCallbacks *callbacks;
 	RegProcedure		typsubsparse = InvalidOid;
 	RegProcedure		typsubsassign = InvalidOid;
 	RegProcedure		typsubsfetch = InvalidOid;
@@ -318,8 +319,8 @@ transformContainerSubscripts(ParseState *pstate,
 						format_type_be(containerType))));
 
 	/* Caller may or may not have bothered to determine elementType. */
-	if (!OidIsValid(elementType))
-		elementType = containerType;
+	/*if (!OidIsValid(elementType))*/
+		/*elementType = containerType;*/
 
 	/*
 	 * A list containing only simple subscripts refers to a single container
@@ -379,7 +380,7 @@ transformContainerSubscripts(ParseState *pstate,
 		sbsref->refevalfunc = typsubsfetch;
 
 	sbsref->refcontainertype = containerType;
-	sbsref->refelemtype = elementType;
+	/*sbsref->refelemtype = elementType;*/
 	sbsref->reftypmod = containerTypMod;
 	/* refcollid will be set by parse_collate.c */
 	sbsref->refupperindexpr = upperIndexpr;
@@ -387,10 +388,14 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	return (Node *) OidFunctionCall3(typsubsparse,
-									 BoolGetDatum(assignFrom != NULL),
-									 PointerGetDatum(sbsref),
-									 PointerGetDatum(pstate));
+	callbacks = (SubscriptingCallbacks *)
+		OidFunctionCall3(typsubsparse,
+						 BoolGetDatum(assignFrom != NULL),
+						 PointerGetDatum(sbsref),
+						 PointerGetDatum(pstate));
+
+	callbacks->sbsref = sbsref;
+	return callbacks;
 }
 
 /*

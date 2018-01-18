@@ -899,23 +899,36 @@ transformAssignmentSubscripts(ParseState *pstate,
 	Oid			elementTypeId;
 	Oid			typeNeeded;
 	Oid			collationNeeded;
+	SubscriptingRef *sbsref;
+	SubscriptingCallbacks *callbacks;
 
 	Assert(subscripts != NIL);
 
 	/* Identify the actual container type and element type involved */
 	containerType = targetTypeId;
 	containerTypMod = targetTypMod;
-	elementTypeId = transformContainerType(&containerType, &containerTypMod);
 
-	/* Identify type that RHS must provide */
-	typeNeeded = isSlice ? containerType : elementTypeId;
+	/* process subscripts */
+	callbacks = transformContainerSubscripts(pstate,
+											 basenode,
+											 containerType,
+											 exprType(rhs),
+											 containerTypMod,
+											 subscripts,
+											 rhs);
+
+	sbsref = callbacks->prepare(rhs != NULL, callbacks->sbsref);
+
+	/* Identify type that RHS must provide
+	 * NOTE: store it into sbsref */
+	typeNeeded = isSlice ? sbsref->refcontainertype : sbsref->refelemtype;
 
 	/*
 	 * container normally has same collation as elements, but there's an
 	 * exception: we might be subscripting a domain over an container type. In
 	 * that case use collation of the base type.
 	 */
-	if (containerType == targetTypeId)
+	if (sbsref->refcontainertype == containerType)
 		collationNeeded = targetCollation;
 	else
 		collationNeeded = get_typcollation(containerType);
@@ -926,20 +939,14 @@ transformAssignmentSubscripts(ParseState *pstate,
 										 targetName,
 										 true,
 										 typeNeeded,
-										 containerTypMod,
+										 sbsref->refcontainertype,
 										 collationNeeded,
 										 next_indirection,
 										 rhs,
 										 location);
 
-	/* process subscripts */
-	result = (Node *) transformContainerSubscripts(pstate,
-												   basenode,
-												   containerType,
-												   exprType(rhs),
-												   containerTypMod,
-												   subscripts,
-												   rhs);
+	sbsref->refassgnexpr = (Expr *) rhs;
+	callbacks->validate(rhs != NULL, sbsref, pstate);
 
 	/* If target was a domain over container, need to coerce up to the domain */
 	if (containerType != targetTypeId)
@@ -962,7 +969,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 					 parser_errposition(pstate, location)));
 	}
 
-	return result;
+	return (Node *) sbsref;
 }
 
 
