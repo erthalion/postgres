@@ -4964,13 +4964,12 @@ Datum
 jsonb_subscript_fetch(PG_FUNCTION_ARGS)
 {
 	Datum					containerSource = PG_GETARG_DATUM(0);
-	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
-	SubscriptingRefState	*sbstate = step->d.sbsref.state;
+	SubscriptingRefState	*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
 
 	return jsonb_get_element(DatumGetJsonbP(containerSource),
 							 sbstate->upper,
 							 sbstate->numupper,
-							 step->resnull,
+							 &sbstate->resnull,
 							 false);
 }
 
@@ -4985,16 +4984,13 @@ Datum
 jsonb_subscript_assign(PG_FUNCTION_ARGS)
 {
 	Datum						containerSource = PG_GETARG_DATUM(0);
-	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
-
-	SubscriptingRefState		*sbstate = step->d.sbsref.state;
-	bool						*is_null = step->resnull;
+	SubscriptingRefState		*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
 
 	/*
 	 * the original jsonb must be non-NULL, else we punt and return the
 	 * original array.
 	 */
-	if (*is_null)
+	if (sbstate->resnull)
 		return containerSource;
 
 	return jsonb_set_element(containerSource,
@@ -5034,7 +5030,7 @@ jsonb_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 {
 	if (isAssignment)
 	{
-		sbsref->refelemtype = exprType(sbsref->refassgnexpr);
+		sbsref->refelemtype = exprType((Node *) sbsref->refassgnexpr);
 	}
 	else
 	{
@@ -5047,8 +5043,6 @@ SubscriptingRef *
 jsonb_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 						 ParseState *pstate)
 {
-	Oid					typesource = InvalidOid;
-	Node				*new_from;
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
 

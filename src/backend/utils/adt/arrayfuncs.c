@@ -6579,12 +6579,11 @@ Datum
 array_subscript_assign(PG_FUNCTION_ARGS)
 {
 	Datum						containerSource = PG_GETARG_DATUM(0);
-	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
-	SubscriptingRefState		*sbstate = step->d.sbsref.state;
+	SubscriptingRefState		*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
 
 	bool						is_slice = (sbstate->numlower != 0);
 	IntArray					u_index, l_index;
-	bool						eisnull = *(step->resnull);
+	bool						eisnull = sbstate->resnull;
 	int							i = 0;
 
 	if (sbstate->refelemlength == 0)
@@ -6614,7 +6613,7 @@ array_subscript_assign(PG_FUNCTION_ARGS)
 	if (eisnull)
 	{
 		containerSource = PointerGetDatum(construct_empty_array(sbstate->refelemtype));
-		*step->resnull = false;
+		sbstate->resnull = false;
 		eisnull = false;
 	}
 
@@ -6644,8 +6643,7 @@ Datum
 array_subscript_fetch(PG_FUNCTION_ARGS)
 {
 	Datum							containerSource = PG_GETARG_DATUM(0);
-	ExprEvalStep					*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
-	SubscriptingRefState			*sbstate = step->d.sbsref.state;
+	SubscriptingRefState			*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
 	bool							is_slice = (sbstate->numlower != 0);
 	IntArray						u_index, l_index;
 	int								i = 0;
@@ -6675,7 +6673,7 @@ array_subscript_fetch(PG_FUNCTION_ARGS)
 								 sbstate->refelemlength,
 								 sbstate->refelembyval,
 								 sbstate->refelemalign,
-								 step->resnull);
+								 &sbstate->resnull);
 	else
 		return array_get_slice(containerSource, sbstate->numupper,
 							   u_index.indx, l_index.indx,

@@ -2750,12 +2750,15 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 {
+	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+
 	/* Should not get here if source container (or any subscript) is null */
 	Assert(!(*op->resnull));
 
 	*op->resvalue = FunctionCall2(op->d.sbsref.eval_finfo,
 				  PointerGetDatum(*op->resvalue),
-				  PointerGetDatum(op));
+				  PointerGetDatum(sbsrefstate));
+	*op->resnull = sbsrefstate->resnull;
 }
 
 /*
@@ -2808,9 +2811,11 @@ ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 			return;
 	}
 
+	sbsrefstate->resnull = *op->resnull;
 	*op->resvalue = FunctionCall2(op->d.sbsref.eval_finfo,
 								  PointerGetDatum(*op->resvalue),
-								  PointerGetDatum(op));
+								  PointerGetDatum(sbsrefstate));
+	*op->resnull = sbsrefstate->resnull;
 }
 
 /*
