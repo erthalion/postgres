@@ -5032,7 +5032,14 @@ jsonb_subscript_parse(PG_FUNCTION_ARGS)
 SubscriptingRef *
 jsonb_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 {
-	sbsref->refelemtype = JSONBOID;
+	if (isAssignment)
+	{
+		sbsref->refelemtype = exprType(sbsref->refassgnexpr);
+	}
+	else
+	{
+		sbsref->refelemtype = JSONBOID;
+	}
 	return sbsref;
 }
 
@@ -5079,30 +5086,6 @@ jsonb_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 	}
 
 	sbsref->refupperindexpr = upperIndexpr;
-
-	if (isAssignment)
-	{
-		SubscriptingRef *assignRef = (SubscriptingRef *) sbsref;
-		Node *assignExpr = (Node *) assignRef->refassgnexpr;
-
-		typesource = exprType(assignExpr);
-		new_from = coerce_to_target_type(pstate,
-										assignExpr, typesource,
-										sbsref->refelemtype, sbsref->reftypmod,
-										COERCION_ASSIGNMENT,
-										COERCE_IMPLICIT_CAST,
-										-1);
-		if (new_from == NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("jsonb assignment requires type %s"
-							" but expression is of type %s",
-							format_type_be(sbsref->refelemtype),
-							format_type_be(typesource)),
-				 errhint("You will need to rewrite or cast the expression."),
-					 parser_errposition(pstate, exprLocation(assignExpr))));
-		assignRef->refassgnexpr = (Expr *) new_from;
-	}
 
 	return sbsref;
 }
