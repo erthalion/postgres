@@ -898,6 +898,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	/* Identify the actual container type and element type involved */
 	containerType = targetTypeId;
 	containerTypMod = targetTypMod;
+	transformContainerType(&containerType, &containerTypMod);
 
 	/* process subscripts */
 	callbacks = transformContainerSubscripts(pstate,
@@ -939,6 +940,8 @@ transformAssignmentSubscripts(ParseState *pstate,
 	sbsref->refassgnexpr = (Expr *) rhs;
 	callbacks->validate(rhs != NULL, sbsref, pstate);
 
+	result = (Node *) sbsref;
+
 	/* If target was a domain over container, need to coerce up to the domain */
 	if (containerType != targetTypeId)
 	{
@@ -960,7 +963,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 					 parser_errposition(pstate, location)));
 	}
 
-	return (Node *) sbsref;
+	return result;
 }
 
 
