@@ -6706,7 +6706,6 @@ SubscriptingRef *
 array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 {
 	Oid					array_type = sbsref->refcontainertype;
-	int32				array_typ_mode = (int32) sbsref->reftypmod;
 	HeapTuple			type_tuple_container;
 	Form_pg_type		type_struct_container;
 
@@ -6717,7 +6716,6 @@ array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 	type_struct_container = (Form_pg_type) GETSTRUCT(type_tuple_container);
 
 	/* needn't check typisdefined since this will fail anyway */
-
 	sbsref->refelemtype = type_struct_container->typelem;
 	ReleaseSysCache(type_tuple_container);
 
@@ -6728,14 +6726,10 @@ SubscriptingRef *
 array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 					  ParseState *pstate)
 {
-	Node				*node = (Node *) sbsref;
-	Oid					array_type = sbsref->refcontainertype;
-	int32				array_typ_mode = (int32) sbsref->reftypmod;
 	bool				is_slice = sbsref->reflowerindexpr != NIL;
 	Oid					typeneeded = InvalidOid,
 						typesource = InvalidOid;
 	Node				*new_from;
-	Oid					element_type_id;
 	Node				*subexpr;
 	List				*upperIndexpr = NIL;
 	List				*lowerIndexpr = NIL;
@@ -6831,32 +6825,9 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 				 errhint("You will need to rewrite or cast the expression."),
 					 parser_errposition(pstate, exprLocation(assignExpr))));
 		assignRef->refassgnexpr = (Expr *) new_from;
-
-		if (array_type != sbsref->refcontainertype)
-		{
-
-			node = coerce_to_target_type(pstate,
-										 node, array_type,
-										 sbsref->refcontainertype, sbsref->reftypmod,
-										 COERCION_ASSIGNMENT,
-										 COERCE_IMPLICIT_CAST,
-										 -1);
-
-			/* can fail if we had int2vector/oidvector, but not for true domains */
-			if (node == NULL && node->type != 0)
-				ereport(ERROR,
-						(errcode(ERRCODE_CANNOT_COERCE),
-						 errmsg("cannot cast type %s to %s",
-								format_type_be(array_type),
-								format_type_be(sbsref->refcontainertype)),
-						 parser_errposition(pstate, 0)));
-
-			return node;
-		}
 	}
 
 	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_FETCH;
 
-	/*PG_RETURN_POINTER(sbsref);*/
 	return sbsref;
 }
