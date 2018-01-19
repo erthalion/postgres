@@ -2782,7 +2782,7 @@ ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 	{
 		sbsrefstate->prevvalue = FunctionCall2(op->d.sbsref.nested_finfo,
 					  PointerGetDatum(*op->resvalue),
-					  PointerGetDatum(op));
+					  PointerGetDatum(sbsrefstate));
 
 		if (sbsrefstate->numlower != 0)
 			sbsrefstate->prevnull = false;
