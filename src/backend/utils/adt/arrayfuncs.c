@@ -35,6 +35,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/syscache.h"
 #include "utils/typcache.h"
 #include "parser/parse_node.h"
 #include "parser/parse_coerce.h"
@@ -6706,10 +6707,20 @@ array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 {
 	Oid					array_type = sbsref->refcontainertype;
 	int32				array_typ_mode = (int32) sbsref->reftypmod;
-	Oid					element_type_id;
+	HeapTuple			type_tuple_container;
+	Form_pg_type		type_struct_container;
 
-	element_type_id = transformContainerType(&array_type, &array_typ_mode);
-	sbsref->refelemtype = element_type_id;
+	/* Get the type tuple for the container */
+	type_tuple_container = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_type));
+	if (!HeapTupleIsValid(type_tuple_container))
+		elog(ERROR, "cache lookup failed for type %u", array_type);
+	type_struct_container = (Form_pg_type) GETSTRUCT(type_tuple_container);
+
+	/* needn't check typisdefined since this will fail anyway */
+
+	sbsref->refelemtype = type_struct_container->typelem;
+	ReleaseSysCache(type_tuple_container);
+
 	return sbsref;
 }
 
@@ -6729,14 +6740,6 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 	List				*upperIndexpr = NIL;
 	List				*lowerIndexpr = NIL;
 	ListCell			*u, *l, *s;
-
-	/*
-	 * Caller may or may not have bothered to determine elementType.  Note
-	 * that if the caller did do so, containerType/containerTypMod must be as modified
-	 * by transformContainerType, ie, smash domain to base type.
-	 */
-	element_type_id = transformContainerType(&array_type, &array_typ_mode);
-	sbsref->refelemtype = element_type_id;
 
 	foreach(u, sbsref->refupperindexpr)
 	{

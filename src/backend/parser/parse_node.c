@@ -211,13 +211,9 @@ make_var(ParseState *pstate, RangeTblEntry *rte, int attrno, int location)
  * necessary to identify the actual container type and typmod, and the
  * container's element type is returned.
  */
-Oid
+void
 transformContainerType(Oid *containerType, int32 *containerTypmod)
 {
-	Oid			elementType;
-	HeapTuple	type_tuple_container;
-	Form_pg_type type_struct_container;
-
 	/*
 	 * If the input is a domain, smash to base type, and extract the actual
 	 * typmod to be applied to the base type. Subscripting a domain is an
@@ -238,20 +234,6 @@ transformContainerType(Oid *containerType, int32 *containerTypmod)
 		*containerType = INT2ARRAYOID;
 	else if (*containerType == OIDVECTOROID)
 		*containerType = OIDARRAYOID;
-
-	/* Get the type tuple for the container */
-	type_tuple_container = SearchSysCache1(TYPEOID, ObjectIdGetDatum(*containerType));
-	if (!HeapTupleIsValid(type_tuple_container))
-		elog(ERROR, "cache lookup failed for type %u", *containerType);
-	type_struct_container = (Form_pg_type) GETSTRUCT(type_tuple_container);
-
-	/* needn't check typisdefined since this will fail anyway */
-
-	elementType = type_struct_container->typelem;
-
-	ReleaseSysCache(type_tuple_container);
-
-	return elementType;
 }
 
 /*
@@ -318,9 +300,8 @@ transformContainerSubscripts(ParseState *pstate,
 				 errmsg("cannot subscript type %s because it does not support subscripting",
 						format_type_be(containerType))));
 
-	/* Caller may or may not have bothered to determine elementType. */
-	/*if (!OidIsValid(elementType))*/
-		/*elementType = containerType;*/
+	/* Identify the actual container type and element type involved */
+	transformContainerType(&containerType, &containerTypMod);
 
 	/*
 	 * A list containing only simple subscripts refers to a single container

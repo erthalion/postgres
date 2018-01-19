@@ -898,7 +898,6 @@ transformAssignmentSubscripts(ParseState *pstate,
 	/* Identify the actual container type and element type involved */
 	containerType = targetTypeId;
 	containerTypMod = targetTypMod;
-	transformContainerType(&containerType, &containerTypMod);
 
 	/* process subscripts */
 	callbacks = transformContainerSubscripts(pstate,
@@ -943,7 +942,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	result = (Node *) sbsref;
 
 	/* If target was a domain over container, need to coerce up to the domain */
-	if (containerType != targetTypeId)
+	if (sbsref->refcontainertype != targetTypeId)
 	{
 		Oid			resulttype = exprType(result);
 
