@@ -434,9 +434,9 @@ unknown_attribute(ParseState *pstate, Node *relref, const char *attname,
 static Node *
 transformIndirection(ParseState *pstate, A_Indirection *ind)
 {
-	Node	   *last_srf = pstate->p_last_srf;
-	Node	   *result = transformExprRecurse(pstate, ind->arg);
-	SubscriptingCallbacks *callbacks;
+	Node	    *last_srf = pstate->p_last_srf;
+	Node	    *result = transformExprRecurse(pstate, ind->arg);
+	SbsRoutines *sbsroutines;
 	SubscriptingRef *sbsref;
 	List	   *subscripts = NIL;
 	int			location = exprLocation(result);
@@ -469,15 +469,15 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 			/* process subscripts before this field selection */
 			if (subscripts)
 			{
-				callbacks = transformContainerSubscripts(pstate,
-													     result,
-													     exprType(result),
-													     InvalidOid,
-													     exprTypmod(result),
-													     subscripts,
-													     NULL);
-				sbsref = callbacks->prepare(false, callbacks->sbsref);
-				callbacks->validate(false, sbsref, pstate);
+				sbsroutines = transformContainerSubscripts(pstate,
+													       result,
+													       exprType(result),
+													       InvalidOid,
+													       exprTypmod(result),
+													       subscripts,
+													       NULL);
+				sbsref = sbsroutines->prepare(false, sbsroutines->sbsref);
+				sbsroutines->validate(false, sbsref, pstate);
 				result = (Node *) sbsref;
 			}
 			subscripts = NIL;
@@ -497,16 +497,16 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 	/* process trailing subscripts, if any */
 	if (subscripts)
 	{
-		callbacks = transformContainerSubscripts(pstate,
-												 result,
-												 exprType(result),
-												 InvalidOid,
-												 exprTypmod(result),
-												 subscripts,
-												 NULL);
+		sbsroutines = transformContainerSubscripts(pstate,
+												   result,
+												   exprType(result),
+												   InvalidOid,
+												   exprTypmod(result),
+												   subscripts,
+												   NULL);
 
-		sbsref = callbacks->prepare(false, callbacks->sbsref);
-		callbacks->validate(false, sbsref, pstate);
+		sbsref = sbsroutines->prepare(false, sbsroutines->sbsref);
+		sbsroutines->validate(false, sbsref, pstate);
 		result = (Node *) sbsref;
 	}
 

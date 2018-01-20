@@ -5016,13 +5016,12 @@ jsonb_subscript_assign(PG_FUNCTION_ARGS)
 Datum
 jsonb_subscript_parse(PG_FUNCTION_ARGS)
 {
-	SubscriptingCallbacks *callbacks = (SubscriptingCallbacks *)
-		palloc(sizeof(SubscriptingCallbacks));
+	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
 
-	callbacks->prepare = jsonb_subscript_prepare;
-	callbacks->validate = jsonb_subscript_validate;
+	sbsroutines->prepare = jsonb_subscript_prepare;
+	sbsroutines->validate = jsonb_subscript_validate;
 
-	PG_RETURN_POINTER(callbacks);
+	PG_RETURN_POINTER(sbsroutines);
 }
 
 SubscriptingRef *

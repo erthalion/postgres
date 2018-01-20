@@ -273,7 +273,7 @@ transformContainerType(Oid *containerType, int32 *containerTypmod)
  * assignFrom		NULL for container fetch, else transformed expression for source.
  */
 
-SubscriptingCallbacks *
+SbsRoutines *
 transformContainerSubscripts(ParseState *pstate,
 							 Node *containerBase,
 							 Oid containerType,
@@ -288,7 +288,7 @@ transformContainerSubscripts(ParseState *pstate,
 	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
-	SubscriptingCallbacks *callbacks;
+	SbsRoutines		   *sbsroutines;
 	RegProcedure		typsubsparse = InvalidOid;
 	RegProcedure		typsubsassign = InvalidOid;
 	RegProcedure		typsubsfetch = InvalidOid;
@@ -369,14 +369,14 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	callbacks = (SubscriptingCallbacks *)
+	sbsroutines = (SbsRoutines *)
 		OidFunctionCall3(typsubsparse,
 						 BoolGetDatum(assignFrom != NULL),
 						 PointerGetDatum(sbsref),
 						 PointerGetDatum(pstate));
 
-	callbacks->sbsref = sbsref;
-	return callbacks;
+	sbsroutines->sbsref = sbsref;
+	return sbsroutines;
 }
 
 /*

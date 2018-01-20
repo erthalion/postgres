@@ -891,7 +891,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	Oid			typeNeeded;
 	Oid			collationNeeded;
 	SubscriptingRef *sbsref;
-	SubscriptingCallbacks *callbacks;
+	SbsRoutines *sbsroutines;
 
 	Assert(subscripts != NIL);
 
@@ -900,15 +900,15 @@ transformAssignmentSubscripts(ParseState *pstate,
 	containerTypMod = targetTypMod;
 
 	/* process subscripts */
-	callbacks = transformContainerSubscripts(pstate,
-											 basenode,
-											 containerType,
-											 exprType(rhs),
-											 containerTypMod,
-											 subscripts,
-											 rhs);
+	sbsroutines = transformContainerSubscripts(pstate,
+											   basenode,
+											   containerType,
+											   exprType(rhs),
+											   containerTypMod,
+											   subscripts,
+											   rhs);
 
-	sbsref = callbacks->prepare(rhs != NULL, callbacks->sbsref);
+	sbsref = sbsroutines->prepare(rhs != NULL, sbsroutines->sbsref);
 
 	/* Identify type that RHS must provide
 	 * NOTE: store it into sbsref */
@@ -937,7 +937,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 										 location);
 
 	sbsref->refassgnexpr = (Expr *) rhs;
-	callbacks->validate(rhs != NULL, sbsref, pstate);
+	sbsroutines->validate(rhs != NULL, sbsref, pstate);
 
 	result = (Node *) sbsref;
 

@@ -6691,13 +6691,12 @@ array_subscript_fetch(PG_FUNCTION_ARGS)
 Datum
 array_subscript_parse(PG_FUNCTION_ARGS)
 {
-	SubscriptingCallbacks *callbacks = (SubscriptingCallbacks *)
-		palloc(sizeof(SubscriptingCallbacks));
+	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
 
-	callbacks->prepare = array_subscript_prepare;
-	callbacks->validate = array_subscript_validate;
+	sbsroutines->prepare = array_subscript_prepare;
+	sbsroutines->validate = array_subscript_validate;
 
-	PG_RETURN_POINTER(callbacks);
+	PG_RETURN_POINTER(sbsroutines);
 }
 
 SubscriptingRef *
