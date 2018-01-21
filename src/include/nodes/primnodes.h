@@ -399,6 +399,7 @@ typedef struct SubscriptingRef
 	Expr		xpr;
 	Oid			refcontainertype;	/* type of the container proper */
 	Oid			refelemtype;		/* type of the container elements */
+	Oid			refassgntype;		/* type of assignment expr that is required */
 	int32		reftypmod;			/* typmod of the container (and elements too) */
 	Oid			refcollid;			/* OID of collation, or InvalidOid if none */
 	Oid			refnestedfunc;		/* OID of type-specific function to handle nested assignment */

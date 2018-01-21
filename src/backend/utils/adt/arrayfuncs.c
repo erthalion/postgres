@@ -6705,6 +6705,7 @@ array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 	Oid					array_type = sbsref->refcontainertype;
 	HeapTuple			type_tuple_container;
 	Form_pg_type		type_struct_container;
+	bool				is_slice = sbsref->reflowerindexpr != NIL;
 
 	/* Get the type tuple for the container */
 	type_tuple_container = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_type));
@@ -6714,6 +6715,10 @@ array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 
 	/* needn't check typisdefined since this will fail anyway */
 	sbsref->refelemtype = type_struct_container->typelem;
+
+	/* Identify type that RHS must provide */
+	sbsref->refassgntype = is_slice ? sbsref->refcontainertype : sbsref->refelemtype;
+
 	ReleaseSysCache(type_tuple_container);
 
 	return sbsref;

@@ -888,7 +888,6 @@ transformAssignmentSubscripts(ParseState *pstate,
 	Oid			containerType;
 	int32		containerTypMod;
 	Oid			elementTypeId;
-	Oid			typeNeeded;
 	Oid			collationNeeded;
 	SubscriptingRef *sbsref;
 	SbsRoutines *sbsroutines;
@@ -910,10 +909,6 @@ transformAssignmentSubscripts(ParseState *pstate,
 
 	sbsref = sbsroutines->prepare(rhs != NULL, sbsroutines->sbsref);
 
-	/* Identify type that RHS must provide
-	 * NOTE: store it into sbsref */
-	typeNeeded = isSlice ? sbsref->refcontainertype : sbsref->refelemtype;
-
 	/*
 	 * container normally has same collation as elements, but there's an
 	 * exception: we might be subscripting a domain over an container type. In
@@ -929,7 +924,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 										 NULL,
 										 targetName,
 										 true,
-										 typeNeeded,
+										 sbsref->refassgntype,
 										 sbsref->reftypmod,
 										 collationNeeded,
 										 next_indirection,

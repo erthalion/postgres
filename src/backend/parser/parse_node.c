@@ -353,7 +353,6 @@ transformContainerSubscripts(ParseState *pstate,
 		sbsref->refassgnexpr = (Expr *) assignFrom;
 
 	sbsref->refcontainertype = containerType;
-	/*sbsref->refelemtype = elementType;*/
 	sbsref->reftypmod = containerTypMod;
 	/* refcollid will be set by parse_collate.c */
 	sbsref->refupperindexpr = upperIndexpr;
