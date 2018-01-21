@@ -1669,14 +1669,6 @@ check_functions_in_node(Node *node, check_function_callback checker,
 					return true;
 			}
 			break;
-		case T_SubscriptingRef:
-			{
-				SubscriptingRef   *sbsref = (SubscriptingRef *) node;
-
-				if (checker(sbsref->refevalfunc, context))
-					return true;
-			}
-			break;
 		case T_FuncExpr:
 			{
 				FuncExpr   *expr = (FuncExpr *) node;

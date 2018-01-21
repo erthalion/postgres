@@ -1188,7 +1188,6 @@ _outSubscriptingRef(StringInfo str, const SubscriptingRef *node)
 	WRITE_OID_FIELD(refelemtype);
 	WRITE_INT_FIELD(reftypmod);
 	WRITE_OID_FIELD(refcollid);
-	WRITE_OID_FIELD(refevalfunc);
 	WRITE_OID_FIELD(refnestedfunc);
 	WRITE_NODE_FIELD(refupperindexpr);
 	WRITE_NODE_FIELD(reflowerindexpr);

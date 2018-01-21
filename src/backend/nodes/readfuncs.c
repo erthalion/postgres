@@ -651,7 +651,6 @@ _readSubscriptingRef(void)
 	READ_OID_FIELD(refelemtype);
 	READ_INT_FIELD(reftypmod);
 	READ_OID_FIELD(refcollid);
-	READ_OID_FIELD(refevalfunc);
 	READ_OID_FIELD(refnestedfunc);
 	READ_NODE_FIELD(refupperindexpr);
 	READ_NODE_FIELD(reflowerindexpr);

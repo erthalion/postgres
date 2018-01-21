@@ -289,10 +289,7 @@ transformContainerSubscripts(ParseState *pstate,
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
 	SbsRoutines		   *sbsroutines;
-	RegProcedure		typsubsparse = InvalidOid;
-	RegProcedure		typsubsassign = InvalidOid;
-	RegProcedure		typsubsfetch = InvalidOid;
-	get_typsubsprocs(containerType, &typsubsparse, &typsubsassign, &typsubsfetch);
+	RegProcedure		typsubsparse = get_typsubsprocs(containerType);
 
 	if (!OidIsValid(typsubsparse))
 		ereport(ERROR,
@@ -353,12 +350,7 @@ transformContainerSubscripts(ParseState *pstate,
 	 */
 	sbsref = (SubscriptingRef *) makeNode(SubscriptingRef);
 	if (assignFrom != NULL)
-	{
 		sbsref->refassgnexpr = (Expr *) assignFrom;
-		sbsref->refevalfunc = typsubsassign;
-	}
-	else
-		sbsref->refevalfunc = typsubsfetch;
 
 	sbsref->refcontainertype = containerType;
 	/*sbsref->refelemtype = elementType;*/

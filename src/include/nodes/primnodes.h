@@ -401,7 +401,6 @@ typedef struct SubscriptingRef
 	Oid			refelemtype;		/* type of the container elements */
 	int32		reftypmod;			/* typmod of the container (and elements too) */
 	Oid			refcollid;			/* OID of collation, or InvalidOid if none */
-	Oid			refevalfunc;		/* OID of type-specific subscripting function */
 	Oid			refnestedfunc;		/* OID of type-specific function to handle nested assignment */
 	List	   *refupperindexpr;	/* expressions that evaluate to upper container
 									 * indexes */

@@ -2413,20 +2413,7 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 	List				 *adjust_jumps = NIL;
 	ListCell   			 *lc;
 	int		   			  i;
-	FmgrInfo   			 *eval_finfo, *nested_finfo;
-	RegProcedure		typsubsparse = InvalidOid;
-	RegProcedure		typsubsassign = InvalidOid;
-	RegProcedure		typsubsfetch = InvalidOid;
-	get_typsubsprocs(sbsref->refcontainertype, &typsubsparse, &typsubsassign, &typsubsfetch);
-
-	eval_finfo = palloc0(sizeof(FmgrInfo));
-	nested_finfo = palloc0(sizeof(FmgrInfo));
-
-	fmgr_info(sbsref->refevalfunc, eval_finfo);
-	if (OidIsValid(sbsref->refnestedfunc))
-	{
-		fmgr_info(sbsref->refnestedfunc, nested_finfo);
-	}
+	RegProcedure		  typsubsparse = get_typsubsprocs(sbsref->refcontainertype);
 
 	/* Fill constant fields of SubscriptingRefState */
 	sbsrefstate->isassignment = isAssignment;
@@ -2566,8 +2553,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 		{
 			scratch->opcode = EEOP_SBSREF_OLD;
 			scratch->d.sbsref.state = sbsrefstate;
-			scratch->d.sbsref.eval_finfo = eval_finfo;
-			scratch->d.sbsref.nested_finfo = nested_finfo;
 			ExprEvalPushStep(state, scratch);
 		}
 
@@ -2587,8 +2572,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 		/* and perform the assignment */
 		scratch->opcode = EEOP_SBSREF_ASSIGN;
 		scratch->d.sbsref.state = sbsrefstate;
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
 		ExprEvalPushStep(state, scratch);
 
 	}
@@ -2597,8 +2580,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 		/* array fetch is much simpler */
 		scratch->opcode = EEOP_SBSREF_FETCH;
 		scratch->d.sbsref.state = sbsrefstate;
-		scratch->d.sbsref.eval_finfo = eval_finfo;
-		scratch->d.sbsref.nested_finfo = nested_finfo;
 		ExprEvalPushStep(state, scratch);
 
 	}

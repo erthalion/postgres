@@ -168,8 +168,6 @@ TypeShellMake(const char *typeName, Oid typeNamespace, Oid ownerId)
 								 InvalidOid,
 								 InvalidOid,
 								 InvalidOid,
-								 InvalidOid,
-								 InvalidOid,
 								 NULL,
 								 false);
 
@@ -229,9 +227,7 @@ TypeCreate(Oid newTypeOid,
 		   int32 typNDims,		/* Array dimensions for baseType */
 		   bool typeNotNull,
 		   Oid typeCollation,
-		   Oid subscriptingParseProcedure,
-		   Oid subscriptingAssignProcedure,
-		   Oid subscriptingFetchProcedure)
+		   Oid subscriptingParseProcedure)
 {
 	Relation	pg_type_desc;
 	Oid			typeObjectId;
@@ -330,21 +326,6 @@ TypeCreate(Oid newTypeOid,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("fixed-size types must have storage PLAIN")));
 
-	/* Prevent incomplete subscripting procedures */
-	if (OidIsValid(subscriptingParseProcedure) &&
-			(!OidIsValid(subscriptingAssignProcedure) ||
-			 !OidIsValid(subscriptingFetchProcedure)))
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("for custom subscripting logic all parse,fetch,assign procedures must be provided")));
-
-	if (!OidIsValid(subscriptingParseProcedure) &&
-			(OidIsValid(subscriptingAssignProcedure) ||
-			 OidIsValid(subscriptingFetchProcedure)))
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("for custom subscripting logic all parse,fetch,assign procedures must be provided")));
-
 	/*
 	 * initialize arrays needed for heap_form_tuple or heap_modify_tuple
 	 */
@@ -387,8 +368,6 @@ TypeCreate(Oid newTypeOid,
 	values[Anum_pg_type_typndims - 1] = Int32GetDatum(typNDims);
 	values[Anum_pg_type_typcollation - 1] = ObjectIdGetDatum(typeCollation);
 	values[Anum_pg_type_typsubsparse - 1] = ObjectIdGetDatum(subscriptingParseProcedure);
-	values[Anum_pg_type_typsubsassign - 1] = ObjectIdGetDatum(subscriptingAssignProcedure);
-	values[Anum_pg_type_typsubsfetch - 1] = ObjectIdGetDatum(subscriptingFetchProcedure);
 
 	/*
 	 * initialize the default binary value for this type.  Check for nulls of
@@ -507,8 +486,6 @@ TypeCreate(Oid newTypeOid,
 								 baseType,
 								 typeCollation,
 								 subscriptingParseProcedure,
-								 subscriptingAssignProcedure,
-								 subscriptingFetchProcedure,
 								 (defaultTypeBin ?
 								  stringToNode(defaultTypeBin) :
 								  NULL),
@@ -556,8 +533,6 @@ GenerateTypeDependencies(Oid typeNamespace,
 						 Oid baseType,
 						 Oid typeCollation,
 						 Oid subscriptingParseProcedure,
-						 Oid subscriptingAssignProcedure,
-						 Oid subscriptingFetchProcedure,
 						 Node *defaultExpr,
 						 bool rebuild)
 {
@@ -715,22 +690,6 @@ GenerateTypeDependencies(Oid typeNamespace,
 	{
 		referenced.classId = ProcedureRelationId;
 		referenced.objectId = subscriptingParseProcedure;
-		referenced.objectSubId = 0;
-		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-	}
-
-	if (OidIsValid(subscriptingAssignProcedure))
-	{
-		referenced.classId = ProcedureRelationId;
-		referenced.objectId = subscriptingAssignProcedure;
-		referenced.objectSubId = 0;
-		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-	}
-
-	if (OidIsValid(subscriptingFetchProcedure))
-	{
-		referenced.classId = ProcedureRelationId;
-		referenced.objectId = subscriptingFetchProcedure;
 		referenced.objectSubId = 0;
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}
