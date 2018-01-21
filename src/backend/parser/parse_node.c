@@ -252,7 +252,7 @@ transformContainerType(Oid *containerType, int32 *containerTypmod)
  *
  * For both cases, this function contains only general subscripting logic while
  * type-specific logic (e.g. type verifications and coersion) is placend in
- * separate procedure indicated by typsubsparse. There is only one exception
+ * separate procedure indicated by typsubshandler. There is only one exception
  * for now about domain-over-container, if the source container is of a
  * domain-over-container type, the result is of the base container type or its
  * element type; essentially, we must fold a domain to its base type before
@@ -358,15 +358,15 @@ transformContainerSubscripts(ParseState *pstate,
 SbsRoutines*
 getSubscriptingRoutines(Oid containerType)
 {
-	RegProcedure typsubsparse = get_typsubsprocs(containerType);
+	RegProcedure typsubshandler = get_typsubsprocs(containerType);
 
-	if (!OidIsValid(typsubsparse))
+	if (!OidIsValid(typsubshandler))
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("cannot subscript type %s because it does not support subscripting",
 						format_type_be(containerType))));
 
-	return (SbsRoutines *) OidFunctionCall0(typsubsparse);
+	return (SbsRoutines *) OidFunctionCall0(typsubshandler);
 }
 
 /*

@@ -2413,13 +2413,13 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 	List				 *adjust_jumps = NIL;
 	ListCell   			 *lc;
 	int		   			  i;
-	RegProcedure		  typsubsparse = get_typsubsprocs(sbsref->refcontainertype);
+	RegProcedure		  typsubshandler = get_typsubsprocs(sbsref->refcontainertype);
 
 	/* Fill constant fields of SubscriptingRefState */
 	sbsrefstate->isassignment = isAssignment;
 	sbsrefstate->refelemtype = sbsref->refelemtype;
 	sbsrefstate->refattrlength = get_typlen(sbsref->refcontainertype);
-	sbsrefstate->sbsroutines = (SbsRoutines *) OidFunctionCall0(typsubsparse);
+	sbsrefstate->sbsroutines = (SbsRoutines *) OidFunctionCall0(typsubshandler);
 
 	/*
 	 * Evaluate array input.  It's safe to do so into resv/resnull, because we

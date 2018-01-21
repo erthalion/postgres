@@ -5010,7 +5010,7 @@ jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
  * Handle jsonb-type subscripting logic.
  */
 Datum
-jsonb_subscript_parse(PG_FUNCTION_ARGS)
+jsonb_subscript_handler(PG_FUNCTION_ARGS)
 {
 	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
 

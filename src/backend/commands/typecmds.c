@@ -689,7 +689,7 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   collation,		/* type's collation */
-			   F_ARRAY_SUBSCRIPT_PARSE);
+			   F_ARRAY_SUBSCRIPT_HANDLER);
 
 	pfree(array_type);
 
@@ -752,7 +752,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	Oid			receiveProcedure;
 	Oid			sendProcedure;
 	Oid			analyzeProcedure;
-	Oid			subscriptingParseProcedure;
+	Oid			subscriptingHandlerProcedure;
 	bool		byValue;
 	char		category;
 	char		delimiter;
@@ -881,7 +881,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	analyzeProcedure = baseType->typanalyze;
 
 	/* Subscripting functions */
-	subscriptingParseProcedure = baseType->typsubsparse;
+	subscriptingHandlerProcedure = baseType->typsubshandler;
 
 	/* Inherited default value */
 	datum = SysCacheGetAttr(TYPEOID, typeTup,
@@ -1088,7 +1088,7 @@ DefineDomain(CreateDomainStmt *stmt)
 				   typNDims,	/* Array dimensions for base type */
 				   typNotNull,	/* Type NOT NULL */
 				   domaincoll,  /* type's collation */
-				   subscriptingParseProcedure);	/* subscripting procedure */
+				   subscriptingHandlerProcedure);	/* subscripting procedure */
 
 	/*
 	 * Create the array type that goes with it.
@@ -1129,7 +1129,7 @@ DefineDomain(CreateDomainStmt *stmt)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   domaincoll,		/* type's collation */
-			   F_ARRAY_SUBSCRIPT_PARSE); /* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_HANDLER); /* array subscripting implementation */
 
 	pfree(domainArrayName);
 
@@ -1245,7 +1245,7 @@ DefineEnum(CreateEnumStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* type's collation */
-				   InvalidOid);	/* typsubsparse - none */
+				   InvalidOid);	/* typsubshandler - none */
 
 	/* Enter the enum's values into pg_enum */
 	EnumValuesCreate(enumTypeAddr.objectId, stmt->vals);
@@ -1286,7 +1286,7 @@ DefineEnum(CreateEnumStmt *stmt)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   InvalidOid,		/* type's collation */
-			   F_ARRAY_SUBSCRIPT_PARSE);	/* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_HANDLER);	/* array subscripting implementation */
 
 	pfree(enumArrayName);
 
@@ -1596,7 +1596,7 @@ DefineRange(CreateRangeStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
 				   InvalidOid,  /* type's collation (ranges never have one) */
-				   InvalidOid);	/* typsubsparse - none */
+				   InvalidOid);	/* typsubshandler - none */
 	Assert(typoid == address.objectId);
 
 	/* Create the entry in pg_range */
@@ -1639,7 +1639,7 @@ DefineRange(CreateRangeStmt *stmt)
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
 			   InvalidOid,		/* typcollation */
-			   F_ARRAY_SUBSCRIPT_PARSE);	/* array subscripting implementation */
+			   F_ARRAY_SUBSCRIPT_HANDLER);	/* array subscripting implementation */
 
 	pfree(rangeArrayName);
 
@@ -2373,7 +2373,7 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 							 false, /* a domain isn't an implicit array */
 							 typTup->typbasetype,
 							 typTup->typcollation,
-							 typTup->typsubsparse,
+							 typTup->typsubshandler,
 							 defaultExpr,
 							 true); /* Rebuild is true */
 

@@ -6687,7 +6687,7 @@ array_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
  * Handle array-type subscripting logic.
  */
 Datum
-array_subscript_parse(PG_FUNCTION_ARGS)
+array_subscript_handler(PG_FUNCTION_ARGS)
 {
 	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
 
@@ -6830,7 +6830,7 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 		assignRef->refassgnexpr = (Expr *) new_from;
 	}
 
-	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_PARSE;
+	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_HANDLER;
 
 	return sbsref;
 }
