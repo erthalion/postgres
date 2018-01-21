@@ -5028,11 +5028,11 @@ jsonb_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 	if (isAssignment)
 	{
 		sbsref->refelemtype = exprType((Node *) sbsref->refassgnexpr);
+		sbsref->refassgntype = exprType((Node *) sbsref->refassgnexpr);
 	}
 	else
-	{
 		sbsref->refelemtype = JSONBOID;
-	}
+
 	return sbsref;
 }
 

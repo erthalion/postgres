@@ -6717,7 +6717,8 @@ array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 	sbsref->refelemtype = type_struct_container->typelem;
 
 	/* Identify type that RHS must provide */
-	sbsref->refassgntype = is_slice ? sbsref->refcontainertype : sbsref->refelemtype;
+	if (isAssignment)
+		sbsref->refassgntype = is_slice ? sbsref->refcontainertype : sbsref->refelemtype;
 
 	ReleaseSysCache(type_tuple_container);
 
