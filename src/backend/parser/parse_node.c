@@ -273,7 +273,7 @@ transformContainerType(Oid *containerType, int32 *containerTypmod)
  * assignFrom		NULL for container fetch, else transformed expression for source.
  */
 
-SbsRoutines *
+SubscriptingRef *
 transformContainerSubscripts(ParseState *pstate,
 							 Node *containerBase,
 							 Oid containerType,
@@ -288,14 +288,6 @@ transformContainerSubscripts(ParseState *pstate,
 	List			   *indexprSlice = NIL;
 	ListCell		   *idx;
 	SubscriptingRef	   *sbsref;
-	SbsRoutines		   *sbsroutines;
-	RegProcedure		typsubsparse = get_typsubsprocs(containerType);
-
-	if (!OidIsValid(typsubsparse))
-		ereport(ERROR,
-				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("cannot subscript type %s because it does not support subscripting",
-						format_type_be(containerType))));
 
 	/* Identify the actual container type and element type involved */
 	transformContainerType(&containerType, &containerTypMod);
@@ -360,10 +352,21 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	sbsroutines = (SbsRoutines *) OidFunctionCall0(typsubsparse);
+	return sbsref;
+}
 
-	sbsroutines->sbsref = sbsref;
-	return sbsroutines;
+SbsRoutines*
+getSubscriptingRoutines(Oid containerType)
+{
+	RegProcedure typsubsparse = get_typsubsprocs(containerType);
+
+	if (!OidIsValid(typsubsparse))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("cannot subscript type %s because it does not support subscripting",
+						format_type_be(containerType))));
+
+	return (SbsRoutines *) OidFunctionCall0(typsubsparse);
 }
 
 /*

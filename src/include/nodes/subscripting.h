@@ -30,8 +30,6 @@ typedef Datum (*SubscriptingAssign) (Datum source, struct SubscriptingRefState *
 
 typedef struct SbsRoutines
 {
-	SubscriptingRef			*sbsref;
-
 	SubscriptingPrepare		prepare;
 	SubscriptingValidate	validate;
 	SubscriptingFetch		fetch;

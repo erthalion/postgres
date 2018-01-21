@@ -165,9 +165,9 @@ static int width_bucket_array_variable(Datum operand,
 							ArrayType *thresholds,
 							Oid collation,
 							TypeCacheEntry *typentry);
-static SubscriptingRef * array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref);
-static SubscriptingRef * array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
-												  ParseState *pstate);
+static SubscriptingRef *array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref);
+static SubscriptingRef *array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+												 ParseState *pstate);
 
 static Datum array_subscript_fetch(Datum containerSource,
 								   SubscriptingRefState *sbstate);

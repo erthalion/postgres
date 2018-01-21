@@ -469,14 +469,16 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 			/* process subscripts before this field selection */
 			if (subscripts)
 			{
-				sbsroutines = transformContainerSubscripts(pstate,
-													       result,
-													       exprType(result),
-													       InvalidOid,
-													       exprTypmod(result),
-													       subscripts,
-													       NULL);
-				sbsref = sbsroutines->prepare(false, sbsroutines->sbsref);
+				sbsref = transformContainerSubscripts(pstate,
+													  result,
+													  exprType(result),
+													  InvalidOid,
+													  exprTypmod(result),
+													  subscripts,
+													  NULL);
+
+				sbsroutines = getSubscriptingRoutines(sbsref->refcontainertype);
+				sbsref = sbsroutines->prepare(false, sbsref);
 				sbsroutines->validate(false, sbsref, pstate);
 				result = (Node *) sbsref;
 			}
@@ -497,15 +499,16 @@ transformIndirection(ParseState *pstate, A_Indirection *ind)
 	/* process trailing subscripts, if any */
 	if (subscripts)
 	{
-		sbsroutines = transformContainerSubscripts(pstate,
-												   result,
-												   exprType(result),
-												   InvalidOid,
-												   exprTypmod(result),
-												   subscripts,
-												   NULL);
+		sbsref = transformContainerSubscripts(pstate,
+											  result,
+											  exprType(result),
+											  InvalidOid,
+											  exprTypmod(result),
+											  subscripts,
+											  NULL);
 
-		sbsref = sbsroutines->prepare(false, sbsroutines->sbsref);
+		sbsroutines = getSubscriptingRoutines(sbsref->refcontainertype);
+		sbsref = sbsroutines->prepare(false, sbsref);
 		sbsroutines->validate(false, sbsref, pstate);
 		result = (Node *) sbsref;
 	}

@@ -273,13 +273,14 @@ extern Var *make_var(ParseState *pstate, RangeTblEntry *rte, int attrno,
 		 int location);
 extern void	transformContainerType(Oid *containerType, int32 *containerTypmod);
 
-extern SbsRoutines *transformContainerSubscripts(ParseState *pstate,
-												 Node *containerBase,
-						 						 Oid containerType,
-						 						 Oid elementType,
-						 						 int32 containerTypMod,
-						 						 List *indirection,
-						 						 Node *assignFrom);
+extern SubscriptingRef *transformContainerSubscripts(ParseState *pstate,
+													 Node *containerBase,
+						 						 	 Oid containerType,
+						 						 	 Oid elementType,
+						 						 	 int32 containerTypMod,
+						 						 	 List *indirection,
+						 						 	 Node *assignFrom);
+extern SbsRoutines* getSubscriptingRoutines(Oid containerType);
 extern Const *make_const(ParseState *pstate, Value *value, int location);
 
 #endif							/* PARSE_NODE_H */

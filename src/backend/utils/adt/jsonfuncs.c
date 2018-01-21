@@ -491,12 +491,12 @@ static void transform_string_values_object_field_start(void *state, char *fname,
 static void transform_string_values_array_element_start(void *state, bool isnull);
 static void transform_string_values_scalar(void *state, char *token, JsonTokenType tokentype);
 
-static SubscriptingRef * jsonb_subscript_prepare(bool isAssignment,
-												 SubscriptingRef *sbsref);
+static SubscriptingRef *jsonb_subscript_prepare(bool isAssignment,
+												SubscriptingRef *sbsref);
 
-static SubscriptingRef * jsonb_subscript_validate(bool isAssignment,
-											      SubscriptingRef *sbsref,
-												  ParseState *pstate);
+static SubscriptingRef *jsonb_subscript_validate(bool isAssignment,
+											     SubscriptingRef *sbsref,
+												 ParseState *pstate);
 static Datum jsonb_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate);
 static Datum jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate);
 

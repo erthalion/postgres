@@ -899,15 +899,16 @@ transformAssignmentSubscripts(ParseState *pstate,
 	containerTypMod = targetTypMod;
 
 	/* process subscripts */
-	sbsroutines = transformContainerSubscripts(pstate,
-											   basenode,
-											   containerType,
-											   exprType(rhs),
-											   containerTypMod,
-											   subscripts,
-											   rhs);
+	sbsref = transformContainerSubscripts(pstate,
+										  basenode,
+										  containerType,
+										  exprType(rhs),
+										  containerTypMod,
+										  subscripts,
+										  rhs);
 
-	sbsref = sbsroutines->prepare(rhs != NULL, sbsroutines->sbsref);
+	sbsroutines = getSubscriptingRoutines(sbsref->refcontainertype);
+	sbsref = sbsroutines->prepare(rhs != NULL, sbsref);
 
 	/*
 	 * container normally has same collation as elements, but there's an
@@ -939,7 +940,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	/* If target was a domain over container, need to coerce up to the domain */
 	if (sbsref->refcontainertype != targetTypeId)
 	{
-		Oid			resulttype = exprType(result);
+		Oid	resulttype = exprType(result);
 
 		result = coerce_to_target_type(pstate,
 									   result, resulttype,
