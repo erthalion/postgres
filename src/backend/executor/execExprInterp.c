@@ -2751,13 +2751,12 @@ void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/* Should not get here if source container (or any subscript) is null */
 	Assert(!(*op->resnull));
 
-	*op->resvalue = FunctionCall2(op->d.sbsref.eval_finfo,
-				  PointerGetDatum(*op->resvalue),
-				  PointerGetDatum(sbsrefstate));
+	*op->resvalue = sbsroutines->fetch(*op->resvalue, sbsrefstate);
 	*op->resnull = sbsrefstate->resnull;
 }
 
@@ -2771,6 +2770,7 @@ void
 ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
 
 	if (*op->resnull)
 	{
@@ -2780,9 +2780,7 @@ ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 	}
 	else
 	{
-		sbsrefstate->prevvalue = FunctionCall2(op->d.sbsref.nested_finfo,
-					  PointerGetDatum(*op->resvalue),
-					  PointerGetDatum(sbsrefstate));
+		sbsrefstate->prevvalue = sbsroutines->fetch(*op->resvalue, sbsrefstate);
 
 		if (sbsrefstate->numlower != 0)
 			sbsrefstate->prevnull = false;
@@ -2800,6 +2798,8 @@ void
 ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+
 	/*
 	 * For an assignment to a fixed-length container type, both the original
 	 * container and the value to be assigned into it must be non-NULL, else we
@@ -2812,9 +2812,7 @@ ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 	}
 
 	sbsrefstate->resnull = *op->resnull;
-	*op->resvalue = FunctionCall2(op->d.sbsref.eval_finfo,
-								  PointerGetDatum(*op->resvalue),
-								  PointerGetDatum(sbsrefstate));
+	*op->resvalue = sbsroutines->assign(*op->resvalue, sbsrefstate);
 	*op->resnull = sbsrefstate->resnull;
 }
 

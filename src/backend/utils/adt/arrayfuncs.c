@@ -165,11 +165,14 @@ static int width_bucket_array_variable(Datum operand,
 							ArrayType *thresholds,
 							Oid collation,
 							TypeCacheEntry *typentry);
-SubscriptingRef * array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref);
-SubscriptingRef * array_subscript_validate(bool isAssignment,
-										  SubscriptingRef *sbsref,
-										  ParseState *pstate);
+static SubscriptingRef * array_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref);
+static SubscriptingRef * array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+												  ParseState *pstate);
 
+static Datum array_subscript_fetch(Datum containerSource,
+								   SubscriptingRefState *sbstate);
+static Datum array_subscript_assign(Datum containerSource,
+									SubscriptingRefState *sbstate);
 
 /*
  * array_in :
@@ -6576,11 +6579,8 @@ width_bucket_array_variable(Datum operand,
  * value will be returned.
  */
 Datum
-array_subscript_assign(PG_FUNCTION_ARGS)
+array_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 {
-	Datum						containerSource = PG_GETARG_DATUM(0);
-	SubscriptingRefState		*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
-
 	bool						is_slice = (sbstate->numlower != 0);
 	IntArray					u_index, l_index;
 	bool						eisnull = sbstate->resnull;
@@ -6640,10 +6640,8 @@ array_subscript_assign(PG_FUNCTION_ARGS)
 }
 
 Datum
-array_subscript_fetch(PG_FUNCTION_ARGS)
+array_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 {
-	Datum							containerSource = PG_GETARG_DATUM(0);
-	SubscriptingRefState			*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
 	bool							is_slice = (sbstate->numlower != 0);
 	IntArray						u_index, l_index;
 	int								i = 0;
@@ -6695,6 +6693,8 @@ array_subscript_parse(PG_FUNCTION_ARGS)
 
 	sbsroutines->prepare = array_subscript_prepare;
 	sbsroutines->validate = array_subscript_validate;
+	sbsroutines->fetch = array_subscript_fetch;
+	sbsroutines->assign = array_subscript_assign;
 
 	PG_RETURN_POINTER(sbsroutines);
 }
@@ -6824,7 +6824,7 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 		assignRef->refassgnexpr = (Expr *) new_from;
 	}
 
-	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_FETCH;
+	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_PARSE;
 
 	return sbsref;
 }

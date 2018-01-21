@@ -369,11 +369,7 @@ transformContainerSubscripts(ParseState *pstate,
 	sbsref->refindexprslice = indexprSlice;
 	sbsref->refexpr = (Expr *) containerBase;
 
-	sbsroutines = (SbsRoutines *)
-		OidFunctionCall3(typsubsparse,
-						 BoolGetDatum(assignFrom != NULL),
-						 PointerGetDatum(sbsref),
-						 PointerGetDatum(pstate));
+	sbsroutines = (SbsRoutines *) OidFunctionCall0(typsubsparse);
 
 	sbsroutines->sbsref = sbsref;
 	return sbsroutines;

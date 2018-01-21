@@ -497,6 +497,8 @@ static SubscriptingRef * jsonb_subscript_prepare(bool isAssignment,
 static SubscriptingRef * jsonb_subscript_validate(bool isAssignment,
 											      SubscriptingRef *sbsref,
 												  ParseState *pstate);
+static Datum jsonb_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate);
+static Datum jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate);
 
 /*
  * SQL function json_object_keys
@@ -4961,11 +4963,8 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
  * value will be returned.
  */
 Datum
-jsonb_subscript_fetch(PG_FUNCTION_ARGS)
+jsonb_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 {
-	Datum					containerSource = PG_GETARG_DATUM(0);
-	SubscriptingRefState	*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
-
 	return jsonb_get_element(DatumGetJsonbP(containerSource),
 							 sbstate->upper,
 							 sbstate->numupper,
@@ -4981,11 +4980,8 @@ jsonb_subscript_fetch(PG_FUNCTION_ARGS)
  * value will be returned.
  */
 Datum
-jsonb_subscript_assign(PG_FUNCTION_ARGS)
+jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 {
-	Datum						containerSource = PG_GETARG_DATUM(0);
-	SubscriptingRefState		*sbstate = (SubscriptingRefState *) PG_GETARG_POINTER(1);
-
 	/*
 	 * the original jsonb must be non-NULL, else we punt and return the
 	 * original array.
@@ -5020,6 +5016,8 @@ jsonb_subscript_parse(PG_FUNCTION_ARGS)
 
 	sbsroutines->prepare = jsonb_subscript_prepare;
 	sbsroutines->validate = jsonb_subscript_validate;
+	sbsroutines->fetch = jsonb_subscript_fetch;
+	sbsroutines->assign = jsonb_subscript_assign;
 
 	PG_RETURN_POINTER(sbsroutines);
 }

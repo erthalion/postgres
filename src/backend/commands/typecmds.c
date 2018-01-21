@@ -714,8 +714,8 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 			   false,			/* Type NOT NULL */
 			   collation,		/* type's collation */
 			   F_ARRAY_SUBSCRIPT_PARSE,
-			   F_ARRAY_SUBSCRIPT_ASSIGN,
-			   F_ARRAY_SUBSCRIPT_FETCH);
+			   F_ARRAY_SUBSCRIPT_PARSE,
+			   F_ARRAY_SUBSCRIPT_PARSE);
 
 	pfree(array_type);
 
@@ -1162,8 +1162,8 @@ DefineDomain(CreateDomainStmt *stmt)
 			   false,			/* Type NOT NULL */
 			   domaincoll,		/* type's collation */
 			   F_ARRAY_SUBSCRIPT_PARSE, /* array subscripting implementation */
-			   F_ARRAY_SUBSCRIPT_ASSIGN,
-			   F_ARRAY_SUBSCRIPT_FETCH);
+			   F_ARRAY_SUBSCRIPT_PARSE,
+			   F_ARRAY_SUBSCRIPT_PARSE);
 
 	pfree(domainArrayName);
 
@@ -1323,8 +1323,8 @@ DefineEnum(CreateEnumStmt *stmt)
 			   false,			/* Type NOT NULL */
 			   InvalidOid,		/* type's collation */
 			   F_ARRAY_SUBSCRIPT_PARSE,	/* array subscripting implementation */
-			   F_ARRAY_SUBSCRIPT_ASSIGN,
-			   F_ARRAY_SUBSCRIPT_FETCH);
+			   F_ARRAY_SUBSCRIPT_PARSE,
+			   F_ARRAY_SUBSCRIPT_PARSE);
 
 	pfree(enumArrayName);
 
@@ -1680,8 +1680,8 @@ DefineRange(CreateRangeStmt *stmt)
 			   false,			/* Type NOT NULL */
 			   InvalidOid,		/* typcollation */
 			   F_ARRAY_SUBSCRIPT_PARSE,	/* array subscripting implementation */
-			   F_ARRAY_SUBSCRIPT_ASSIGN,
-			   F_ARRAY_SUBSCRIPT_FETCH);
+			   F_ARRAY_SUBSCRIPT_PARSE,
+			   F_ARRAY_SUBSCRIPT_PARSE);
 
 	pfree(rangeArrayName);
 

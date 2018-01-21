@@ -2414,6 +2414,10 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 	ListCell   			 *lc;
 	int		   			  i;
 	FmgrInfo   			 *eval_finfo, *nested_finfo;
+	RegProcedure		typsubsparse = InvalidOid;
+	RegProcedure		typsubsassign = InvalidOid;
+	RegProcedure		typsubsfetch = InvalidOid;
+	get_typsubsprocs(sbsref->refcontainertype, &typsubsparse, &typsubsassign, &typsubsfetch);
 
 	eval_finfo = palloc0(sizeof(FmgrInfo));
 	nested_finfo = palloc0(sizeof(FmgrInfo));
@@ -2428,6 +2432,7 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 	sbsrefstate->isassignment = isAssignment;
 	sbsrefstate->refelemtype = sbsref->refelemtype;
 	sbsrefstate->refattrlength = get_typlen(sbsref->refcontainertype);
+	sbsrefstate->sbsroutines = (SbsRoutines *) OidFunctionCall0(typsubsparse);
 
 	/*
 	 * Evaluate array input.  It's safe to do so into resv/resnull, because we

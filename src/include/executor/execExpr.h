@@ -18,13 +18,51 @@
 
 /* forward references to avoid circularity */
 struct ExprEvalStep;
-struct SubscriptingRefState;
+struct SbsRoutines;
 
 /* Bits in ExprState->flags (see also execnodes.h for public flag bits): */
 /* expression's interpreter has been initialized */
 #define EEO_FLAG_INTERPRETER_INITIALIZED	(1 << 1)
 /* jump-threading is in use */
 #define EEO_FLAG_DIRECT_THREADED			(1 << 2)
+
+/* Non-inline data for container operations */
+typedef struct SubscriptingRefState
+{
+	bool		isassignment;	/* is it assignment, or just fetch? */
+
+	Oid			refelemtype;	/* OID of the container element type */
+	int16		refattrlength;	/* typlen of container type */
+	int16		refelemlength;	/* typlen of the container element type */
+	bool		refelembyval;	/* is the element type pass-by-value? */
+	char		refelemalign;	/* typalign of the element type */
+
+	/* numupper and upperprovided[] are filled at compile time */
+	/* at runtime, extracted subscript datums get stored in upperindex[] */
+	int			numupper;
+	bool		upperprovided[MAX_SUBSCRIPT_DEPTH];
+	Datum		upper[MAX_SUBSCRIPT_DEPTH];
+
+	/* similarly for lower indexes, if any */
+	int			numlower;
+	bool		lowerprovided[MAX_SUBSCRIPT_DEPTH];
+	Datum		lower[MAX_SUBSCRIPT_DEPTH];
+
+	/* subscript expressions get evaluated into here */
+	Datum		subscriptvalue;
+	bool		subscriptnull;
+
+	/* for assignment, new value to assign is evaluated into here */
+	Datum		replacevalue;
+	bool		replacenull;
+
+	/* if we have a nested assignment, SBSREF_OLD puts old value here */
+	Datum		prevvalue;
+	bool		prevnull;
+
+	bool		resnull;
+	struct SbsRoutines *sbsroutines;
+} SubscriptingRefState;
 
 /* Typical API for out-of-line evaluation subroutines */
 typedef void (*ExecEvalSubroutine) (ExprState *state,
@@ -579,43 +617,6 @@ typedef struct ExprEvalStep
 	}			d;
 } ExprEvalStep;
 
-
-/* Non-inline data for container operations */
-typedef struct SubscriptingRefState
-{
-	bool		isassignment;	/* is it assignment, or just fetch? */
-
-	Oid			refelemtype;	/* OID of the container element type */
-	int16		refattrlength;	/* typlen of container type */
-	int16		refelemlength;	/* typlen of the container element type */
-	bool		refelembyval;	/* is the element type pass-by-value? */
-	char		refelemalign;	/* typalign of the element type */
-
-	/* numupper and upperprovided[] are filled at compile time */
-	/* at runtime, extracted subscript datums get stored in upperindex[] */
-	int			numupper;
-	bool		upperprovided[MAX_SUBSCRIPT_DEPTH];
-	Datum		upper[MAX_SUBSCRIPT_DEPTH];
-
-	/* similarly for lower indexes, if any */
-	int			numlower;
-	bool		lowerprovided[MAX_SUBSCRIPT_DEPTH];
-	Datum		lower[MAX_SUBSCRIPT_DEPTH];
-
-	/* subscript expressions get evaluated into here */
-	Datum		subscriptvalue;
-	bool		subscriptnull;
-
-	/* for assignment, new value to assign is evaluated into here */
-	Datum		replacevalue;
-	bool		replacenull;
-
-	/* if we have a nested assignment, SBSREF_OLD puts old value here */
-	Datum		prevvalue;
-	bool		prevnull;
-
-	bool		resnull;
-} SubscriptingRefState;
 
 /* functions in execExpr.c */
 extern void ExprEvalPushStep(ExprState *es, const ExprEvalStep *s);
