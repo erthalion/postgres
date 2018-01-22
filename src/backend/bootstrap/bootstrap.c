@@ -827,7 +827,7 @@ InsertOneValue(char *value, int i)
 
 	AssertArg(i >= 0 && i < MAXATTR);
 
-	elog(INFO, "inserting column %d value \"%s\"", i, value);
+	elog(DEBUG4, "inserting column %d value \"%s\"", i, value);
 
 	typoid = TupleDescAttr(boot_reldesc->rd_att, i)->atttypid;
 
