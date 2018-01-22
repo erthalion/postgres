@@ -206,10 +206,8 @@ make_var(ParseState *pstate, RangeTblEntry *rte, int attrno, int location)
  * transformContainerType()
  *		Identify the types involved in a subscripting operation for container
  *
- * On entry, containerType/containerTypmod identify the type of the input value
- * to be subscripted (which could be a domain type). These are modified if
- * necessary to identify the actual container type and typmod, and the
- * container's element type is returned.
+ * On entry, containerType/containerTypmod  are modified if necessary to
+ * identify the actual container type and typmod.
  */
 void
 transformContainerType(Oid *containerType, int32 *containerTypmod)
