@@ -24,13 +24,13 @@ PG_FUNCTION_INFO_V1(custom_subscripting_handler);
 Datum
 custom_subscripting_handler(PG_FUNCTION_ARGS)
 {
-	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
-	sbsroutines->prepare = custom_subscript_prepare;
-	sbsroutines->validate = custom_subscript_validate;
-	sbsroutines->fetch = custom_subscript_fetch;
-	sbsroutines->assign = custom_subscript_assign;
+    SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
+    sbsroutines->prepare = custom_subscript_prepare;
+    sbsroutines->validate = custom_subscript_validate;
+    sbsroutines->fetch = custom_subscript_fetch;
+    sbsroutines->assign = custom_subscript_assign;
 
-	PG_RETURN_POINTER(sbsroutines);
+    PG_RETURN_POINTER(sbsroutines);
 }
 
 SubscriptingRef *
@@ -39,16 +39,16 @@ custom_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
     sbsref->refelemtype = someType;
     sbsref->refassgntype = someType;
 
-	return sbsref;
+    return sbsref;
 }
 
 SubscriptingRef *
 custom_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
-						  ParseState *pstate)
+                          ParseState *pstate)
 {
     // some validation and coercion logic
 
-	return sbsref;
+    return sbsref;
 }
 
 Datum
