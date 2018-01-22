@@ -912,7 +912,10 @@ transformAssignmentSubscripts(ParseState *pstate,
 
 	sbsroutines = getSubscriptingRoutines(sbsref->refcontainertype);
 
-	/* Let custom code provide necessary information about required types */
+	/*
+	 * Let custom code provide necessary information about required types:
+	 * refelemtype and refassgntype
+	 */
 	sbsref = sbsroutines->prepare(rhs != NULL, sbsref);
 
 	/*

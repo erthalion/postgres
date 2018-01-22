@@ -19,37 +19,49 @@ typedef struct Custom
     int second;
 }   Custom;
 
-PG_FUNCTION_INFO_V1(custom_subscripting_parse);
-PG_FUNCTION_INFO_V1(custom_subscripting_assign);
-PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
+PG_FUNCTION_INFO_V1(custom_subscripting_handler);
 
 Datum
-custom_subscripting_parse(PG_FUNCTION_ARGS)
+custom_subscripting_handler(PG_FUNCTION_ARGS)
 {
-    bool                isAssignment = PG_GETARG_BOOL(0);
-    SubscriptingRef     *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-    ParseState          *pstate = (ParseState *) PG_GETARG_POINTER(2);
+	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
+	sbsroutines->prepare = custom_subscript_prepare;
+	sbsroutines->validate = custom_subscript_validate;
+	sbsroutines->fetch = custom_subscript_fetch;
+	sbsroutines->assign = custom_subscript_assign;
 
-    // Some verifications or type coersion
-    PG_RETURN_POINTER(sbsref);
+	PG_RETURN_POINTER(sbsroutines);
+}
+
+SubscriptingRef *
+custom_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
+{
+    sbsref->refelemtype = someType;
+    sbsref->refassgntype = someType;
+
+	return sbsref;
+}
+
+SubscriptingRef *
+custom_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+						  ParseState *pstate)
+{
+    // some validation and coercion logic
+
+	return sbsref;
 }
 
 Datum
-custom_subscripting_assign(PG_FUNCTION_ARGS)
+custom_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 {
-    Custom          *containerSource = (Custom *) PG_GETARG_DATUM(0);
-    ExprEvalStep    *step = (ExprEvalStep *) PG_GETARG_POINTER(1);
+    // Some assignment logic
 
-    // Some extraction logic based on sbsdata
-    PG_RETURN_POINTER(containerSource);
+    return newContainer;
 }
 
 Datum
-custom_subscripting_fetch(PG_FUNCTION_ARGS)
+custom_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 {
-    Custom          *containerSource = (Custom *) PG_GETARG_DATUM(0);
-    ExprEvalStep    *step = (ExprEvalStep *) PG_GETARG_POINTER(1);
-
     // Some fetch logic based on sbsdata
 }]]>
 </programlisting>
@@ -58,17 +70,7 @@ custom_subscripting_fetch(PG_FUNCTION_ARGS)
     Then you can define a subscripting procedures and a custom data type:
 </para>
 <programlisting>
-CREATE FUNCTION custom_subscripting_parse(internal)
-    RETURNS internal
-    AS '<replaceable>filename</replaceable>'
-    LANGUAGE C IMMUTABLE STRICT;
-
-CREATE FUNCTION custom_subscripting_assign(internal)
-    RETURNS internal
-    AS '<replaceable>filename</replaceable>'
-    LANGUAGE C IMMUTABLE STRICT;
-
-CREATE FUNCTION custom_subscripting_fetch(internal)
+CREATE FUNCTION custom_subscripting_handler(internal)
     RETURNS internal
     AS '<replaceable>filename</replaceable>'
     LANGUAGE C IMMUTABLE STRICT;
@@ -77,9 +79,7 @@ CREATE TYPE custom (
    internallength = 4,
    input = custom_in,
    output = custom_out,
-   subscripting_parse = custom_subscripting_parse,
-   subscripting_fetch = custom_subscripting_fetch,
-   subscripting_assign = custom_subscripting_assign
+   subscripting_handler = custom_subscripting_handler,
 );
 </programlisting>
 

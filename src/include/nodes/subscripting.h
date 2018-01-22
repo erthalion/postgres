@@ -19,6 +19,7 @@
 struct ParseState;
 struct SubscriptingRefState;
 
+/* Callback function signatures --- see xsubscripting.sgml for more info. */
 typedef SubscriptingRef * (*SubscriptingPrepare) (bool isAssignment, SubscriptingRef *sbsef);
 
 typedef SubscriptingRef * (*SubscriptingValidate) (bool isAssignment, SubscriptingRef *sbsef,
