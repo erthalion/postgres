@@ -495,7 +495,7 @@ static SubscriptingRef *jsonb_subscript_prepare(bool isAssignment,
 												SubscriptingRef *sbsref);
 
 static SubscriptingRef *jsonb_subscript_validate(bool isAssignment,
-											     SubscriptingRef *sbsref,
+												 SubscriptingRef *sbsref,
 												 ParseState *pstate);
 static Datum jsonb_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate);
 static Datum jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate);

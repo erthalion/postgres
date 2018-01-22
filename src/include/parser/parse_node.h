@@ -275,11 +275,11 @@ extern void	transformContainerType(Oid *containerType, int32 *containerTypmod);
 
 extern SubscriptingRef *transformContainerSubscripts(ParseState *pstate,
 													 Node *containerBase,
-						 						 	 Oid containerType,
-						 						 	 Oid elementType,
-						 						 	 int32 containerTypMod,
-						 						 	 List *indirection,
-						 						 	 Node *assignFrom);
+													 Oid containerType,
+													 Oid elementType,
+													 int32 containerTypMod,
+													 List *indirection,
+													 Node *assignFrom);
 extern SbsRoutines* getSubscriptingRoutines(Oid containerType);
 extern Const *make_const(ParseState *pstate, Value *value, int location);
 
