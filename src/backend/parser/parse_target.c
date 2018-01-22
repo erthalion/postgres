@@ -654,7 +654,7 @@ updateTargetListEntry(ParseState *pstate,
  * needed.
  *
  * targetName is the name of the field or subfield we're assigning to, and
- * targetIsArray is true if we're subscripting it.  These are just for
+ * targetIsSubscripting is true if we're subscripting it.  These are just for
  * error reporting.
  *
  * targetTypeId, targetTypMod, targetCollation indicate the datatype and
@@ -676,7 +676,7 @@ static Node *
 transformAssignmentIndirection(ParseState *pstate,
 							   Node *basenode,
 							   const char *targetName,
-							   bool targetIsArray,
+							   bool targetIsSubscripting,
 							   Oid targetTypeId,
 							   int32 targetTypMod,
 							   Oid targetCollation,
@@ -838,9 +838,12 @@ transformAssignmentIndirection(ParseState *pstate,
 											 location);
 	}
 
-	/* base case: just coerce RHS to match target type ID */
-
-	if (!targetIsArray)
+	/*
+	 * Base case: just coerce RHS to match target type ID.
+	 * It's necessary only for field selection, since for
+	 * subscripting it's custom code who should define types.
+	 */
+	if (!targetIsSubscripting)
 	{
 		result = coerce_to_target_type(pstate,
 									   rhs, exprType(rhs),
@@ -908,6 +911,8 @@ transformAssignmentSubscripts(ParseState *pstate,
 										  rhs);
 
 	sbsroutines = getSubscriptingRoutines(sbsref->refcontainertype);
+
+	/* Let custom code provide necessary information about required types */
 	sbsref = sbsroutines->prepare(rhs != NULL, sbsref);
 
 	/*
@@ -932,6 +937,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 										 rhs,
 										 location);
 
+	/* Provide fully prepared subscriptinng information for custom validation */
 	sbsref->refassgnexpr = (Expr *) rhs;
 	sbsroutines->validate(rhs != NULL, sbsref, pstate);
 

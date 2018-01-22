@@ -251,16 +251,14 @@ transformContainerType(Oid *containerType, int32 *containerTypmod)
  * with the source data inserted into the right part of the container.
  *
  * For both cases, this function contains only general subscripting logic while
- * type-specific logic (e.g. type verifications and coersion) is placend in
+ * type-specific logic (e.g. type verifications and coersion) is placen in
  * separate procedure indicated by typsubshandler. There is only one exception
  * for now about domain-over-container, if the source container is of a
  * domain-over-container type, the result is of the base container type or its
  * element type; essentially, we must fold a domain to its base type before
  * applying subscripting. (Note that int2vector and oidvector are treated as
- * domains here.) If domain verification failed we assume, that element type
- * must be the same as container type (e.g. in case of jsonb).
- * An error will appear in case if current container type doesn't have a
- * subscripting procedure.
+ * domains here.) An error will appear in case if current container type
+ * doesn't have a subscripting procedure.
  *
  * pstate			Parse state
  * containerBase	Already-transformed expression for the container as a whole
