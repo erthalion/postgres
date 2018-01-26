@@ -44,14 +44,14 @@
 #define F_LINUX_SPECIFIC_BASE 1024
 #define F_SET_RW_HINT         (F_LINUX_SPECIFIC_BASE + 12)
 
-enum WriteLifeTimeHint {
-	WLTH_NOT_SET = 0, // No hint information set
-	WLTH_NONE,        // No hints about write life time
-	WLTH_SHORT,       // Data written has a short life time
-	WLTH_MEDIUM,      // Data written has a medium life time
-	WLTH_LONG,        // Data written has a long life time
-	WLTH_EXTREME,     // Data written has an extremely long life time
-};
+typedef enum RWFWriteLifeHint {
+	RWF_WRITE_LIFE_NOT_SET = 0, // No hint information set
+	RWF_WRITE_LIFE_NONE,        // No hints about write life time
+	RWF_WRITE_LIFE_SHORT,       // Data written has a short life time
+	RWF_WRITE_LIFE_MEDIUM,      // Data written has a medium life time
+	RWF_WRITE_LIFE_LONG,        // Data written has a long life time
+	RWF_WRITE_LIFE_EXTREME,     // Data written has an extremely long life time
+} RWFWriteLifeHint;
 
 /*
  * FileSeek uses the standard UNIX lseek(2) flags.
@@ -75,8 +75,8 @@ extern int	max_safe_fds;
 
 /* Operations on virtual Files --- equivalent to Unix kernel file ops */
 extern File PathNameOpenFile(const char *fileName, int fileFlags);
-extern File PathNameOpenFileHint(const char *fileName, int fileFlags, enum WriteLifeTimeHint *hint);
-extern File PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode, enum WriteLifeTimeHint *hint);
+extern File PathNameOpenFileHint(const char *fileName, int fileFlags, RWFWriteLifeHint *hint);
+extern File PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode, RWFWriteLifeHint *hint);
 extern File OpenTemporaryFile(bool interXact);
 extern void FileClose(File file);
 extern int	FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info);

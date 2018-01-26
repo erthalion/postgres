@@ -960,8 +960,7 @@ BasicOpenFile(const char *fileName, int fileFlags)
 int
 BasicOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 {
-	int			fd;
-	enum WriteLifeTimeHint hint = WLTH_EXTREME;
+	int	fd;
 
 tryAgain:
 	fd = open(fileName, fileFlags, fileMode);
@@ -1358,12 +1357,12 @@ FileInvalidate(File file)
 File
 PathNameOpenFile(const char *fileName, int fileFlags)
 {
-	enum WriteLifeTimeHint hint = WLTH_EXTREME;
+	RWFWriteLifeHint hint = RWF_WRITE_LIFE_EXTREME;
 	return PathNameOpenFileHint(fileName, fileFlags, &hint);
 }
 
 File
-PathNameOpenFileHint(const char *fileName, int fileFlags, enum WriteLifeTimeHint *hint)
+PathNameOpenFileHint(const char *fileName, int fileFlags, RWFWriteLifeHint *hint)
 {
 	return PathNameOpenFilePerm(fileName, fileFlags, PG_FILE_MODE_DEFAULT, hint);
 }
@@ -1376,12 +1375,12 @@ PathNameOpenFileHint(const char *fileName, int fileFlags, enum WriteLifeTimeHint
  * (which should always be $PGDATA when this code is running).
  */
 File
-PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode, enum WriteLifeTimeHint *hint)
+PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode, RWFWriteLifeHint *hint)
 {
-	char	   *fnamecopy;
-	File		file;
-	Vfd		   *vfdP;
-	enum WriteLifeTimeHint defaulthint = WLTH_EXTREME;
+	char			 *fnamecopy;
+	File	   		  file;
+	Vfd		   		 *vfdP;
+	RWFWriteLifeHint defaulthint = RWF_WRITE_LIFE_EXTREME;
 
 	DO_DB(elog(LOG, "PathNameOpenFilePerm: %s %x %o",
 			   fileName, fileFlags, fileMode));
@@ -1513,8 +1512,7 @@ PathNameDeleteTemporaryDir(const char *dirname)
 File
 OpenTemporaryFile(bool interXact)
 {
-	File		file = 0;
-	enum WriteLifeTimeHint hint = WLTH_SHORT;
+	File			 file = 0;
 
 	/*
 	 * Make sure the current resource owner has space for this File before we
@@ -1592,10 +1590,10 @@ TempTablespacePath(char *path, Oid tablespace)
 static File
 OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 {
-	char		tempdirpath[MAXPGPATH];
-	char		tempfilepath[MAXPGPATH];
-	File		file;
-	enum WriteLifeTimeHint hint = WLTH_SHORT;
+	char			 tempdirpath[MAXPGPATH];
+	char			 tempfilepath[MAXPGPATH];
+	File			 file;
+	RWFWriteLifeHint hint = RWF_WRITE_LIFE_SHORT;
 
 	TempTablespacePath(tempdirpath, tblspcOid);
 
@@ -1651,8 +1649,8 @@ OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 File
 PathNameCreateTemporaryFile(const char *path, bool error_on_failure)
 {
-	File		file;
-	enum WriteLifeTimeHint hint = WLTH_SHORT;
+	File			 file;
+	RWFWriteLifeHint hint = RWF_WRITE_LIFE_SHORT;
 
 	ResourceOwnerEnlargeFiles(CurrentResourceOwner);
 
@@ -1690,8 +1688,8 @@ PathNameCreateTemporaryFile(const char *path, bool error_on_failure)
 File
 PathNameOpenTemporaryFile(const char *path)
 {
-	File		file;
-	enum WriteLifeTimeHint hint = WLTH_SHORT;
+	File			 file;
+	RWFWriteLifeHint hint = RWF_WRITE_LIFE_SHORT;
 
 	ResourceOwnerEnlargeFiles(CurrentResourceOwner);
 
@@ -2420,8 +2418,8 @@ OpenTransientFile(const char *fileName, int fileFlags)
 int
 OpenTransientFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 {
-	int			fd;
-	enum WriteLifeTimeHint hint = WLTH_SHORT;
+	int				 fd;
+	RWFWriteLifeHint hint = RWF_WRITE_LIFE_SHORT;
 
 	DO_DB(elog(LOG, "OpenTransientFile: Allocated %d (%s)",
 			   numAllocatedDescs, fileName));
