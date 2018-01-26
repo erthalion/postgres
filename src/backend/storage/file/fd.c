@@ -961,6 +961,7 @@ int
 BasicOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 {
 	int			fd;
+	enum WriteLifeTimeHint hint = WLTH_EXTREME;
 
 tryAgain:
 	fd = open(fileName, fileFlags, fileMode);
@@ -1357,7 +1358,14 @@ FileInvalidate(File file)
 File
 PathNameOpenFile(const char *fileName, int fileFlags)
 {
-	return PathNameOpenFilePerm(fileName, fileFlags, PG_FILE_MODE_DEFAULT);
+	enum WriteLifeTimeHint hint = WLTH_EXTREME;
+	return PathNameOpenFileHint(fileName, fileFlags, &hint);
+}
+
+File
+PathNameOpenFileHint(const char *fileName, int fileFlags, enum WriteLifeTimeHint *hint)
+{
+	return PathNameOpenFilePerm(fileName, fileFlags, PG_FILE_MODE_DEFAULT, hint);
 }
 
 /*
@@ -1368,11 +1376,12 @@ PathNameOpenFile(const char *fileName, int fileFlags)
  * (which should always be $PGDATA when this code is running).
  */
 File
-PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
+PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode, enum WriteLifeTimeHint *hint)
 {
 	char	   *fnamecopy;
 	File		file;
 	Vfd		   *vfdP;
+	enum WriteLifeTimeHint defaulthint = WLTH_EXTREME;
 
 	DO_DB(elog(LOG, "PathNameOpenFilePerm: %s %x %o",
 			   fileName, fileFlags, fileMode));
@@ -1406,6 +1415,11 @@ PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 	++nfile;
 	DO_DB(elog(LOG, "PathNameOpenFile: success %d",
 			   vfdP->fd));
+
+	if (hint != NULL)
+		fcntl(vfdP->fd, F_SET_RW_HINT, hint);
+	else
+		fcntl(vfdP->fd, F_SET_RW_HINT, &defaulthint);
 
 	Insert(file);
 
@@ -1500,6 +1514,7 @@ File
 OpenTemporaryFile(bool interXact)
 {
 	File		file = 0;
+	enum WriteLifeTimeHint hint = WLTH_SHORT;
 
 	/*
 	 * Make sure the current resource owner has space for this File before we
@@ -1580,6 +1595,7 @@ OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 	char		tempdirpath[MAXPGPATH];
 	char		tempfilepath[MAXPGPATH];
 	File		file;
+	enum WriteLifeTimeHint hint = WLTH_SHORT;
 
 	TempTablespacePath(tempdirpath, tblspcOid);
 
@@ -1594,8 +1610,9 @@ OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 	 * Open the file.  Note: we don't use O_EXCL, in case there is an orphaned
 	 * temp file that can be reused.
 	 */
-	file = PathNameOpenFile(tempfilepath,
-							O_RDWR | O_CREAT | O_TRUNC | PG_BINARY);
+	file = PathNameOpenFileHint(tempfilepath,
+								O_RDWR | O_CREAT | O_TRUNC | PG_BINARY,
+								&hint);
 	if (file <= 0)
 	{
 		/*
@@ -1608,8 +1625,8 @@ OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 		 */
 		mkdir(tempdirpath, S_IRWXU);
 
-		file = PathNameOpenFile(tempfilepath,
-								O_RDWR | O_CREAT | O_TRUNC | PG_BINARY);
+		file = PathNameOpenFileHint(tempfilepath,
+									O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, &hint);
 		if (file <= 0 && rejectError)
 			elog(ERROR, "could not create temporary file \"%s\": %m",
 				 tempfilepath);
@@ -1635,6 +1652,7 @@ File
 PathNameCreateTemporaryFile(const char *path, bool error_on_failure)
 {
 	File		file;
+	enum WriteLifeTimeHint hint = WLTH_SHORT;
 
 	ResourceOwnerEnlargeFiles(CurrentResourceOwner);
 
@@ -1642,7 +1660,7 @@ PathNameCreateTemporaryFile(const char *path, bool error_on_failure)
 	 * Open the file.  Note: we don't use O_EXCL, in case there is an orphaned
 	 * temp file that can be reused.
 	 */
-	file = PathNameOpenFile(path, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY);
+	file = PathNameOpenFileHint(path, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, &hint);
 	if (file <= 0)
 	{
 		if (error_on_failure)
@@ -1673,11 +1691,12 @@ File
 PathNameOpenTemporaryFile(const char *path)
 {
 	File		file;
+	enum WriteLifeTimeHint hint = WLTH_SHORT;
 
 	ResourceOwnerEnlargeFiles(CurrentResourceOwner);
 
 	/* We open the file read-only. */
-	file = PathNameOpenFile(path, O_RDONLY | PG_BINARY);
+	file = PathNameOpenFileHint(path, O_RDONLY | PG_BINARY, &hint);
 
 	/* If no such file, then we don't raise an error. */
 	if (file <= 0 && errno != ENOENT)
@@ -2402,6 +2421,7 @@ int
 OpenTransientFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 {
 	int			fd;
+	enum WriteLifeTimeHint hint = WLTH_SHORT;
 
 	DO_DB(elog(LOG, "OpenTransientFile: Allocated %d (%s)",
 			   numAllocatedDescs, fileName));
@@ -2427,6 +2447,7 @@ OpenTransientFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 		desc->create_subid = GetCurrentSubTransactionId();
 		numAllocatedDescs++;
 
+		fcntl(fd, F_SET_RW_HINT, &hint);
 		return fd;
 	}
 
