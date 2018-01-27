@@ -1512,7 +1512,7 @@ PathNameDeleteTemporaryDir(const char *dirname)
 File
 OpenTemporaryFile(bool interXact)
 {
-	File			 file = 0;
+	File		file = 0;
 
 	/*
 	 * Make sure the current resource owner has space for this File before we
