@@ -960,7 +960,7 @@ BasicOpenFile(const char *fileName, int fileFlags)
 int
 BasicOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode)
 {
-	int	fd;
+	int			fd;
 
 tryAgain:
 	fd = open(fileName, fileFlags, fileMode);
