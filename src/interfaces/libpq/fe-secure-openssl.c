@@ -98,10 +98,6 @@ static long win32_ssl_create_mutex = 0;
 /*			 Procedures common to all secure sessions			*/
 /* ------------------------------------------------------------ */
 
-/*
- *	Exported function to allow application to tell us it's already
- *	initialized OpenSSL and/or libcrypto.
- */
 void
 pgtls_init_library(bool do_ssl, int do_crypto)
 {
@@ -119,9 +115,6 @@ pgtls_init_library(bool do_ssl, int do_crypto)
 	pq_init_crypto_lib = do_crypto;
 }
 
-/*
- *	Begin or continue negotiating a secure session.
- */
 PostgresPollingStatusType
 pgtls_open_client(PGconn *conn)
 {
@@ -144,22 +137,6 @@ pgtls_open_client(PGconn *conn)
 	return open_client_SSL(conn);
 }
 
-/*
- *	Is there unread data waiting in the SSL read buffer?
- */
-bool
-pgtls_read_pending(PGconn *conn)
-{
-	return SSL_pending(conn->ssl);
-}
-
-/*
- *	Read data from a secure connection.
- *
- * On failure, this function is responsible for putting a suitable message
- * into conn->errorMessage.  The caller must still inspect errno, but only
- * to determine whether to continue/retry after error.
- */
 ssize_t
 pgtls_read(PGconn *conn, void *ptr, size_t len)
 {
@@ -284,13 +261,12 @@ rloop:
 	return n;
 }
 
-/*
- *	Write data to a secure connection.
- *
- * On failure, this function is responsible for putting a suitable message
- * into conn->errorMessage.  The caller must still inspect errno, but only
- * to determine whether to continue/retry after error.
- */
+bool
+pgtls_read_pending(PGconn *conn)
+{
+	return SSL_pending(conn->ssl);
+}
+
 ssize_t
 pgtls_write(PGconn *conn, const void *ptr, size_t len)
 {
@@ -393,12 +369,6 @@ pgtls_write(PGconn *conn, const void *ptr, size_t len)
 	return n;
 }
 
-/*
- *	Get the TLS finish message sent during last handshake
- *
- * This information is useful for callers doing channel binding during
- * authentication.
- */
 char *
 pgtls_get_finished(PGconn *conn, size_t *len)
 {
@@ -419,6 +389,85 @@ pgtls_get_finished(PGconn *conn, size_t *len)
 	return result;
 }
 
+char *
+pgtls_get_peer_certificate_hash(PGconn *conn, size_t *len)
+{
+#ifdef HAVE_X509_GET_SIGNATURE_NID
+	X509	   *peer_cert;
+	const EVP_MD *algo_type;
+	unsigned char hash[EVP_MAX_MD_SIZE];	/* size for SHA-512 */
+	unsigned int hash_size;
+	int			algo_nid;
+	char	   *cert_hash;
+
+	*len = 0;
+
+	if (!conn->peer)
+		return NULL;
+
+	peer_cert = conn->peer;
+
+	/*
+	 * Get the signature algorithm of the certificate to determine the hash
+	 * algorithm to use for the result.
+	 */
+	if (!OBJ_find_sigid_algs(X509_get_signature_nid(peer_cert),
+							 &algo_nid, NULL))
+	{
+		printfPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("could not determine server certificate signature algorithm\n"));
+		return NULL;
+	}
+
+	/*
+	 * The TLS server's certificate bytes need to be hashed with SHA-256 if
+	 * its signature algorithm is MD5 or SHA-1 as per RFC 5929
+	 * (https://tools.ietf.org/html/rfc5929#section-4.1).  If something else
+	 * is used, the same hash as the signature algorithm is used.
+	 */
+	switch (algo_nid)
+	{
+		case NID_md5:
+		case NID_sha1:
+			algo_type = EVP_sha256();
+			break;
+		default:
+			algo_type = EVP_get_digestbynid(algo_nid);
+			if (algo_type == NULL)
+			{
+				printfPQExpBuffer(&conn->errorMessage,
+								  libpq_gettext("could not find digest for NID %s\n"),
+								  OBJ_nid2sn(algo_nid));
+				return NULL;
+			}
+			break;
+	}
+
+	if (!X509_digest(peer_cert, algo_type, hash, &hash_size))
+	{
+		printfPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("could not generate peer certificate hash\n"));
+		return NULL;
+	}
+
+	/* save result */
+	cert_hash = malloc(hash_size);
+	if (cert_hash == NULL)
+	{
+		printfPQExpBuffer(&conn->errorMessage,
+						  libpq_gettext("out of memory\n"));
+		return NULL;
+	}
+	memcpy(cert_hash, hash, hash_size);
+	*len = hash_size;
+
+	return cert_hash;
+#else
+	printfPQExpBuffer(&conn->errorMessage,
+					  libpq_gettext("channel binding type \"tls-server-end-point\" is not supported by this build\n"));
+	return NULL;
+#endif
+}
 
 /* ------------------------------------------------------------ */
 /*						OpenSSL specific code					*/
@@ -768,11 +817,6 @@ pq_lockingcallback(int mode, int n, const char *file, int line)
  * If the caller has told us (through PQinitOpenSSL) that he's taking care
  * of libcrypto, we expect that callbacks are already set, and won't try to
  * override it.
- *
- * The conn parameter is only used to be able to pass back an error
- * message - no connection-local setup is made here.
- *
- * Returns 0 if OK, -1 on failure (with a message in conn->errorMessage).
  */
 int
 pgtls_init(PGconn *conn)
@@ -1407,9 +1451,6 @@ open_client_SSL(PGconn *conn)
 	return PGRES_POLLING_OK;
 }
 
-/*
- *	Close SSL connection.
- */
 void
 pgtls_close(PGconn *conn)
 {
@@ -1505,14 +1546,6 @@ SSLerrfree(char *buf)
 /* ------------------------------------------------------------ */
 /*					SSL information functions					*/
 /* ------------------------------------------------------------ */
-
-int
-PQsslInUse(PGconn *conn)
-{
-	if (!conn)
-		return 0;
-	return conn->ssl_in_use;
-}
 
 /*
  *	Return pointer to OpenSSL object.

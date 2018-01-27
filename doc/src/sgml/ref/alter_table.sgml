@@ -456,14 +456,30 @@ ALTER TABLE [ IF EXISTS ] <replaceable class="parameter">name</replaceable>
       requires superuser privileges; it should be done with caution since
       of course the integrity of the constraint cannot be guaranteed if the
       triggers are not executed.
+     </para>
+
+     <para>
       The trigger firing mechanism is also affected by the configuration
       variable <xref linkend="guc-session-replication-role"/>. Simply enabled
-      triggers will fire when the replication role is <quote>origin</quote>
+      triggers (the default) will fire when the replication role is <quote>origin</quote>
       (the default) or <quote>local</quote>. Triggers configured as <literal>ENABLE
       REPLICA</literal> will only fire if the session is in <quote>replica</quote>
       mode, and triggers configured as <literal>ENABLE ALWAYS</literal> will
-      fire regardless of the current replication mode.
+      fire regardless of the current replication role.
      </para>
+
+     <para>
+      The effect of this mechanism is that in the default configuration,
+      triggers do not fire on replicas.  This is useful because if a trigger
+      is used on the origin to propagate data between tables, then the
+      replication system will also replicate the propagated data, and the
+      trigger should not fire a second time on the replica, because that would
+      lead to duplication.  However, if a trigger is used for another purpose
+      such as creating external alerts, then it might be appropriate to set it
+      to <literal>ENABLE ALWAYS</literal> so that it is also fired on
+      replicas.
+     </para>
+
      <para>
       This command acquires a <literal>SHARE ROW EXCLUSIVE</literal> lock.
      </para>
@@ -480,6 +496,12 @@ ALTER TABLE [ IF EXISTS ] <replaceable class="parameter">name</replaceable>
       triggers. This configuration is ignored for <literal>ON SELECT</literal> rules, which
       are always applied in order to keep views working even if the current
       session is in a non-default replication role.
+     </para>
+
+     <para>
+      The rule firing mechanism is also affected by the configuration variable
+      <xref linkend="guc-session-replication-role"/>, analogous to triggers as
+      described above.
      </para>
     </listitem>
    </varlistentry>
@@ -783,7 +805,10 @@ ALTER TABLE [ IF EXISTS ] <replaceable class="parameter">name</replaceable>
       as a partition of the target table. The table can be attached
       as a partition for specific values using <literal>FOR VALUES
       </literal> or as a default partition by using <literal>DEFAULT
-      </literal>.
+      </literal>.  For each index in the target table, a corresponding
+      one will be created in the attached table; or, if an equivalent
+      index already exists, will be attached to the target table's index,
+      as if <command>ALTER INDEX ATTACH PARTITION</command> had been executed.
      </para>
 
      <para>
@@ -844,7 +869,8 @@ ALTER TABLE [ IF EXISTS ] <replaceable class="parameter">name</replaceable>
      <para>
       This form detaches specified partition of the target table.  The detached
       partition continues to exist as a standalone table, but no longer has any
-      ties to the table from which it was detached.
+      ties to the table from which it was detached.  Any indexes that were
+      attached to the target table's indexes are detached.
      </para>
     </listitem>
    </varlistentry>

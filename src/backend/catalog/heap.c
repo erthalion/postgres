@@ -294,6 +294,7 @@ heap_create(const char *relname,
 		case RELKIND_COMPOSITE_TYPE:
 		case RELKIND_FOREIGN_TABLE:
 		case RELKIND_PARTITIONED_TABLE:
+		case RELKIND_PARTITIONED_INDEX:
 			create_storage = false;
 
 			/*
@@ -1142,11 +1143,11 @@ heap_create_with_catalog(const char *relname,
 			case RELKIND_MATVIEW:
 			case RELKIND_FOREIGN_TABLE:
 			case RELKIND_PARTITIONED_TABLE:
-				relacl = get_user_default_acl(ACL_OBJECT_RELATION, ownerid,
+				relacl = get_user_default_acl(OBJECT_TABLE, ownerid,
 											  relnamespace);
 				break;
 			case RELKIND_SEQUENCE:
-				relacl = get_user_default_acl(ACL_OBJECT_SEQUENCE, ownerid,
+				relacl = get_user_default_acl(OBJECT_SEQUENCE, ownerid,
 											  relnamespace);
 				break;
 			default:
