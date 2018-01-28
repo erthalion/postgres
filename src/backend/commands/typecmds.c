@@ -268,9 +268,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
 		else if (strcmp(defel->defname, "analyze") == 0 ||
 				 strcmp(defel->defname, "analyse") == 0)
 			defelp = &analyzeNameEl;
-		else if (pg_strcasecmp(defel->defname, "subscripting_handler") == 0)
+		else if (strcmp(defel->defname, "subscripting_handler") == 0)
 			defelp = &subscriptingParseNameEl;
-		else if (pg_strcasecmp(defel->defname, "category") == 0)
+		else if (strcmp(defel->defname, "category") == 0)
 			defelp = &categoryEl;
 		else if (strcmp(defel->defname, "preferred") == 0)
 			defelp = &preferredEl;
