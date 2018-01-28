@@ -6269,7 +6269,7 @@ get_update_query_targetlist_def(Query *query, List *targetList,
 
 					expr = (Node *) linitial(fstore->newvals);
 				}
-				else if (IsA(expr, SubscriptingRef) && IsAssignment(expr))
+				else if (IsA(expr, SubscriptingRef))
 				{
 					SubscriptingRef   *sbsref = (SubscriptingRef *) expr;
 
@@ -10341,7 +10341,7 @@ processIndirection(Node *node, deparse_context *context)
 			 */
 			node = (Node *) linitial(fstore->newvals);
 		}
-		else if (IsA(node, SubscriptingRef) && IsAssignment(node))
+		else if (IsA(node, SubscriptingRef))
 		{
 			SubscriptingRef   *sbsref = (SubscriptingRef *) node;
 

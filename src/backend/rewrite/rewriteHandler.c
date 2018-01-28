@@ -1097,7 +1097,7 @@ get_assignment_input(Node *node)
 
 		return (Node *) fstore->arg;
 	}
-	else if (IsA(node, SubscriptingRef) && IsAssignment(node))
+	else if (IsA(node, SubscriptingRef))
 	{
 		SubscriptingRef   *sbsref = (SubscriptingRef *) node;
 
