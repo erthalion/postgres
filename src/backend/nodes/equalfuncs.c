@@ -910,6 +910,7 @@ _equalPartitionedChildRelInfo(const PartitionedChildRelInfo *a, const Partitione
 {
 	COMPARE_SCALAR_FIELD(parent_relid);
 	COMPARE_NODE_FIELD(child_rels);
+	COMPARE_SCALAR_FIELD(part_cols_updated);
 
 	return true;
 }
@@ -1334,6 +1335,7 @@ _equalIndexStmt(const IndexStmt *a, const IndexStmt *b)
 {
 	COMPARE_STRING_FIELD(idxname);
 	COMPARE_NODE_FIELD(relation);
+	COMPARE_SCALAR_FIELD(relationId);
 	COMPARE_STRING_FIELD(accessMethod);
 	COMPARE_STRING_FIELD(tableSpace);
 	COMPARE_NODE_FIELD(indexParams);
@@ -1370,13 +1372,12 @@ _equalCreateStatsStmt(const CreateStatsStmt *a, const CreateStatsStmt *b)
 static bool
 _equalCreateFunctionStmt(const CreateFunctionStmt *a, const CreateFunctionStmt *b)
 {
+	COMPARE_SCALAR_FIELD(is_procedure);
 	COMPARE_SCALAR_FIELD(replace);
 	COMPARE_NODE_FIELD(funcname);
 	COMPARE_NODE_FIELD(parameters);
 	COMPARE_NODE_FIELD(returnType);
-	COMPARE_SCALAR_FIELD(is_procedure);
 	COMPARE_NODE_FIELD(options);
-	COMPARE_NODE_FIELD(withClause);
 
 	return true;
 }

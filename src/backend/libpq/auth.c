@@ -873,8 +873,6 @@ CheckSCRAMAuth(Port *port, char *shadow_pass, char **logdetail)
 	int			inputlen;
 	int			result;
 	bool		initial;
-	char	   *tls_finished = NULL;
-	size_t		tls_finished_len = 0;
 
 	/*
 	 * SASL auth is not supported for protocol versions before 3, because it
@@ -915,17 +913,6 @@ CheckSCRAMAuth(Port *port, char *shadow_pass, char **logdetail)
 	sendAuthRequest(port, AUTH_REQ_SASL, sasl_mechs, p - sasl_mechs + 1);
 	pfree(sasl_mechs);
 
-#ifdef USE_SSL
-
-	/*
-	 * Get data for channel binding.
-	 */
-	if (port->ssl_in_use)
-	{
-		tls_finished = be_tls_get_peer_finished(port, &tls_finished_len);
-	}
-#endif
-
 	/*
 	 * Initialize the status tracker for message exchanges.
 	 *
@@ -937,11 +924,7 @@ CheckSCRAMAuth(Port *port, char *shadow_pass, char **logdetail)
 	 * This is because we don't want to reveal to an attacker what usernames
 	 * are valid, nor which users have a valid password.
 	 */
-	scram_opaq = pg_be_scram_init(port->user_name,
-								  shadow_pass,
-								  port->ssl_in_use,
-								  tls_finished,
-								  tls_finished_len);
+	scram_opaq = pg_be_scram_init(port, shadow_pass);
 
 	/*
 	 * Loop through SASL message exchange.  This exchange can consist of
@@ -2363,9 +2346,10 @@ InitializeLDAPConnection(Port *port, LDAP **ldap)
 	if (scheme == NULL)
 		scheme = "ldap";
 #ifdef WIN32
-	*ldap = ldap_sslinit(port->hba->ldapserver,
-						 port->hba->ldapport,
-						 strcmp(scheme, "ldaps") == 0);
+	if (strcmp(scheme, "ldaps") == 0)
+		*ldap = ldap_sslinit(port->hba->ldapserver, port->hba->ldapport, 1);
+	else
+		*ldap = ldap_init(port->hba->ldapserver, port->hba->ldapport);
 	if (!*ldap)
 	{
 		ereport(LOG,
@@ -2487,6 +2471,11 @@ InitializeLDAPConnection(Port *port, LDAP **ldap)
 /* Not all LDAP implementations define this. */
 #ifndef LDAP_NO_ATTRS
 #define LDAP_NO_ATTRS "1.1"
+#endif
+
+/* Not all LDAP implementations define this. */
+#ifndef LDAPS_PORT
+#define LDAPS_PORT 636
 #endif
 
 /*
