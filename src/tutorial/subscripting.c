@@ -25,11 +25,15 @@ typedef struct Custom
 	int	second;
 }	Custom;
 
+SubscriptingRef * custom_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref);
+SubscriptingRef * custom_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+											ParseState *pstate);
+Datum custom_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate);
+Datum custom_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate);
+
 PG_FUNCTION_INFO_V1(custom_in);
 PG_FUNCTION_INFO_V1(custom_out);
-PG_FUNCTION_INFO_V1(custom_subscripting_parse);
-PG_FUNCTION_INFO_V1(custom_subscripting_assign);
-PG_FUNCTION_INFO_V1(custom_subscripting_fetch);
+PG_FUNCTION_INFO_V1(custom_subscripting_handler);
 
 /*****************************************************************************
  * Input/Output functions
@@ -71,54 +75,30 @@ custom_out(PG_FUNCTION_ARGS)
  *****************************************************************************/
 
 Datum
-custom_subscripting_assign(PG_FUNCTION_ARGS)
+custom_subscripting_handler(PG_FUNCTION_ARGS)
 {
-	Custom						*containerSource = (Custom *) PG_GETARG_DATUM(0);
-	ExprEvalStep				*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
+	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
 
-	SubscriptingRefState		*sbstate = step->d.sbsref.state;
-	int							index;
+	sbsroutines->prepare = custom_subscript_prepare;
+	sbsroutines->validate = custom_subscript_validate;
+	sbsroutines->fetch = custom_subscript_fetch;
+	sbsroutines->assign = custom_subscript_assign;
 
-	if (sbstate->numupper != 1)
-		ereport(ERROR, (errmsg("custom does not support nested subscripting")));
-
-	index = DatumGetInt32(sbstate->upper[0]);
-
-	if (index == 1)
-		containerSource->first = DatumGetInt32(sbstate->replacevalue);
-	else
-		containerSource->second = DatumGetInt32(sbstate->replacevalue);
-
-	PG_RETURN_POINTER(containerSource);
+	PG_RETURN_POINTER(sbsroutines);
 }
 
-
-Datum
-custom_subscripting_fetch(PG_FUNCTION_ARGS)
+SubscriptingRef *
+custom_subscript_prepare(bool isAssignment, SubscriptingRef *sbsref)
 {
-	Custom					*containerSource = (Custom *) PG_GETARG_DATUM(0);
-	ExprEvalStep			*step = (ExprEvalStep *) PG_GETARG_POINTER(1);
-	SubscriptingRefState	*sbstate = step->d.sbsref.state;
-
-	int						index;
-
-	if (sbstate->numupper != 1)
-		ereport(ERROR, (errmsg("custom does not support nested subscripting")));
-
-	index = DatumGetInt32(sbstate->upper[0]);
-
-	if (index == 1)
-		PG_RETURN_INT32(containerSource->first);
-	else
-		PG_RETURN_INT32(containerSource->second);
+	sbsref->refelemtype = INT4OID;
+	sbsref->refassgntype = INT4OID;
+	return sbsref;
 }
 
-Datum
-custom_subscripting_parse(PG_FUNCTION_ARGS)
+SubscriptingRef *
+custom_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
+						  ParseState *pstate)
 {
-	bool				isAssignment = PG_GETARG_BOOL(0);
-	SubscriptingRef	   *sbsref = (SubscriptingRef *) PG_GETARG_POINTER(1);
-	ParseState		   *pstate = (ParseState *) PG_GETARG_POINTER(2);
 	List			   *upperIndexpr = NIL;
 	ListCell		   *l;
 
@@ -132,8 +112,6 @@ custom_subscripting_parse(PG_FUNCTION_ARGS)
 	foreach(l, sbsref->refupperindexpr)
 	{
 		Node *subexpr = (Node *) lfirst(l);
-
-		Assert(subexpr != NULL);
 
 		if (subexpr == NULL)
 			ereport(ERROR,
@@ -151,7 +129,7 @@ custom_subscripting_parse(PG_FUNCTION_ARGS)
 		if (subexpr == NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("custom subscript must have int type"),
+					 errmsg("custom subscript must have integer type"),
 					 parser_errposition(pstate, exprLocation(subexpr))));
 
 		upperIndexpr = lappend(upperIndexpr, subexpr);
@@ -178,7 +156,45 @@ custom_subscripting_parse(PG_FUNCTION_ARGS)
 	}
 
 	sbsref->refupperindexpr = upperIndexpr;
-	sbsref->refelemtype = INT4OID;
 
-	PG_RETURN_POINTER(sbsref);
+	return sbsref;
+}
+
+Datum
+custom_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
+{
+	Custom	*container= (Custom *) containerSource;
+	int		 index;
+
+	if (sbstate->numupper != 1)
+		ereport(ERROR, (errmsg("custom does not support nested subscripting")));
+
+	index = DatumGetInt32(sbstate->upper[0]);
+
+	if (index == 1)
+		return (Datum) container->first;
+	else
+		return (Datum) container->second;
+}
+
+Datum
+custom_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
+{
+	int	index;
+	Custom *container = (Custom *) containerSource;
+
+	if (sbstate->resnull)
+		return containerSource;
+
+	if (sbstate->numupper != 1)
+		ereport(ERROR, (errmsg("custom does not support nested subscripting")));
+
+	index = DatumGetInt32(sbstate->upper[0]);
+
+	if (index == 1)
+		container->first = DatumGetInt32(sbstate->replacevalue);
+	else
+		container->second = DatumGetInt32(sbstate->replacevalue);
+
+	return (Datum) container;
 }
