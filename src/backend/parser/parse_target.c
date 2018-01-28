@@ -890,7 +890,6 @@ transformAssignmentSubscripts(ParseState *pstate,
 	Node	   *result;
 	Oid			containerType;
 	int32		containerTypMod;
-	Oid			elementTypeId;
 	Oid			collationNeeded;
 	SubscriptingRef *sbsref;
 	SbsRoutines *sbsroutines;
