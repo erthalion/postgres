@@ -119,7 +119,7 @@ ExprState *
 ExecInitExpr(Expr *node, PlanState *parent)
 {
 	ExprState  *state;
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
 
 	/* Special case: NULL expression produces a NULL ExprState pointer */
 	if (node == NULL)
@@ -156,7 +156,7 @@ ExprState *
 ExecInitExprWithParams(Expr *node, ParamListInfo ext_params)
 {
 	ExprState  *state;
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
 
 	/* Special case: NULL expression produces a NULL ExprState pointer */
 	if (node == NULL)
@@ -205,7 +205,7 @@ ExprState *
 ExecInitQual(List *qual, PlanState *parent)
 {
 	ExprState  *state;
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
 	List	   *adjust_jumps = NIL;
 	ListCell   *lc;
 
@@ -354,7 +354,7 @@ ExecBuildProjectionInfo(List *targetList,
 {
 	ProjectionInfo *projInfo = makeNode(ProjectionInfo);
 	ExprState  *state;
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
 	ListCell   *lc;
 
 	projInfo->pi_exprContext = econtext;
@@ -639,7 +639,7 @@ static void
 ExecInitExprRec(Expr *node, ExprState *state,
 				Datum *resv, bool *resnull)
 {
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
 
 	/* Guard against stack overflow due to overly complex expressions */
 	check_stack_depth();
@@ -2274,7 +2274,10 @@ ExecInitExprSlots(ExprState *state, Node *node)
 static void
 ExecPushExprSlots(ExprState *state, LastAttnumInfo *info)
 {
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
+
+	scratch.resvalue = NULL;
+	scratch.resnull = NULL;
 
 	/* Emit steps as needed */
 	if (info->last_inner > 0)
@@ -2663,7 +2666,7 @@ static void
 ExecInitCoerceToDomain(ExprEvalStep *scratch, CoerceToDomain *ctest,
 					   ExprState *state, Datum *resv, bool *resnull)
 {
-	ExprEvalStep scratch2;
+	ExprEvalStep scratch2 = {0};
 	DomainConstraintRef *constraint_ref;
 	Datum	   *domainval = NULL;
 	bool	   *domainnull = NULL;
@@ -2815,7 +2818,7 @@ ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase,
 {
 	ExprState  *state = makeNode(ExprState);
 	PlanState  *parent = &aggstate->ss.ps;
-	ExprEvalStep scratch;
+	ExprEvalStep scratch = {0};
 	int			transno = 0;
 	int			setoff = 0;
 	bool		isCombine = DO_AGGSPLIT_COMBINE(aggstate->aggsplit);
