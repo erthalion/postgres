@@ -196,7 +196,7 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    <replaceable class="parameter">type_modifier_input_function</replaceable>,
    <replaceable class="parameter">type_modifier_output_function</replaceable>,
    <replaceable class="parameter">analyze_function</replaceable>,
-   <replaceable class="parameter">subscripting_handler_function</replaceable>,
+   <replaceable class="parameter">subscripting_handler_function</replaceable>
    are optional.  Generally these functions have to be coded in C
    or another low-level language.
   </para>

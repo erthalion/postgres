@@ -536,9 +536,6 @@ typedef struct ExprEvalStep
 		struct
 		{
 			/* too big to have inline */
-			FmgrInfo   *eval_finfo;	/* function to evaluate subscript */
-			FmgrInfo   *nested_finfo;	/* function to handle nested assignment */
-
 			struct SubscriptingRefState *state;
 		}			sbsref;
 
