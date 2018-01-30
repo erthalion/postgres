@@ -4966,7 +4966,7 @@ Datum
 jsonb_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 {
 	return jsonb_get_element(DatumGetJsonbP(containerSource),
-							 sbstate->upper,
+							 sbstate->upperindex,
 							 sbstate->numupper,
 							 &sbstate->resnull,
 							 false);
@@ -4990,7 +4990,7 @@ jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 		return containerSource;
 
 	return jsonb_set_element(containerSource,
-							 sbstate->upper,
+							 sbstate->upperindex,
 							 sbstate->numupper,
 							 sbstate->replacevalue,
 							 sbstate->refelemtype,

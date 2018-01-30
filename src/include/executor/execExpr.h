@@ -42,12 +42,12 @@ typedef struct SubscriptingRefState
 	/* at runtime, extracted subscript datums get stored in upperindex[] */
 	int			numupper;
 	bool		upperprovided[MAX_SUBSCRIPT_DEPTH];
-	Datum		upper[MAX_SUBSCRIPT_DEPTH];
+	Datum		upperindex[MAX_SUBSCRIPT_DEPTH];
 
 	/* similarly for lower indexes, if any */
 	int			numlower;
 	bool		lowerprovided[MAX_SUBSCRIPT_DEPTH];
-	Datum		lower[MAX_SUBSCRIPT_DEPTH];
+	Datum		lowerindex[MAX_SUBSCRIPT_DEPTH];
 
 	/* subscript expressions get evaluated into here */
 	Datum		subscriptvalue;

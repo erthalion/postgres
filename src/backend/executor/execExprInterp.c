@@ -2973,9 +2973,9 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 
 	/* Convert datum to int, save in appropriate place */
 	if (op->d.sbsref_subscript.isupper)
-		indexes = sbsrefstate->upper;
+		indexes = sbsrefstate->upperindex;
 	else
-		indexes = sbsrefstate->lower;
+		indexes = sbsrefstate->lowerindex;
 	off = op->d.sbsref_subscript.off;
 
 	indexes[off] = sbsrefstate->subscriptvalue;

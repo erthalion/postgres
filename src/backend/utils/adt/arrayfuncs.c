@@ -6596,12 +6596,12 @@ array_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 	}
 
 	for(i = 0; i < sbstate->numupper; i++)
-		u_index.indx[i] = DatumGetInt32(sbstate->upper[i]);
+		u_index.indx[i] = DatumGetInt32(sbstate->upperindex[i]);
 
 	if (is_slice)
 	{
 		for(i = 0; i < sbstate->numlower; i++)
-			l_index.indx[i] = DatumGetInt32(sbstate->lower[i]);
+			l_index.indx[i] = DatumGetInt32(sbstate->lowerindex[i]);
 	}
 
 	/*
@@ -6656,12 +6656,12 @@ array_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 	}
 
 	for(i = 0; i < sbstate->numupper; i++)
-		u_index.indx[i] = DatumGetInt32(sbstate->upper[i]);
+		u_index.indx[i] = DatumGetInt32(sbstate->upperindex[i]);
 
 	if (is_slice)
 	{
 		for(i = 0; i < sbstate->numlower; i++)
-			l_index.indx[i] = DatumGetInt32(sbstate->lower[i]);
+			l_index.indx[i] = DatumGetInt32(sbstate->lowerindex[i]);
 	}
 
 	if (!is_slice)
