@@ -77,7 +77,8 @@ custom_out(PG_FUNCTION_ARGS)
 Datum
 custom_subscripting_handler(PG_FUNCTION_ARGS)
 {
-	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
+	SubscriptRoutines *sbsroutines = (SubscriptRoutines *)
+									 palloc(sizeof(SubscriptRoutines));
 
 	sbsroutines->prepare = custom_subscript_prepare;
 	sbsroutines->validate = custom_subscript_validate;

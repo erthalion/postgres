@@ -2992,7 +2992,7 @@ void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/* Should not get here if source container (or any subscript) is null */
 	Assert(!(*op->resnull));
@@ -3011,7 +3011,7 @@ void
 ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	if (*op->resnull)
 	{
@@ -3039,7 +3039,7 @@ void
 ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/*
 	 * For an assignment to a fixed-length container type, both the original

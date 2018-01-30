@@ -19,7 +19,7 @@
 
 /* forward references to avoid circularity */
 struct ExprEvalStep;
-struct SbsRoutines;
+struct SubscriptRoutines;
 
 /* Bits in ExprState->flags (see also execnodes.h for public flag bits): */
 /* expression's interpreter has been initialized */
@@ -62,7 +62,7 @@ typedef struct SubscriptingRefState
 	bool		prevnull;
 
 	bool		resnull;
-	struct SbsRoutines *sbsroutines;
+	struct SubscriptRoutines *sbsroutines;
 } SubscriptingRefState;
 
 /* Typical API for out-of-line evaluation subroutines */

@@ -434,13 +434,13 @@ unknown_attribute(ParseState *pstate, Node *relref, const char *attname,
 static Node *
 transformIndirection(ParseState *pstate, A_Indirection *ind)
 {
-	Node	    *last_srf = pstate->p_last_srf;
-	Node	    *result = transformExprRecurse(pstate, ind->arg);
-	SbsRoutines *sbsroutines;
-	SubscriptingRef *sbsref;
-	List	   *subscripts = NIL;
-	int			location = exprLocation(result);
-	ListCell   *i;
+	Node			  *last_srf = pstate->p_last_srf;
+	Node			  *result = transformExprRecurse(pstate, ind->arg);
+	SubscriptRoutines *sbsroutines;
+	SubscriptingRef   *sbsref;
+	List	          *subscripts = NIL;
+	int				  location = exprLocation(result);
+	ListCell		  *i;
 
 	/*
 	 * We have to split any field-selection operations apart from

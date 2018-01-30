@@ -6689,7 +6689,8 @@ array_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 Datum
 array_subscript_handler(PG_FUNCTION_ARGS)
 {
-	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
+	SubscriptRoutines *sbsroutines = (SubscriptRoutines *)
+									 palloc(sizeof(SubscriptRoutines));
 
 	sbsroutines->prepare = array_subscript_prepare;
 	sbsroutines->validate = array_subscript_validate;

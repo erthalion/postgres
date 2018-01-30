@@ -29,14 +29,14 @@ typedef Datum (*SubscriptingFetch) (Datum source, struct SubscriptingRefState *s
 
 typedef Datum (*SubscriptingAssign) (Datum source, struct SubscriptingRefState *sbrsefstate);
 
-typedef struct SbsRoutines
+typedef struct SubscriptRoutines
 {
 	SubscriptingPrepare		prepare;
 	SubscriptingValidate	validate;
 	SubscriptingFetch		fetch;
 	SubscriptingAssign		assign;
 
-} SbsRoutines;
+} SubscriptRoutines;
 
 
 #endif							/* SUBSCRIPTING_H */

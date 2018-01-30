@@ -351,7 +351,7 @@ transformContainerSubscripts(ParseState *pstate,
 	return sbsref;
 }
 
-SbsRoutines*
+SubscriptRoutines*
 getSubscriptingRoutines(Oid containerType)
 {
 	RegProcedure typsubshandler = get_typsubsprocs(containerType);
@@ -362,7 +362,7 @@ getSubscriptingRoutines(Oid containerType)
 				 errmsg("cannot subscript type %s because it does not support subscripting",
 						format_type_be(containerType))));
 
-	return (SbsRoutines *) OidFunctionCall0(typsubshandler);
+	return (SubscriptRoutines *) OidFunctionCall0(typsubshandler);
 }
 
 /*
