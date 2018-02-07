@@ -2549,6 +2549,10 @@ ExecHashEstimate(HashState *node, ParallelContext *pcxt)
 {
 	size_t		size;
 
+	/* don't need this if not instrumenting or no workers */
+	if (!node->ps.instrument || pcxt->nworkers == 0)
+		return;
+
 	size = mul_size(pcxt->nworkers, sizeof(HashInstrumentation));
 	size = add_size(size, offsetof(SharedHashInfo, hinstrument));
 	shm_toc_estimate_chunk(&pcxt->estimator, size);
@@ -2563,6 +2567,10 @@ void
 ExecHashInitializeDSM(HashState *node, ParallelContext *pcxt)
 {
 	size_t		size;
+
+	/* don't need this if not instrumenting or no workers */
+	if (!node->ps.instrument || pcxt->nworkers == 0)
+		return;
 
 	size = offsetof(SharedHashInfo, hinstrument) +
 		pcxt->nworkers * sizeof(HashInstrumentation);
@@ -2582,8 +2590,12 @@ ExecHashInitializeWorker(HashState *node, ParallelWorkerContext *pwcxt)
 {
 	SharedHashInfo *shared_info;
 
+	/* don't need this if not instrumenting */
+	if (!node->ps.instrument)
+		return;
+
 	shared_info = (SharedHashInfo *)
-		shm_toc_lookup(pwcxt->toc, node->ps.plan->plan_node_id, true);
+		shm_toc_lookup(pwcxt->toc, node->ps.plan->plan_node_id, false);
 	node->hinstrument = &shared_info->hinstrument[ParallelWorkerNumber];
 }
 
@@ -2609,6 +2621,9 @@ ExecHashRetrieveInstrumentation(HashState *node)
 {
 	SharedHashInfo *shared_info = node->shared_info;
 	size_t		size;
+
+	if (shared_info == NULL)
+		return;
 
 	/* Replace node->shared_info with a copy in backend-local memory. */
 	size = offsetof(SharedHashInfo, hinstrument) +
