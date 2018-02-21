@@ -25,18 +25,18 @@ typedef SubscriptingRef * (*SubscriptingPrepare) (bool isAssignment, Subscriptin
 typedef SubscriptingRef * (*SubscriptingValidate) (bool isAssignment, SubscriptingRef *sbsef,
 												   struct ParseState *pstate);
 
-typedef Datum (*SubscriptingFetch) (Datum source, struct SubscriptingRefState *sbsefstate);
+typedef Datum (*SubscriptingFetch) (Datum source, struct SubscriptingRefState *sbsrefstate);
 
-typedef Datum (*SubscriptingAssign) (Datum source, struct SubscriptingRefState *sbsefstate);
+typedef Datum (*SubscriptingAssign) (Datum source, struct SubscriptingRefState *sbrsefstate);
 
-typedef struct SbsRoutines
+typedef struct SubscriptRoutines
 {
 	SubscriptingPrepare		prepare;
 	SubscriptingValidate	validate;
 	SubscriptingFetch		fetch;
 	SubscriptingAssign		assign;
 
-} SbsRoutines;
+} SubscriptRoutines;
 
 
 #endif							/* SUBSCRIPTING_H */

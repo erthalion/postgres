@@ -411,7 +411,7 @@ foreign_expr_walker(Node *node,
 					return false;
 
 				/*
-				 * Recurse to remaining subexpressions. Since the container
+				 * Recurse to remaining subexpressions.  Since the container
 				 * subscripts must yield (noncollatable) integers, they won't
 				 * affect the inner_cxt state.
 				 */

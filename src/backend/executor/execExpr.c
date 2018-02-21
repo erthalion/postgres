@@ -2440,7 +2440,7 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 	sbsrefstate->isassignment = isAssignment;
 	sbsrefstate->refelemtype = sbsref->refelemtype;
 	sbsrefstate->refattrlength = get_typlen(sbsref->refcontainertype);
-	sbsrefstate->sbsroutines = (SbsRoutines *) OidFunctionCall0(typsubshandler);
+	sbsrefstate->sbsroutines = (SubscriptRoutines *) OidFunctionCall0(typsubshandler);
 
 	/*
 	 * Evaluate array input.  It's safe to do so into resv/resnull, because we

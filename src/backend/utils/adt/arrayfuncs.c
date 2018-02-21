@@ -6596,12 +6596,12 @@ array_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 	}
 
 	for(i = 0; i < sbstate->numupper; i++)
-		u_index.indx[i] = DatumGetInt32(sbstate->upper[i]);
+		u_index.indx[i] = DatumGetInt32(sbstate->upperindex[i]);
 
 	if (is_slice)
 	{
 		for(i = 0; i < sbstate->numlower; i++)
-			l_index.indx[i] = DatumGetInt32(sbstate->lower[i]);
+			l_index.indx[i] = DatumGetInt32(sbstate->lowerindex[i]);
 	}
 
 	/*
@@ -6656,12 +6656,12 @@ array_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 	}
 
 	for(i = 0; i < sbstate->numupper; i++)
-		u_index.indx[i] = DatumGetInt32(sbstate->upper[i]);
+		u_index.indx[i] = DatumGetInt32(sbstate->upperindex[i]);
 
 	if (is_slice)
 	{
 		for(i = 0; i < sbstate->numlower; i++)
-			l_index.indx[i] = DatumGetInt32(sbstate->lower[i]);
+			l_index.indx[i] = DatumGetInt32(sbstate->lowerindex[i]);
 	}
 
 	if (!is_slice)
@@ -6689,7 +6689,8 @@ array_subscript_fetch(Datum containerSource, SubscriptingRefState *sbstate)
 Datum
 array_subscript_handler(PG_FUNCTION_ARGS)
 {
-	SbsRoutines *sbsroutines = (SbsRoutines *) palloc(sizeof(SbsRoutines));
+	SubscriptRoutines *sbsroutines = (SubscriptRoutines *)
+									 palloc(sizeof(SubscriptRoutines));
 
 	sbsroutines->prepare = array_subscript_prepare;
 	sbsroutines->validate = array_subscript_validate;

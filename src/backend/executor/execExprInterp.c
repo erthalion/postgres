@@ -3051,9 +3051,9 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 
 	/* Convert datum to int, save in appropriate place */
 	if (op->d.sbsref_subscript.isupper)
-		indexes = sbsrefstate->upper;
+		indexes = sbsrefstate->upperindex;
 	else
-		indexes = sbsrefstate->lower;
+		indexes = sbsrefstate->lowerindex;
 	off = op->d.sbsref_subscript.off;
 
 	indexes[off] = sbsrefstate->subscriptvalue;
@@ -3070,7 +3070,7 @@ void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/* Should not get here if source container (or any subscript) is null */
 	Assert(!(*op->resnull));
@@ -3089,7 +3089,7 @@ void
 ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	if (*op->resnull)
 	{
@@ -3117,7 +3117,7 @@ void
 ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	SbsRoutines			 *sbsroutines = sbsrefstate->sbsroutines;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/*
 	 * For an assignment to a fixed-length container type, both the original

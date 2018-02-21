@@ -887,12 +887,12 @@ transformAssignmentSubscripts(ParseState *pstate,
 							  Node *rhs,
 							  int location)
 {
-	Node	   *result;
-	Oid			containerType;
-	int32		containerTypMod;
-	Oid			collationNeeded;
-	SubscriptingRef *sbsref;
-	SbsRoutines *sbsroutines;
+	Node			  *result;
+	Oid				  containerType;
+	int32			  containerTypMod;
+	Oid				  collationNeeded;
+	SubscriptingRef   *sbsref;
+	SubscriptRoutines *sbsroutines;
 
 	Assert(subscripts != NIL);
 

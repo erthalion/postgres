@@ -281,7 +281,7 @@ extern SubscriptingRef *transformContainerSubscripts(ParseState *pstate,
 													 int32 containerTypMod,
 													 List *indirection,
 													 Node *assignFrom);
-extern SbsRoutines* getSubscriptingRoutines(Oid containerType);
+extern SubscriptRoutines* getSubscriptingRoutines(Oid containerType);
 extern Const *make_const(ParseState *pstate, Value *value, int location);
 
 #endif							/* PARSE_NODE_H */

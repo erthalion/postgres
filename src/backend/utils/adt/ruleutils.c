@@ -7735,7 +7735,7 @@ get_rule_expr(Node *node, deparse_context *context,
 					/*
 					 * Use processIndirection to print this node's subscripts
 					 * as well as any additional field selections or
-					 * subscripting in immediate descendants. It returns the
+					 * subscripting in immediate descendants.  It returns the
 					 * RHS expr that is actually being "assigned".
 					 */
 					refassgnexpr = processIndirection(node, context);
