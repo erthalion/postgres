@@ -488,7 +488,7 @@ typedef struct
 	int			indx[MAXDIM];
 }			IntArray;
 
-#define MAX_SUBSCRIPT_DEPTH 6
+#define MAX_SUBSCRIPT_DEPTH 12
 
 /* ----------------
  *		Variable-length datatypes all share the 'struct varlena' header.
