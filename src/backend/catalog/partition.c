@@ -189,9 +189,6 @@ static int	get_partition_bound_num_indexes(PartitionBoundInfo b);
 static int	get_greatest_modulus(PartitionBoundInfo b);
 static uint64 compute_hash_value(PartitionKey key, Datum *values, bool *isnull);
 
-/* SQL-callable function for use in hash partition CHECK constraints */
-PG_FUNCTION_INFO_V1(satisfies_hash_partition);
-
 /*
  * RelationBuildPartitionDesc
  *		Form rel's partition descriptor
@@ -859,7 +856,7 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
  * Return a copy of given PartitionBoundInfo structure. The data types of bounds
  * are described by given partition key specification.
  */
-extern PartitionBoundInfo
+PartitionBoundInfo
 partition_bounds_copy(PartitionBoundInfo src,
 					  PartitionKey key)
 {

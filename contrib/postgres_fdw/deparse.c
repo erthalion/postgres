@@ -854,10 +854,12 @@ foreign_expr_walker(Node *node,
 static char *
 deparse_type_name(Oid type_oid, int32 typemod)
 {
-	if (is_builtin(type_oid))
-		return format_type_with_typemod(type_oid, typemod);
-	else
-		return format_type_with_typemod_qualified(type_oid, typemod);
+	uint8 flags = FORMAT_TYPE_TYPEMOD_GIVEN;
+
+	if (!is_builtin(type_oid))
+		flags |= FORMAT_TYPE_FORCE_QUALIFY;
+
+	return format_type_extended(type_oid, typemod, flags);
 }
 
 /*
@@ -925,7 +927,7 @@ build_tlist_to_deparse(RelOptInfo *foreignrel)
  *
  * List of columns selected is returned in retrieved_attrs.
  */
-extern void
+void
 deparseSelectStmtForRel(StringInfo buf, PlannerInfo *root, RelOptInfo *rel,
 						List *tlist, List *remote_conds, List *pathkeys,
 						bool is_subquery, List **retrieved_attrs,
@@ -1311,7 +1313,7 @@ appendConditions(List *exprs, deparse_expr_cxt *context)
 }
 
 /* Output join name for given join type */
-extern const char *
+const char *
 get_jointype_name(JoinType jointype)
 {
 	switch (jointype)
