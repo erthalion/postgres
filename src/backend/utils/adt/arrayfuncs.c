@@ -6832,5 +6832,18 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 
 	sbsref->refnestedfunc = F_ARRAY_SUBSCRIPT_HANDLER;
 
+	/* Verify subscript list lengths are within limit */
+	if (list_length(sbsref->refupperindexpr) > MAXDIM)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
+						list_length(sbsref->refupperindexpr), MAXDIM)));
+
+	if (list_length(sbsref->reflowerindexpr) > MAXDIM)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
+						list_length(sbsref->reflowerindexpr), MAXDIM)));
+
 	return sbsref;
 }

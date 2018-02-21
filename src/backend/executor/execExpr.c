@@ -2462,19 +2462,6 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 								   state->steps_len - 1);
 	}
 
-	/* Verify subscript list lengths are within limit */
-	if (list_length(sbsref->refupperindexpr) > MAX_SUBSCRIPT_DEPTH)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(sbsref->refupperindexpr), MAX_SUBSCRIPT_DEPTH)));
-
-	if (list_length(sbsref->reflowerindexpr) > MAX_SUBSCRIPT_DEPTH)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(sbsref->reflowerindexpr), MAX_SUBSCRIPT_DEPTH)));
-
 	/* Evaluate upper subscripts */
 	i = 0;
 	foreach(lc, sbsref->refupperindexpr)
