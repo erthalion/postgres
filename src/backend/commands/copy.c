@@ -23,7 +23,6 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
-#include "catalog/dependency.h"
 #include "catalog/pg_type.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
@@ -2445,10 +2444,9 @@ CopyFrom(CopyState cstate)
 	estate->es_range_table = cstate->range_table;
 
 	/* Set up a tuple slot too */
-	myslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(myslot, tupDesc);
+	myslot = ExecInitExtraTupleSlot(estate, tupDesc);
 	/* Triggers might need a slot as well */
-	estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
+	estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, NULL);
 
 	/* Prepare to catch AFTER triggers. */
 	AfterTriggerBeginQuery();
@@ -2996,19 +2994,8 @@ BeginCopyFrom(ParseState *pstate,
 		{
 			/* attribute is NOT to be copied from input */
 			/* use default value if one exists */
-			Expr	   *defexpr;
-
-			if (att->attidentity)
-			{
-				NextValueExpr *nve = makeNode(NextValueExpr);
-
-				nve->seqid = getOwnedSequence(RelationGetRelid(cstate->rel),
-											  attnum);
-				nve->typeId = att->atttypid;
-				defexpr = (Expr *) nve;
-			}
-			else
-				defexpr = (Expr *) build_column_default(cstate->rel, attnum);
+			Expr	   *defexpr = (Expr *) build_column_default(cstate->rel,
+																attnum);
 
 			if (defexpr != NULL)
 			{

@@ -983,9 +983,14 @@ RelationBuildPartitionKey(Relation relation)
 		}
 		else
 		{
+			if (partexprs_item == NULL)
+				elog(ERROR, "wrong number of partition key expressions");
+
 			key->parttypid[i] = exprType(lfirst(partexprs_item));
 			key->parttypmod[i] = exprTypmod(lfirst(partexprs_item));
 			key->parttypcoll[i] = exprCollation(lfirst(partexprs_item));
+
+			partexprs_item = lnext(partexprs_item);
 		}
 		get_typlenbyvalalign(key->parttypid[i],
 							 &key->parttyplen[i],
@@ -5245,7 +5250,7 @@ errtablecol(Relation rel, int attnum)
 	if (attnum > 0 && attnum <= reldesc->natts)
 		colname = NameStr(TupleDescAttr(reldesc, attnum - 1)->attname);
 	else
-		colname = get_relid_attribute_name(RelationGetRelid(rel), attnum);
+		colname = get_attname(RelationGetRelid(rel), attnum, false);
 
 	return errtablecolname(rel, colname);
 }

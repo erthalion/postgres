@@ -7020,17 +7020,14 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 
 /*
  * getExtendedStatistics
- *	  get information about extended statistics on a dumpable table
- *	  or materialized view.
+ *	  get information about extended-statistics objects.
  *
  * Note: extended statistics data is not returned directly to the caller, but
  * it does get entered into the DumpableObject tables.
  */
 void
-getExtendedStatistics(Archive *fout, TableInfo tblinfo[], int numTables)
+getExtendedStatistics(Archive *fout)
 {
-	int			i,
-				j;
 	PQExpBuffer query;
 	PGresult   *res;
 	StatsExtInfo *statsextinfo;
@@ -7038,7 +7035,9 @@ getExtendedStatistics(Archive *fout, TableInfo tblinfo[], int numTables)
 	int			i_tableoid;
 	int			i_oid;
 	int			i_stxname;
-	int			i_stxdef;
+	int			i_stxnamespace;
+	int			i_rolname;
+	int			i;
 
 	/* Extended statistics were new in v10 */
 	if (fout->remoteVersion < 100000)
@@ -7046,73 +7045,46 @@ getExtendedStatistics(Archive *fout, TableInfo tblinfo[], int numTables)
 
 	query = createPQExpBuffer();
 
-	for (i = 0; i < numTables; i++)
+	/* Make sure we are in proper schema */
+	selectSourceSchema(fout, "pg_catalog");
+
+	appendPQExpBuffer(query, "SELECT tableoid, oid, stxname, "
+					  "stxnamespace, (%s stxowner) AS rolname "
+					  "FROM pg_catalog.pg_statistic_ext",
+					  username_subquery);
+
+	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+	ntups = PQntuples(res);
+
+	i_tableoid = PQfnumber(res, "tableoid");
+	i_oid = PQfnumber(res, "oid");
+	i_stxname = PQfnumber(res, "stxname");
+	i_stxnamespace = PQfnumber(res, "stxnamespace");
+	i_rolname = PQfnumber(res, "rolname");
+
+	statsextinfo = (StatsExtInfo *) pg_malloc(ntups * sizeof(StatsExtInfo));
+
+	for (i = 0; i < ntups; i++)
 	{
-		TableInfo  *tbinfo = &tblinfo[i];
+		statsextinfo[i].dobj.objType = DO_STATSEXT;
+		statsextinfo[i].dobj.catId.tableoid = atooid(PQgetvalue(res, i, i_tableoid));
+		statsextinfo[i].dobj.catId.oid = atooid(PQgetvalue(res, i, i_oid));
+		AssignDumpId(&statsextinfo[i].dobj);
+		statsextinfo[i].dobj.name = pg_strdup(PQgetvalue(res, i, i_stxname));
+		statsextinfo[i].dobj.namespace =
+			findNamespace(fout,
+						  atooid(PQgetvalue(res, i, i_stxnamespace)));
+		statsextinfo[i].rolname = pg_strdup(PQgetvalue(res, i, i_rolname));
 
-		/*
-		 * Only plain tables, materialized views, foreign tables and
-		 * partitioned tables can have extended statistics.
-		 */
-		if (tbinfo->relkind != RELKIND_RELATION &&
-			tbinfo->relkind != RELKIND_MATVIEW &&
-			tbinfo->relkind != RELKIND_FOREIGN_TABLE &&
-			tbinfo->relkind != RELKIND_PARTITIONED_TABLE)
-			continue;
+		/* Decide whether we want to dump it */
+		selectDumpableObject(&(statsextinfo[i].dobj), fout);
 
-		/*
-		 * Ignore extended statistics of tables whose definitions are not to
-		 * be dumped.
-		 */
-		if (!(tbinfo->dobj.dump & DUMP_COMPONENT_DEFINITION))
-			continue;
-
-		if (g_verbose)
-			write_msg(NULL, "reading extended statistics for table \"%s.%s\"\n",
-					  tbinfo->dobj.namespace->dobj.name,
-					  tbinfo->dobj.name);
-
-		/* Make sure we are in proper schema so stadef is right */
-		selectSourceSchema(fout, tbinfo->dobj.namespace->dobj.name);
-
-		resetPQExpBuffer(query);
-
-		appendPQExpBuffer(query,
-						  "SELECT "
-						  "tableoid, "
-						  "oid, "
-						  "stxname, "
-						  "pg_catalog.pg_get_statisticsobjdef(oid) AS stxdef "
-						  "FROM pg_catalog.pg_statistic_ext "
-						  "WHERE stxrelid = '%u' "
-						  "ORDER BY stxname", tbinfo->dobj.catId.oid);
-
-		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-
-		ntups = PQntuples(res);
-
-		i_tableoid = PQfnumber(res, "tableoid");
-		i_oid = PQfnumber(res, "oid");
-		i_stxname = PQfnumber(res, "stxname");
-		i_stxdef = PQfnumber(res, "stxdef");
-
-		statsextinfo = (StatsExtInfo *) pg_malloc(ntups * sizeof(StatsExtInfo));
-
-		for (j = 0; j < ntups; j++)
-		{
-			statsextinfo[j].dobj.objType = DO_STATSEXT;
-			statsextinfo[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, i_tableoid));
-			statsextinfo[j].dobj.catId.oid = atooid(PQgetvalue(res, j, i_oid));
-			AssignDumpId(&statsextinfo[j].dobj);
-			statsextinfo[j].dobj.name = pg_strdup(PQgetvalue(res, j, i_stxname));
-			statsextinfo[j].dobj.namespace = tbinfo->dobj.namespace;
-			statsextinfo[j].statsexttable = tbinfo;
-			statsextinfo[j].statsextdef = pg_strdup(PQgetvalue(res, j, i_stxdef));
-		}
-
-		PQclear(res);
+		/* Stats objects do not currently have ACLs. */
+		statsextinfo[i].dobj.dump &= ~DUMP_COMPONENT_ACL;
 	}
 
+	PQclear(res);
 	destroyPQExpBuffer(query);
 }
 
@@ -16486,25 +16458,41 @@ static void
 dumpStatisticsExt(Archive *fout, StatsExtInfo *statsextinfo)
 {
 	DumpOptions *dopt = fout->dopt;
-	TableInfo  *tbinfo = statsextinfo->statsexttable;
 	PQExpBuffer q;
 	PQExpBuffer delq;
 	PQExpBuffer labelq;
+	PQExpBuffer query;
+	PGresult   *res;
+	char	   *stxdef;
 
-	if (dopt->dataOnly)
+	/* Skip if not to be dumped */
+	if (!statsextinfo->dobj.dump || dopt->dataOnly)
 		return;
 
 	q = createPQExpBuffer();
 	delq = createPQExpBuffer();
 	labelq = createPQExpBuffer();
+	query = createPQExpBuffer();
+
+	/* Make sure we are in proper schema so references are qualified */
+	selectSourceSchema(fout, statsextinfo->dobj.namespace->dobj.name);
+
+	appendPQExpBuffer(query, "SELECT "
+					  "pg_catalog.pg_get_statisticsobjdef('%u'::pg_catalog.oid)",
+					  statsextinfo->dobj.catId.oid);
+
+	res = ExecuteSqlQueryForSingleRow(fout, query->data);
+
+	stxdef = PQgetvalue(res, 0, 0);
 
 	appendPQExpBuffer(labelq, "STATISTICS %s",
 					  fmtId(statsextinfo->dobj.name));
 
-	appendPQExpBuffer(q, "%s;\n", statsextinfo->statsextdef);
+	/* Result of pg_get_statisticsobjdef is complete except for semicolon */
+	appendPQExpBuffer(q, "%s;\n", stxdef);
 
 	appendPQExpBuffer(delq, "DROP STATISTICS %s.",
-					  fmtId(tbinfo->dobj.namespace->dobj.name));
+					  fmtId(statsextinfo->dobj.namespace->dobj.name));
 	appendPQExpBuffer(delq, "%s;\n",
 					  fmtId(statsextinfo->dobj.name));
 
@@ -16512,9 +16500,9 @@ dumpStatisticsExt(Archive *fout, StatsExtInfo *statsextinfo)
 		ArchiveEntry(fout, statsextinfo->dobj.catId,
 					 statsextinfo->dobj.dumpId,
 					 statsextinfo->dobj.name,
-					 tbinfo->dobj.namespace->dobj.name,
+					 statsextinfo->dobj.namespace->dobj.name,
 					 NULL,
-					 tbinfo->rolname, false,
+					 statsextinfo->rolname, false,
 					 "STATISTICS", SECTION_POST_DATA,
 					 q->data, delq->data, NULL,
 					 NULL, 0,
@@ -16523,14 +16511,16 @@ dumpStatisticsExt(Archive *fout, StatsExtInfo *statsextinfo)
 	/* Dump Statistics Comments */
 	if (statsextinfo->dobj.dump & DUMP_COMPONENT_COMMENT)
 		dumpComment(fout, labelq->data,
-					tbinfo->dobj.namespace->dobj.name,
-					tbinfo->rolname,
+					statsextinfo->dobj.namespace->dobj.name,
+					statsextinfo->rolname,
 					statsextinfo->dobj.catId, 0,
 					statsextinfo->dobj.dumpId);
 
+	PQclear(res);
 	destroyPQExpBuffer(q);
 	destroyPQExpBuffer(delq);
 	destroyPQExpBuffer(labelq);
+	destroyPQExpBuffer(query);
 }
 
 /*
@@ -16853,6 +16843,10 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 			   *seqtype;
 	bool		cycled;
 	bool		is_ascending;
+	int64		default_minv,
+				default_maxv;
+	char		bufm[32],
+				bufx[32];
 	PQExpBuffer query = createPQExpBuffer();
 	PQExpBuffer delqry = createPQExpBuffer();
 	PQExpBuffer labelq = createPQExpBuffer();
@@ -16922,40 +16916,41 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 	cache = PQgetvalue(res, 0, 5);
 	cycled = (strcmp(PQgetvalue(res, 0, 6), "t") == 0);
 
-	is_ascending = incby[0] != '-';
-
-	if (is_ascending && atoi(minv) == 1)
-		minv = NULL;
-	if (!is_ascending && atoi(maxv) == -1)
-		maxv = NULL;
-
+	/* Calculate default limits for a sequence of this type */
+	is_ascending = (incby[0] != '-');
 	if (strcmp(seqtype, "smallint") == 0)
 	{
-		if (!is_ascending && atoi(minv) == PG_INT16_MIN)
-			minv = NULL;
-		if (is_ascending && atoi(maxv) == PG_INT16_MAX)
-			maxv = NULL;
+		default_minv = is_ascending ? 1 : PG_INT16_MIN;
+		default_maxv = is_ascending ? PG_INT16_MAX : -1;
 	}
 	else if (strcmp(seqtype, "integer") == 0)
 	{
-		if (!is_ascending && atoi(minv) == PG_INT32_MIN)
-			minv = NULL;
-		if (is_ascending && atoi(maxv) == PG_INT32_MAX)
-			maxv = NULL;
+		default_minv = is_ascending ? 1 : PG_INT32_MIN;
+		default_maxv = is_ascending ? PG_INT32_MAX : -1;
 	}
 	else if (strcmp(seqtype, "bigint") == 0)
 	{
-		char		bufm[100],
-					bufx[100];
-
-		snprintf(bufm, sizeof(bufm), INT64_FORMAT, PG_INT64_MIN);
-		snprintf(bufx, sizeof(bufx), INT64_FORMAT, PG_INT64_MAX);
-
-		if (!is_ascending && strcmp(minv, bufm) == 0)
-			minv = NULL;
-		if (is_ascending && strcmp(maxv, bufx) == 0)
-			maxv = NULL;
+		default_minv = is_ascending ? 1 : PG_INT64_MIN;
+		default_maxv = is_ascending ? PG_INT64_MAX : -1;
 	}
+	else
+	{
+		exit_horribly(NULL, "unrecognized sequence type: %s\n", seqtype);
+		default_minv = default_maxv = 0;	/* keep compiler quiet */
+	}
+
+	/*
+	 * 64-bit strtol() isn't very portable, so convert the limits to strings
+	 * and compare that way.
+	 */
+	snprintf(bufm, sizeof(bufm), INT64_FORMAT, default_minv);
+	snprintf(bufx, sizeof(bufx), INT64_FORMAT, default_maxv);
+
+	/* Don't print minv/maxv if they match the respective default limit */
+	if (strcmp(minv, bufm) == 0)
+		minv = NULL;
+	if (strcmp(maxv, bufx) == 0)
+		maxv = NULL;
 
 	/*
 	 * DROP must be fully qualified in case same name appears in pg_catalog

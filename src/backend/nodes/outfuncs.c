@@ -840,6 +840,11 @@ _outWindowAgg(StringInfo str, const WindowAgg *node)
 	WRITE_INT_FIELD(frameOptions);
 	WRITE_NODE_FIELD(startOffset);
 	WRITE_NODE_FIELD(endOffset);
+	WRITE_OID_FIELD(startInRangeFunc);
+	WRITE_OID_FIELD(endInRangeFunc);
+	WRITE_OID_FIELD(inRangeColl);
+	WRITE_BOOL_FIELD(inRangeAsc);
+	WRITE_BOOL_FIELD(inRangeNullsFirst);
 }
 
 static void
@@ -2816,6 +2821,7 @@ _outColumnDef(StringInfo str, const ColumnDef *node)
 	WRITE_NODE_FIELD(raw_default);
 	WRITE_NODE_FIELD(cooked_default);
 	WRITE_CHAR_FIELD(identity);
+	WRITE_NODE_FIELD(identitySequence);
 	WRITE_NODE_FIELD(collClause);
 	WRITE_OID_FIELD(collOid);
 	WRITE_NODE_FIELD(constraints);
@@ -2986,6 +2992,11 @@ _outWindowClause(StringInfo str, const WindowClause *node)
 	WRITE_INT_FIELD(frameOptions);
 	WRITE_NODE_FIELD(startOffset);
 	WRITE_NODE_FIELD(endOffset);
+	WRITE_OID_FIELD(startInRangeFunc);
+	WRITE_OID_FIELD(endInRangeFunc);
+	WRITE_OID_FIELD(inRangeColl);
+	WRITE_BOOL_FIELD(inRangeAsc);
+	WRITE_BOOL_FIELD(inRangeNullsFirst);
 	WRITE_UINT_FIELD(winref);
 	WRITE_BOOL_FIELD(copiedOrder);
 }

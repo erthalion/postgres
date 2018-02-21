@@ -352,9 +352,7 @@ BitmapHeapNext(BitmapHeapScanState *node)
 			if (tbmres->recheck)
 			{
 				econtext->ecxt_scantuple = slot;
-				ResetExprContext(econtext);
-
-				if (!ExecQual(node->bitmapqualorig, econtext))
+				if (!ExecQualAndReset(node->bitmapqualorig, econtext))
 				{
 					/* Fails recheck, so drop it and loop back for another */
 					InstrCountFiltered2(node, 1);
@@ -717,10 +715,7 @@ BitmapHeapRecheck(BitmapHeapScanState *node, TupleTableSlot *slot)
 
 	/* Does the tuple meet the original qual conditions? */
 	econtext->ecxt_scantuple = slot;
-
-	ResetExprContext(econtext);
-
-	return ExecQual(node->bitmapqualorig, econtext);
+	return ExecQualAndReset(node->bitmapqualorig, econtext);
 }
 
 /* ----------------------------------------------------------------
@@ -912,23 +907,39 @@ ExecInitBitmapHeapScan(BitmapHeapScan *node, EState *estate, int eflags)
 	ExecAssignExprContext(estate, &scanstate->ss.ps);
 
 	/*
+	 * open the base relation and acquire appropriate lock on it.
+	 */
+	currentRelation = ExecOpenScanRelation(estate, node->scan.scanrelid, eflags);
+
+	/*
+	 * initialize child nodes
+	 *
+	 * We do this after ExecOpenScanRelation because the child nodes will open
+	 * indexscans on our relation's indexes, and we want to be sure we have
+	 * acquired a lock on the relation first.
+	 */
+	outerPlanState(scanstate) = ExecInitNode(outerPlan(node), estate, eflags);
+
+	/*
+	 * get the scan type from the relation descriptor.
+	 */
+	ExecInitScanTupleSlot(estate, &scanstate->ss,
+						  RelationGetDescr(currentRelation));
+
+
+	/*
+	 * Initialize result slot, type and projection.
+	 */
+	ExecInitResultTupleSlotTL(estate, &scanstate->ss.ps);
+	ExecAssignScanProjectionInfo(&scanstate->ss);
+
+	/*
 	 * initialize child expressions
 	 */
 	scanstate->ss.ps.qual =
 		ExecInitQual(node->scan.plan.qual, (PlanState *) scanstate);
 	scanstate->bitmapqualorig =
 		ExecInitQual(node->bitmapqualorig, (PlanState *) scanstate);
-
-	/*
-	 * tuple table initialization
-	 */
-	ExecInitResultTupleSlot(estate, &scanstate->ss.ps);
-	ExecInitScanTupleSlot(estate, &scanstate->ss);
-
-	/*
-	 * open the base relation and acquire appropriate lock on it.
-	 */
-	currentRelation = ExecOpenScanRelation(estate, node->scan.scanrelid, eflags);
 
 	/*
 	 * Determine the maximum for prefetch_target.  If the tablespace has a
@@ -956,26 +967,6 @@ ExecInitBitmapHeapScan(BitmapHeapScan *node, EState *estate, int eflags)
 														 estate->es_snapshot,
 														 0,
 														 NULL);
-
-	/*
-	 * get the scan type from the relation descriptor.
-	 */
-	ExecAssignScanType(&scanstate->ss, RelationGetDescr(currentRelation));
-
-	/*
-	 * Initialize result tuple type and projection info.
-	 */
-	ExecAssignResultTypeFromTL(&scanstate->ss.ps);
-	ExecAssignScanProjectionInfo(&scanstate->ss);
-
-	/*
-	 * initialize child nodes
-	 *
-	 * We do this last because the child nodes will open indexscans on our
-	 * relation's indexes, and we want to be sure we have acquired a lock on
-	 * the relation first.
-	 */
-	outerPlanState(scanstate) = ExecInitNode(outerPlan(node), estate, eflags);
 
 	/*
 	 * all done.
