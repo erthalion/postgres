@@ -127,7 +127,7 @@ bool		enable_material = true;
 bool		enable_mergejoin = true;
 bool		enable_hashjoin = true;
 bool		enable_gathermerge = true;
-bool		enable_partition_wise_join = false;
+bool		enable_partitionwise_join = false;
 bool		enable_parallel_append = true;
 bool		enable_parallel_hash = true;
 
@@ -682,7 +682,9 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 		 * order.
 		 */
 		path->path.parallel_workers = compute_parallel_worker(baserel,
-															  rand_heap_pages, index_pages);
+															  rand_heap_pages,
+															  index_pages,
+															  max_parallel_workers_per_gather);
 
 		/*
 		 * Fall out if workers can't be assigned for parallel scan, because in

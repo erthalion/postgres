@@ -84,8 +84,8 @@ static void parse_object_field(JsonLexContext *lex, JsonSemAction *sem);
 static void parse_object(JsonLexContext *lex, JsonSemAction *sem);
 static void parse_array_element(JsonLexContext *lex, JsonSemAction *sem);
 static void parse_array(JsonLexContext *lex, JsonSemAction *sem);
-static void report_parse_error(JsonParseContext ctx, JsonLexContext *lex);
-static void report_invalid_token(JsonLexContext *lex);
+static void report_parse_error(JsonParseContext ctx, JsonLexContext *lex) pg_attribute_noreturn();
+static void report_invalid_token(JsonLexContext *lex) pg_attribute_noreturn();
 static int	report_json_context(JsonLexContext *lex);
 static char *extract_mb_char(char *s);
 static void composite_to_json(Datum composite, StringInfo result,
@@ -1843,7 +1843,7 @@ add_json(Datum val, bool is_null, StringInfo result,
 /*
  * SQL function array_to_json(row)
  */
-extern Datum
+Datum
 array_to_json(PG_FUNCTION_ARGS)
 {
 	Datum		array = PG_GETARG_DATUM(0);
@@ -1859,7 +1859,7 @@ array_to_json(PG_FUNCTION_ARGS)
 /*
  * SQL function array_to_json(row, prettybool)
  */
-extern Datum
+Datum
 array_to_json_pretty(PG_FUNCTION_ARGS)
 {
 	Datum		array = PG_GETARG_DATUM(0);
@@ -1876,7 +1876,7 @@ array_to_json_pretty(PG_FUNCTION_ARGS)
 /*
  * SQL function row_to_json(row)
  */
-extern Datum
+Datum
 row_to_json(PG_FUNCTION_ARGS)
 {
 	Datum		array = PG_GETARG_DATUM(0);
@@ -1892,7 +1892,7 @@ row_to_json(PG_FUNCTION_ARGS)
 /*
  * SQL function row_to_json(row, prettybool)
  */
-extern Datum
+Datum
 row_to_json_pretty(PG_FUNCTION_ARGS)
 {
 	Datum		array = PG_GETARG_DATUM(0);

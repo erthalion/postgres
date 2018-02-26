@@ -214,8 +214,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		if (scandesc->xs_recheck)
 		{
 			econtext->ecxt_scantuple = slot;
-			ResetExprContext(econtext);
-			if (!ExecQual(node->indexqual, econtext))
+			if (!ExecQualAndReset(node->indexqual, econtext))
 			{
 				/* Fails recheck, so drop it and loop back for another */
 				InstrCountFiltered2(node, 1);
@@ -421,11 +420,39 @@ ExecEndIndexOnlyScan(IndexOnlyScanState *node)
 
 /* ----------------------------------------------------------------
  *		ExecIndexOnlyMarkPos
+ *
+ * Note: we assume that no caller attempts to set a mark before having read
+ * at least one tuple.  Otherwise, ioss_ScanDesc might still be NULL.
  * ----------------------------------------------------------------
  */
 void
 ExecIndexOnlyMarkPos(IndexOnlyScanState *node)
 {
+	EState	   *estate = node->ss.ps.state;
+
+	if (estate->es_epqTuple != NULL)
+	{
+		/*
+		 * We are inside an EvalPlanQual recheck.  If a test tuple exists for
+		 * this relation, then we shouldn't access the index at all.  We would
+		 * instead need to save, and later restore, the state of the
+		 * es_epqScanDone flag, so that re-fetching the test tuple is
+		 * possible.  However, given the assumption that no caller sets a mark
+		 * at the start of the scan, we can only get here with es_epqScanDone
+		 * already set, and so no state need be saved.
+		 */
+		Index		scanrelid = ((Scan *) node->ss.ps.plan)->scanrelid;
+
+		Assert(scanrelid > 0);
+		if (estate->es_epqTupleSet[scanrelid - 1])
+		{
+			/* Verify the claim above */
+			if (!estate->es_epqScanDone[scanrelid - 1])
+				elog(ERROR, "unexpected ExecIndexOnlyMarkPos call in EPQ recheck");
+			return;
+		}
+	}
+
 	index_markpos(node->ioss_ScanDesc);
 }
 
@@ -436,6 +463,23 @@ ExecIndexOnlyMarkPos(IndexOnlyScanState *node)
 void
 ExecIndexOnlyRestrPos(IndexOnlyScanState *node)
 {
+	EState	   *estate = node->ss.ps.state;
+
+	if (estate->es_epqTuple != NULL)
+	{
+		/* See comments in ExecIndexOnlyMarkPos */
+		Index		scanrelid = ((Scan *) node->ss.ps.plan)->scanrelid;
+
+		Assert(scanrelid > 0);
+		if (estate->es_epqTupleSet[scanrelid - 1])
+		{
+			/* Verify the claim above */
+			if (!estate->es_epqScanDone[scanrelid - 1])
+				elog(ERROR, "unexpected ExecIndexOnlyRestrPos call in EPQ recheck");
+			return;
+		}
+	}
+
 	index_restrpos(node->ioss_ScanDesc);
 }
 
@@ -475,23 +519,6 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	ExecAssignExprContext(estate, &indexstate->ss.ps);
 
 	/*
-	 * initialize child expressions
-	 *
-	 * Note: we don't initialize all of the indexorderby expression, only the
-	 * sub-parts corresponding to runtime keys (see below).
-	 */
-	indexstate->ss.ps.qual =
-		ExecInitQual(node->scan.plan.qual, (PlanState *) indexstate);
-	indexstate->indexqual =
-		ExecInitQual(node->indexqual, (PlanState *) indexstate);
-
-	/*
-	 * tuple table initialization
-	 */
-	ExecInitResultTupleSlot(estate, &indexstate->ss.ps);
-	ExecInitScanTupleSlot(estate, &indexstate->ss);
-
-	/*
 	 * open the base relation and acquire appropriate lock on it.
 	 */
 	currentRelation = ExecOpenScanRelation(estate, node->scan.scanrelid, eflags);
@@ -507,15 +534,26 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	 * suitable data anyway.)
 	 */
 	tupDesc = ExecTypeFromTL(node->indextlist, false);
-	ExecAssignScanType(&indexstate->ss, tupDesc);
+	ExecInitScanTupleSlot(estate, &indexstate->ss, tupDesc);
 
 	/*
-	 * Initialize result tuple type and projection info.  The node's
+	 * Initialize result slot, type and projection info.  The node's
 	 * targetlist will contain Vars with varno = INDEX_VAR, referencing the
 	 * scan tuple.
 	 */
-	ExecAssignResultTypeFromTL(&indexstate->ss.ps);
+	ExecInitResultTupleSlotTL(estate, &indexstate->ss.ps);
 	ExecAssignScanProjectionInfoWithVarno(&indexstate->ss, INDEX_VAR);
+
+	/*
+	 * initialize child expressions
+	 *
+	 * Note: we don't initialize all of the indexorderby expression, only the
+	 * sub-parts corresponding to runtime keys (see below).
+	 */
+	indexstate->ss.ps.qual =
+		ExecInitQual(node->scan.plan.qual, (PlanState *) indexstate);
+	indexstate->indexqual =
+		ExecInitQual(node->indexqual, (PlanState *) indexstate);
 
 	/*
 	 * If we are just doing EXPLAIN (ie, aren't going to run the plan), stop

@@ -374,27 +374,22 @@ ExecInitHash(Hash *node, EState *estate, int eflags)
 	ExecAssignExprContext(estate, &hashstate->ps);
 
 	/*
-	 * initialize our result slot
+	 * initialize child nodes
 	 */
-	ExecInitResultTupleSlot(estate, &hashstate->ps);
+	outerPlanState(hashstate) = ExecInitNode(outerPlan(node), estate, eflags);
+
+	/*
+	 * initialize our result slot and type. No need to build projection
+	 * because this node doesn't do projections.
+	 */
+	ExecInitResultTupleSlotTL(estate, &hashstate->ps);
+	hashstate->ps.ps_ProjInfo = NULL;
 
 	/*
 	 * initialize child expressions
 	 */
 	hashstate->ps.qual =
 		ExecInitQual(node->plan.qual, (PlanState *) hashstate);
-
-	/*
-	 * initialize child nodes
-	 */
-	outerPlanState(hashstate) = ExecInitNode(outerPlan(node), estate, eflags);
-
-	/*
-	 * initialize tuple type. no need to initialize projection info because
-	 * this node doesn't do projections
-	 */
-	ExecAssignResultTypeFromTL(&hashstate->ps);
-	hashstate->ps.ps_ProjInfo = NULL;
 
 	return hashstate;
 }
@@ -1942,10 +1937,7 @@ ExecScanHashBucket(HashJoinState *hjstate,
 											 false);	/* do not pfree */
 			econtext->ecxt_innertuple = inntuple;
 
-			/* reset temp memory each time to avoid leaks from qual expr */
-			ResetExprContext(econtext);
-
-			if (ExecQual(hjclauses, econtext))
+			if (ExecQualAndReset(hjclauses, econtext))
 			{
 				hjstate->hj_CurTuple = hashTuple;
 				return true;
@@ -2002,10 +1994,7 @@ ExecParallelScanHashBucket(HashJoinState *hjstate,
 											 false);	/* do not pfree */
 			econtext->ecxt_innertuple = inntuple;
 
-			/* reset temp memory each time to avoid leaks from qual expr */
-			ResetExprContext(econtext);
-
-			if (ExecQual(hjclauses, econtext))
+			if (ExecQualAndReset(hjclauses, econtext))
 			{
 				hjstate->hj_CurTuple = hashTuple;
 				return true;
@@ -2555,6 +2544,10 @@ ExecHashEstimate(HashState *node, ParallelContext *pcxt)
 {
 	size_t		size;
 
+	/* don't need this if not instrumenting or no workers */
+	if (!node->ps.instrument || pcxt->nworkers == 0)
+		return;
+
 	size = mul_size(pcxt->nworkers, sizeof(HashInstrumentation));
 	size = add_size(size, offsetof(SharedHashInfo, hinstrument));
 	shm_toc_estimate_chunk(&pcxt->estimator, size);
@@ -2569,6 +2562,10 @@ void
 ExecHashInitializeDSM(HashState *node, ParallelContext *pcxt)
 {
 	size_t		size;
+
+	/* don't need this if not instrumenting or no workers */
+	if (!node->ps.instrument || pcxt->nworkers == 0)
+		return;
 
 	size = offsetof(SharedHashInfo, hinstrument) +
 		pcxt->nworkers * sizeof(HashInstrumentation);
@@ -2588,8 +2585,12 @@ ExecHashInitializeWorker(HashState *node, ParallelWorkerContext *pwcxt)
 {
 	SharedHashInfo *shared_info;
 
+	/* don't need this if not instrumenting */
+	if (!node->ps.instrument)
+		return;
+
 	shared_info = (SharedHashInfo *)
-		shm_toc_lookup(pwcxt->toc, node->ps.plan->plan_node_id, true);
+		shm_toc_lookup(pwcxt->toc, node->ps.plan->plan_node_id, false);
 	node->hinstrument = &shared_info->hinstrument[ParallelWorkerNumber];
 }
 
@@ -2615,6 +2616,9 @@ ExecHashRetrieveInstrumentation(HashState *node)
 {
 	SharedHashInfo *shared_info = node->shared_info;
 	size_t		size;
+
+	if (shared_info == NULL)
+		return;
 
 	/* Replace node->shared_info with a copy in backend-local memory. */
 	size = offsetof(SharedHashInfo, hinstrument) +

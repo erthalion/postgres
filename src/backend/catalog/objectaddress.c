@@ -1593,6 +1593,8 @@ get_object_address_opf_member(ObjectType objtype,
 	famaddr = get_object_address_opcf(OBJECT_OPFAMILY, copy, false);
 
 	/* find out left/right type names and OIDs */
+	typenames[0] = typenames[1] = NULL;
+	typeoids[0] = typeoids[1] = InvalidOid;
 	i = 0;
 	foreach(cell, lsecond(object))
 	{
@@ -2682,8 +2684,9 @@ getObjectDescription(const ObjectAddress *object)
 			getRelationDescription(&buffer, object->objectId);
 			if (object->objectSubId != 0)
 				appendStringInfo(&buffer, _(" column %s"),
-								 get_relid_attribute_name(object->objectId,
-														  object->objectSubId));
+								 get_attname(object->objectId,
+											 object->objectSubId,
+											 false));
 			break;
 
 		case OCLASS_PROC:
@@ -4103,8 +4106,8 @@ getObjectIdentityParts(const ObjectAddress *object,
 			{
 				char	   *attr;
 
-				attr = get_relid_attribute_name(object->objectId,
-												object->objectSubId);
+				attr = get_attname(object->objectId, object->objectSubId,
+								   false);
 				appendStringInfo(&buffer, ".%s", quote_identifier(attr));
 				if (objname)
 					*objname = lappend(*objname, attr);

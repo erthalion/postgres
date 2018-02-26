@@ -560,11 +560,16 @@ SELECT ft5, ft5.c1, ft5.c2, ft5.c3, ft4.c1, ft4.c2 FROM ft5 left join ft4 on ft5
 SELECT ft5, ft5.c1, ft5.c2, ft5.c3, ft4.c1, ft4.c2 FROM ft5 left join ft4 on ft5.c1 = ft4.c1 WHERE ft4.c1 BETWEEN 10 and 30 ORDER BY ft5.c1, ft4.c1;
 
 -- multi-way join involving multiple merge joins
+-- (this case used to have EPQ-related planning problems)
+SET enable_nestloop TO false;
+SET enable_hashjoin TO false;
 EXPLAIN (VERBOSE, COSTS OFF)
-SELECT * FROM ft1, ft2, ft4, ft5 WHERE ft1.c1 = ft2.c1 AND ft1.c1 = ft4.c1
-    AND ft1.c1 = ft5.c1 FOR UPDATE;
-SELECT * FROM ft1, ft2, ft4, ft5 WHERE ft1.c1 = ft2.c1 AND ft1.c1 = ft4.c1
-    AND ft1.c1 = ft5.c1 FOR UPDATE;
+SELECT * FROM ft1, ft2, ft4, ft5 WHERE ft1.c1 = ft2.c1 AND ft1.c2 = ft4.c1
+    AND ft1.c2 = ft5.c1 AND ft1.c1 < 100 AND ft2.c1 < 100 FOR UPDATE;
+SELECT * FROM ft1, ft2, ft4, ft5 WHERE ft1.c1 = ft2.c1 AND ft1.c2 = ft4.c1
+    AND ft1.c2 = ft5.c1 AND ft1.c1 < 100 AND ft2.c1 < 100 FOR UPDATE;
+RESET enable_nestloop;
+RESET enable_hashjoin;
 
 -- check join pushdown in situations where multiple userids are involved
 CREATE ROLE regress_view_owner SUPERUSER;
@@ -1063,6 +1068,11 @@ explain (verbose, costs off) select * from ft3 f, loct3 l
 -- ===================================================================
 -- test writable foreign table stuff
 -- ===================================================================
+-- Autovacuum on the remote side might affect remote estimates,
+-- so use local stats on ft2 as well
+ALTER FOREIGN TABLE ft2 OPTIONS (SET use_remote_estimate 'false');
+ANALYZE ft2;
+
 EXPLAIN (verbose, costs off)
 INSERT INTO ft2 (c1,c2,c3) SELECT c1+1000,c2+100, c3 || c3 FROM ft2 LIMIT 20;
 INSERT INTO ft2 (c1,c2,c3) SELECT c1+1000,c2+100, c3 || c3 FROM ft2 LIMIT 20;
@@ -1077,14 +1087,14 @@ UPDATE ft2 SET c2 = c2 + 400, c3 = c3 || '_update7' WHERE c1 % 10 = 7 RETURNING 
 UPDATE ft2 SET c2 = c2 + 400, c3 = c3 || '_update7' WHERE c1 % 10 = 7 RETURNING *;
 EXPLAIN (verbose, costs off)
 UPDATE ft2 SET c2 = ft2.c2 + 500, c3 = ft2.c3 || '_update9', c7 = DEFAULT
-  FROM ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 9;                               -- can't be pushed down
+  FROM ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 9;                               -- can be pushed down
 UPDATE ft2 SET c2 = ft2.c2 + 500, c3 = ft2.c3 || '_update9', c7 = DEFAULT
   FROM ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 9;
 EXPLAIN (verbose, costs off)
   DELETE FROM ft2 WHERE c1 % 10 = 5 RETURNING c1, c4;                               -- can be pushed down
 DELETE FROM ft2 WHERE c1 % 10 = 5 RETURNING c1, c4;
 EXPLAIN (verbose, costs off)
-DELETE FROM ft2 USING ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 2;                -- can't be pushed down
+DELETE FROM ft2 USING ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 2;                -- can be pushed down
 DELETE FROM ft2 USING ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 2;
 SELECT c1,c2,c3,c4 FROM ft2 ORDER BY c1;
 EXPLAIN (verbose, costs off)
@@ -1096,6 +1106,58 @@ UPDATE ft2 SET c3 = 'bar' WHERE c1 = 9999 RETURNING tableoid::regclass;
 EXPLAIN (verbose, costs off)
 DELETE FROM ft2 WHERE c1 = 9999 RETURNING tableoid::regclass;                       -- can be pushed down
 DELETE FROM ft2 WHERE c1 = 9999 RETURNING tableoid::regclass;
+
+-- Test UPDATE/DELETE with RETURNING on a three-table join
+INSERT INTO ft2 (c1,c2,c3)
+  SELECT id, id - 1200, to_char(id, 'FM00000') FROM generate_series(1201, 1300) id;
+EXPLAIN (verbose, costs off)
+UPDATE ft2 SET c3 = 'foo'
+  FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c2 = ft4.c1
+  RETURNING ft2, ft2.*, ft4, ft4.*;       -- can be pushed down
+UPDATE ft2 SET c3 = 'foo'
+  FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c2 = ft4.c1
+  RETURNING ft2, ft2.*, ft4, ft4.*;
+EXPLAIN (verbose, costs off)
+DELETE FROM ft2
+  USING ft4 LEFT JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c1 % 10 = 0 AND ft2.c2 = ft4.c1
+  RETURNING 100;                          -- can be pushed down
+DELETE FROM ft2
+  USING ft4 LEFT JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c1 % 10 = 0 AND ft2.c2 = ft4.c1
+  RETURNING 100;
+DELETE FROM ft2 WHERE ft2.c1 > 1200;
+
+-- Test UPDATE/DELETE with WHERE or JOIN/ON conditions containing
+-- user-defined operators/functions
+ALTER SERVER loopback OPTIONS (DROP extensions);
+INSERT INTO ft2 (c1,c2,c3)
+  SELECT id, id % 10, to_char(id, 'FM00000') FROM generate_series(2001, 2010) id;
+EXPLAIN (verbose, costs off)
+UPDATE ft2 SET c3 = 'bar' WHERE postgres_fdw_abs(c1) > 2000 RETURNING *;            -- can't be pushed down
+UPDATE ft2 SET c3 = 'bar' WHERE postgres_fdw_abs(c1) > 2000 RETURNING *;
+EXPLAIN (verbose, costs off)
+UPDATE ft2 SET c3 = 'baz'
+  FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 2000 AND ft2.c2 === ft4.c1
+  RETURNING ft2.*, ft4.*, ft5.*;                                                    -- can't be pushed down
+UPDATE ft2 SET c3 = 'baz'
+  FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 2000 AND ft2.c2 === ft4.c1
+  RETURNING ft2.*, ft4.*, ft5.*;
+EXPLAIN (verbose, costs off)
+DELETE FROM ft2
+  USING ft4 INNER JOIN ft5 ON (ft4.c1 === ft5.c1)
+  WHERE ft2.c1 > 2000 AND ft2.c2 = ft4.c1
+  RETURNING ft2.c1, ft2.c2, ft2.c3;       -- can't be pushed down
+DELETE FROM ft2
+  USING ft4 INNER JOIN ft5 ON (ft4.c1 === ft5.c1)
+  WHERE ft2.c1 > 2000 AND ft2.c2 = ft4.c1
+  RETURNING ft2.c1, ft2.c2, ft2.c3;
+DELETE FROM ft2 WHERE ft2.c1 > 2000;
+ALTER SERVER loopback OPTIONS (ADD extensions 'postgres_fdw');
 
 -- Test that trigger on remote table works as expected
 CREATE OR REPLACE FUNCTION "S 1".F_BRTRIG() RETURNS trigger AS $$
@@ -1150,6 +1212,10 @@ select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 commit;
 select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
 select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
+
+-- Go back to use remote-estimate mode on ft2
+VACUUM ANALYZE "S 1"."T 1";
+ALTER FOREIGN TABLE ft2 OPTIONS (SET use_remote_estimate 'true');
 
 -- Above DMLs add data with c6 as NULL in ft1, so test ORDER BY NULLS LAST and NULLs
 -- FIRST behavior here.
@@ -1797,9 +1863,9 @@ AND ftoptions @> array['fetch_size=60000'];
 ROLLBACK;
 
 -- ===================================================================
--- test partition-wise-joins
+-- test partitionwise joins
 -- ===================================================================
-SET enable_partition_wise_join=on;
+SET enable_partitionwise_join=on;
 
 CREATE TABLE fprt1 (a int, b int, c varchar) PARTITION BY RANGE(a);
 CREATE TABLE fprt1_p1 (LIKE fprt1);
@@ -1847,4 +1913,4 @@ EXPLAIN (COSTS OFF)
 SELECT t1.a,t1.b FROM fprt1 t1, LATERAL (SELECT t2.a, t2.b FROM fprt2 t2 WHERE t1.a = t2.b AND t1.b = t2.a) q WHERE t1.a%25 = 0 ORDER BY 1,2;
 SELECT t1.a,t1.b FROM fprt1 t1, LATERAL (SELECT t2.a, t2.b FROM fprt2 t2 WHERE t1.a = t2.b AND t1.b = t2.a) q WHERE t1.a%25 = 0 ORDER BY 1,2;
 
-RESET enable_partition_wise_join;
+RESET enable_partitionwise_join;
