@@ -1358,7 +1358,7 @@ File
 PathNameOpenFile(const char *fileName, int fileFlags)
 {
 	RWFWriteLifeHint hint = RWF_WRITE_LIFE_EXTREME;
-	return PathNameOpenFileHint(fileName, fileFlags, &hint);
+	return PathNameOpenFileHint(fileName, fileFlags, NULL);
 }
 
 File
@@ -1417,8 +1417,8 @@ PathNameOpenFilePerm(const char *fileName, int fileFlags, mode_t fileMode, RWFWr
 
 	if (hint != NULL)
 		fcntl(vfdP->fd, F_SET_RW_HINT, hint);
-	else
-		fcntl(vfdP->fd, F_SET_RW_HINT, &defaulthint);
+	/*else*/
+		/*fcntl(vfdP->fd, F_SET_RW_HINT, &defaulthint);*/
 
 	Insert(file);
 
