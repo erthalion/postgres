@@ -5557,10 +5557,10 @@ DATA(insert OID = 3444 ( pg_control_init PGNSP PGUID 12 1 0 0 0 f f f t f v s 0 
 DESCR("pg_controldata init state information as a function");
 
 /* type subscripting support */
-DATA(insert OID = 4001 (  jsonb_subscript_handler PGNSP PGUID 12 1 0 0 0 f f f f t f i s 1 0 "2281" "2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscript_handler _null_ _null_ _null_ ));
+DATA(insert OID = 4001 (  jsonb_subscript_handler PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 "2281" "2281" _null_ _null_ _null_ _null_ _null_ jsonb_subscript_handler _null_ _null_ _null_ ));
 DESCR("Jsonb subscripting logic");
 
-DATA(insert OID = 4004 (  array_subscript_handler PGNSP PGUID 12 1 0 0 0 f f f f t f i s 1 0 "2281" "2281" _null_ _null_ _null_ _null_ _null_ array_subscript_handler _null_ _null_ _null_ ));
+DATA(insert OID = 4004 (  array_subscript_handler PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 "2281" "2281" _null_ _null_ _null_ _null_ _null_ array_subscript_handler _null_ _null_ _null_ ));
 DESCR("Array subscripting logic");
 
 /* collation management functions */
