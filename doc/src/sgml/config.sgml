@@ -2778,7 +2778,7 @@ include_dir 'conf.d'
       <listitem>
        <para>
         Write a message to the server log if checkpoints caused by
-        the filling of checkpoint segment files happen closer together
+        the filling of WAL segment files happen closer together
         than this many seconds (which suggests that
         <varname>max_wal_size</varname> ought to be raised).  The default is
         30 seconds (<literal>30s</literal>).  Zero disables the warning.
@@ -3123,7 +3123,7 @@ include_dir 'conf.d'
         in this list, and
         that are both currently connected and streaming data in real-time
         (as shown by a state of <literal>streaming</literal> in the
-        <link linkend="monitoring-stats-views-table">
+        <link linkend="pg-stat-replication-view">
         <literal>pg_stat_replication</literal></link> view).
         Specifying more than one synchronous standby can allow for very high
         availability and protection against data loss.
@@ -3371,7 +3371,7 @@ ANY <replaceable class="parameter">num_sync</replaceable> ( <replaceable class="
        Specifies the minimum frequency for the WAL receiver
        process on the standby to send information about replication progress
        to the primary or upstream standby, where it can be seen using the
-       <link linkend="monitoring-stats-views-table">
+       <link linkend="pg-stat-replication-view">
        <literal>pg_stat_replication</literal></link> view.  The standby will report
        the last write-ahead log location it has written, the last position it
        has flushed to disk, and the last position it has applied.
@@ -6330,6 +6330,13 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
        </para>
 
        <para>
+        For more information on schema handling, see
+        <xref linkend="ddl-schemas"/>.  In particular, the default
+        configuration is suitable only when the database has a single user or
+        a few mutually-trusting users.
+       </para>
+
+       <para>
         The current effective value of the search path can be examined
         via the <acronym>SQL</acronym> function
         <function>current_schemas</function>
@@ -6340,9 +6347,6 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
         appearing in <varname>search_path</varname> were resolved.
        </para>
 
-       <para>
-        For more information on schema handling, see <xref linkend="ddl-schemas"/>.
-       </para>
       </listitem>
      </varlistentry>
 

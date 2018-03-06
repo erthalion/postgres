@@ -2689,6 +2689,7 @@ _outCreateStatsStmt(StringInfo str, const CreateStatsStmt *node)
 	WRITE_NODE_FIELD(stat_types);
 	WRITE_NODE_FIELD(exprs);
 	WRITE_NODE_FIELD(relations);
+	WRITE_STRING_FIELD(stxcomment);
 	WRITE_BOOL_FIELD(if_not_exists);
 }
 

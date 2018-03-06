@@ -1208,6 +1208,7 @@ static bool
 _equalCallStmt(const CallStmt *a, const CallStmt *b)
 {
 	COMPARE_NODE_FIELD(funccall);
+	COMPARE_NODE_FIELD(funcexpr);
 
 	return true;
 }
@@ -1364,6 +1365,7 @@ _equalCreateStatsStmt(const CreateStatsStmt *a, const CreateStatsStmt *b)
 	COMPARE_NODE_FIELD(stat_types);
 	COMPARE_NODE_FIELD(exprs);
 	COMPARE_NODE_FIELD(relations);
+	COMPARE_STRING_FIELD(stxcomment);
 	COMPARE_SCALAR_FIELD(if_not_exists);
 
 	return true;

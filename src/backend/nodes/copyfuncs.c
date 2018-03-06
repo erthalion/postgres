@@ -3233,6 +3233,7 @@ _copyCallStmt(const CallStmt *from)
 	CallStmt   *newnode = makeNode(CallStmt);
 
 	COPY_NODE_FIELD(funccall);
+	COPY_NODE_FIELD(funcexpr);
 
 	return newnode;
 }
@@ -3425,6 +3426,7 @@ _copyCreateStatsStmt(const CreateStatsStmt *from)
 	COPY_NODE_FIELD(stat_types);
 	COPY_NODE_FIELD(exprs);
 	COPY_NODE_FIELD(relations);
+	COPY_STRING_FIELD(stxcomment);
 	COPY_SCALAR_FIELD(if_not_exists);
 
 	return newnode;

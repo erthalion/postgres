@@ -57,6 +57,12 @@ CREATE TABLE "S 1"."T 4" (
 	CONSTRAINT t4_pkey PRIMARY KEY (c1)
 );
 
+-- Disable autovacuum for these tables to avoid unexpected effects of that
+ALTER TABLE "S 1"."T 1" SET (autovacuum_enabled = 'false');
+ALTER TABLE "S 1"."T 2" SET (autovacuum_enabled = 'false');
+ALTER TABLE "S 1"."T 3" SET (autovacuum_enabled = 'false');
+ALTER TABLE "S 1"."T 4" SET (autovacuum_enabled = 'false');
+
 INSERT INTO "S 1"."T 1"
 	SELECT id,
 	       id % 10,
@@ -88,6 +94,15 @@ ANALYZE "S 1"."T 1";
 ANALYZE "S 1"."T 2";
 ANALYZE "S 1"."T 3";
 ANALYZE "S 1"."T 4";
+
+-- record relpages for T 1
+create temp table save_t_1_relpages as
+  select relpages as old_relpages from pg_class where relname = 'T 1';
+
+select relpages - (select old_relpages from save_t_1_relpages) as pg_delta,
+  reltuples from pg_class where relname = 'T 1';
+select (histogram_bounds::text::int[])[array_length(histogram_bounds,1)]
+  from pg_stats where tablename = 'T 1' and attname = 'C 1';
 
 -- ===================================================================
 -- create foreign tables
@@ -1068,11 +1083,6 @@ explain (verbose, costs off) select * from ft3 f, loct3 l
 -- ===================================================================
 -- test writable foreign table stuff
 -- ===================================================================
--- Autovacuum on the remote side might affect remote estimates,
--- so use local stats on ft2 as well
-ALTER FOREIGN TABLE ft2 OPTIONS (SET use_remote_estimate 'false');
-ANALYZE ft2;
-
 EXPLAIN (verbose, costs off)
 INSERT INTO ft2 (c1,c2,c3) SELECT c1+1000,c2+100, c3 || c3 FROM ft2 LIMIT 20;
 INSERT INTO ft2 (c1,c2,c3) SELECT c1+1000,c2+100, c3 || c3 FROM ft2 LIMIT 20;
@@ -1138,6 +1148,10 @@ INSERT INTO ft2 (c1,c2,c3)
 EXPLAIN (verbose, costs off)
 UPDATE ft2 SET c3 = 'bar' WHERE postgres_fdw_abs(c1) > 2000 RETURNING *;            -- can't be pushed down
 UPDATE ft2 SET c3 = 'bar' WHERE postgres_fdw_abs(c1) > 2000 RETURNING *;
+select relpages - (select old_relpages from save_t_1_relpages) as pg_delta,
+  reltuples from pg_class where relname = 'T 1';
+select (histogram_bounds::text::int[])[array_length(histogram_bounds,1)]
+  from pg_stats where tablename = 'T 1' and attname = 'C 1';
 EXPLAIN (verbose, costs off)
 UPDATE ft2 SET c3 = 'baz'
   FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
@@ -1213,9 +1227,7 @@ commit;
 select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
 select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 
--- Go back to use remote-estimate mode on ft2
 VACUUM ANALYZE "S 1"."T 1";
-ALTER FOREIGN TABLE ft2 OPTIONS (SET use_remote_estimate 'true');
 
 -- Above DMLs add data with c6 as NULL in ft1, so test ORDER BY NULLS LAST and NULLs
 -- FIRST behavior here.
@@ -1264,6 +1276,7 @@ ALTER FOREIGN TABLE ft1 DROP CONSTRAINT ft1_c2negative;
 -- ===================================================================
 
 CREATE TABLE base_tbl (a int, b int);
+ALTER TABLE base_tbl SET (autovacuum_enabled = 'false');
 CREATE FOREIGN TABLE foreign_tbl (a int, b int)
   SERVER loopback OPTIONS(table_name 'base_tbl');
 CREATE VIEW rw_view AS SELECT * FROM foreign_tbl
@@ -1287,6 +1300,7 @@ DROP TABLE base_tbl;
 -- test serial columns (ie, sequence-based defaults)
 -- ===================================================================
 create table loc1 (f1 serial, f2 text);
+alter table loc1 set (autovacuum_enabled = 'false');
 create foreign table rem1 (f1 serial, f2 text)
   server loopback options(table_name 'loc1');
 select pg_catalog.setval('rem1_f1_seq', 10, false);
@@ -1603,6 +1617,8 @@ DROP TRIGGER trig_row_after_delete ON rem1;
 
 CREATE TABLE a (aa TEXT);
 CREATE TABLE loct (aa TEXT, bb TEXT);
+ALTER TABLE a SET (autovacuum_enabled = 'false');
+ALTER TABLE loct SET (autovacuum_enabled = 'false');
 CREATE FOREIGN TABLE b (bb TEXT) INHERITS (a)
   SERVER loopback OPTIONS (table_name 'loct');
 
@@ -1649,12 +1665,18 @@ DROP TABLE loct;
 create table loct1 (f1 int, f2 int, f3 int);
 create table loct2 (f1 int, f2 int, f3 int);
 
+alter table loct1 set (autovacuum_enabled = 'false');
+alter table loct2 set (autovacuum_enabled = 'false');
+
 create table foo (f1 int, f2 int);
 create foreign table foo2 (f3 int) inherits (foo)
   server loopback options (table_name 'loct1');
 create table bar (f1 int, f2 int);
 create foreign table bar2 (f3 int) inherits (bar)
   server loopback options (table_name 'loct2');
+
+alter table foo set (autovacuum_enabled = 'false');
+alter table bar set (autovacuum_enabled = 'false');
 
 insert into foo values(1,1);
 insert into foo values(3,3);
@@ -1870,6 +1892,8 @@ SET enable_partitionwise_join=on;
 CREATE TABLE fprt1 (a int, b int, c varchar) PARTITION BY RANGE(a);
 CREATE TABLE fprt1_p1 (LIKE fprt1);
 CREATE TABLE fprt1_p2 (LIKE fprt1);
+ALTER TABLE fprt1_p1 SET (autovacuum_enabled = 'false');
+ALTER TABLE fprt1_p2 SET (autovacuum_enabled = 'false');
 INSERT INTO fprt1_p1 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 249, 2) i;
 INSERT INTO fprt1_p2 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(250, 499, 2) i;
 CREATE FOREIGN TABLE ftprt1_p1 PARTITION OF fprt1 FOR VALUES FROM (0) TO (250)
@@ -1883,6 +1907,8 @@ ANALYZE fprt1_p2;
 CREATE TABLE fprt2 (a int, b int, c varchar) PARTITION BY RANGE(b);
 CREATE TABLE fprt2_p1 (LIKE fprt2);
 CREATE TABLE fprt2_p2 (LIKE fprt2);
+ALTER TABLE fprt2_p1 SET (autovacuum_enabled = 'false');
+ALTER TABLE fprt2_p2 SET (autovacuum_enabled = 'false');
 INSERT INTO fprt2_p1 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(0, 249, 3) i;
 INSERT INTO fprt2_p2 SELECT i, i, to_char(i/50, 'FM0000') FROM generate_series(250, 499, 3) i;
 CREATE FOREIGN TABLE ftprt2_p1 PARTITION OF fprt2 FOR VALUES FROM (0) TO (250)
@@ -1912,5 +1938,10 @@ SELECT t1,t2 FROM fprt1 t1 JOIN fprt2 t2 ON (t1.a = t2.b and t1.b = t2.a) WHERE 
 EXPLAIN (COSTS OFF)
 SELECT t1.a,t1.b FROM fprt1 t1, LATERAL (SELECT t2.a, t2.b FROM fprt2 t2 WHERE t1.a = t2.b AND t1.b = t2.a) q WHERE t1.a%25 = 0 ORDER BY 1,2;
 SELECT t1.a,t1.b FROM fprt1 t1, LATERAL (SELECT t2.a, t2.b FROM fprt2 t2 WHERE t1.a = t2.b AND t1.b = t2.a) q WHERE t1.a%25 = 0 ORDER BY 1,2;
+
+-- with PHVs, partition-wise join selected but no join pushdown
+EXPLAIN (COSTS OFF)
+SELECT t1.a, t1.phv, t2.b, t2.phv FROM (SELECT 't1_phv' phv, * FROM fprt1 WHERE a % 25 = 0) t1 FULL JOIN (SELECT 't2_phv' phv, * FROM fprt2 WHERE b % 25 = 0) t2 ON (t1.a = t2.b) ORDER BY t1.a, t2.b;
+SELECT t1.a, t1.phv, t2.b, t2.phv FROM (SELECT 't1_phv' phv, * FROM fprt1 WHERE a % 25 = 0) t1 FULL JOIN (SELECT 't2_phv' phv, * FROM fprt2 WHERE b % 25 = 0) t2 ON (t1.a = t2.b) ORDER BY t1.a, t2.b;
 
 RESET enable_partitionwise_join;

@@ -71,6 +71,8 @@ typedef struct AggClauseCosts
 typedef enum UpperRelationKind
 {
 	UPPERREL_SETOP,				/* result of UNION/INTERSECT/EXCEPT, if any */
+	UPPERREL_PARTIAL_GROUP_AGG, /* result of partial grouping/aggregation, if
+								 * any */
 	UPPERREL_GROUP_AGG,			/* result of grouping/aggregation, if any */
 	UPPERREL_WINDOW,			/* result of window functions, if any */
 	UPPERREL_DISTINCT,			/* result of "SELECT DISTINCT", if any */
@@ -349,7 +351,7 @@ typedef struct PartitionSchemeData
 	int16		partnatts;		/* number of partition attributes */
 	Oid		   *partopfamily;	/* OIDs of operator families */
 	Oid		   *partopcintype;	/* OIDs of opclass declared input data types */
-	Oid		   *parttypcoll;	/* OIDs of collations of partition keys. */
+	Oid		   *partcollation;	/* OIDs of partitioning collations */
 
 	/* Cached information about partition key data types. */
 	int16	   *parttyplen;
