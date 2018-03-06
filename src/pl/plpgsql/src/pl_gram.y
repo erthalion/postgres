@@ -16,6 +16,7 @@
 #include "postgres.h"
 
 #include "catalog/namespace.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "parser/parser.h"
 #include "parser/parse_type.h"
@@ -3140,10 +3141,18 @@ make_return_stmt(int location)
 	else if (plpgsql_curr_compile->fn_rettype == VOIDOID)
 	{
 		if (yylex() != ';')
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("RETURN cannot have a parameter in function returning void"),
-					 parser_errposition(yylloc)));
+		{
+			if (plpgsql_curr_compile->fn_prokind == PROKIND_PROCEDURE)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("RETURN cannot have a parameter in a procedure"),
+						 parser_errposition(yylloc)));
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
+						 errmsg("RETURN cannot have a parameter in function returning void"),
+						 parser_errposition(yylloc)));
+		}
 	}
 	else
 	{
