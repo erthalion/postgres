@@ -600,6 +600,12 @@ UPDATE table_name SET jsonb_field['key'] = 1;
 -- need to put the value in double quotes to be able to convert it to jsonb.
 SELECT * FROM table_name WHERE jsonb_field['key'] = '"value"';
 </programlisting>
+
+  There is no special indexing support for such kind of expressions, but you
+  always can create a functional index that includes it
+<programlisting>
+CREATE INDEX idx ON table_name ((jsonb_field['key']));
+</programlisting>
   </para>
  </sect2>
 
