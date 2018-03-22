@@ -131,7 +131,7 @@ sub mkvcbuild
 	our @pgcommonbkndfiles = @pgcommonallfiles;
 
 	our @pgfeutilsfiles = qw(
-	  mbprint.c print.c psqlscan.l psqlscan.c simple_list.c string_utils.c);
+	  conditional.c mbprint.c print.c psqlscan.l psqlscan.c simple_list.c string_utils.c);
 
 	$libpgport = $solution->AddProject('libpgport', 'lib', 'misc');
 	$libpgport->AddDefine('FRONTEND');
@@ -182,6 +182,7 @@ sub mkvcbuild
    # if building without OpenSSL
 	if (!$solution->{options}->{openssl})
 	{
+		$postgres->RemoveFile('src/backend/libpq/be-secure-common.c');
 		$postgres->RemoveFile('src/backend/libpq/be-secure-openssl.c');
 	}
 

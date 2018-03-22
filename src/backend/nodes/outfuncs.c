@@ -272,6 +272,7 @@ _outPlannedStmt(StringInfo str, const PlannedStmt *node)
 	WRITE_BOOL_FIELD(transientPlan);
 	WRITE_BOOL_FIELD(dependsOnRole);
 	WRITE_BOOL_FIELD(parallelModeNeeded);
+	WRITE_BOOL_FIELD(jitFlags);
 	WRITE_NODE_FIELD(planTree);
 	WRITE_NODE_FIELD(rtable);
 	WRITE_NODE_FIELD(resultRelations);
@@ -3235,7 +3236,7 @@ _outValue(StringInfo str, const Value *value)
 	switch (value->type)
 	{
 		case T_Integer:
-			appendStringInfo(str, "%ld", value->val.ival);
+			appendStringInfo(str, "%d", value->val.ival);
 			break;
 		case T_Float:
 

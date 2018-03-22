@@ -134,8 +134,6 @@ static void subquery_push_qual(Query *subquery,
 static void recurse_push_qual(Node *setOp, Query *topquery,
 				  RangeTblEntry *rte, Index rti, Node *qual);
 static void remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel);
-static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
-						List *live_childrels);
 
 
 /*
@@ -1326,7 +1324,7 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
  * parameterization or ordering. Similarly it collects partial paths from
  * non-dummy children to create partial append paths.
  */
-static void
+void
 add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 						List *live_childrels)
 {
@@ -1413,8 +1411,12 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 		 * If child has an unparameterized cheapest-total path, add that to
 		 * the unparameterized Append path we are constructing for the parent.
 		 * If not, there's no workable unparameterized path.
+		 *
+		 * With partitionwise aggregates, the child rel's pathlist may be
+		 * empty, so don't assume that a path exists here.
 		 */
-		if (childrel->cheapest_total_path->param_info == NULL)
+		if (childrel->pathlist != NIL &&
+			childrel->cheapest_total_path->param_info == NULL)
 			accumulate_append_subpath(childrel->cheapest_total_path,
 									  &subpaths, NULL);
 		else
@@ -1574,7 +1576,7 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 
 		/*
 		 * If the use of parallel append is permitted, always request at least
-		 * log2(# of children) paths.  We assume it can be useful to have
+		 * log2(# of children) workers.  We assume it can be useful to have
 		 * extra workers in this case because they will be spread out across
 		 * the children.  The precise formula is just a guess, but we don't
 		 * want to end up with a radically different answer for a table with N
@@ -1681,6 +1683,13 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 		{
 			RelOptInfo *childrel = (RelOptInfo *) lfirst(lcr);
 			Path	   *subpath;
+
+			if (childrel->pathlist == NIL)
+			{
+				/* failed to make a suitable path for this child */
+				subpaths_valid = false;
+				break;
+			}
 
 			subpath = get_cheapest_parameterized_child_path(root,
 															childrel,
@@ -2178,6 +2187,28 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 		add_path(rel, (Path *)
 				 create_subqueryscan_path(root, rel, subpath,
 										  pathkeys, required_outer));
+	}
+
+	/* If consider_parallel is false, there should be no partial paths. */
+	Assert(sub_final_rel->consider_parallel ||
+		   sub_final_rel->partial_pathlist == NIL);
+
+	/* Same for partial paths. */
+	foreach(lc, sub_final_rel->partial_pathlist)
+	{
+		Path	   *subpath = (Path *) lfirst(lc);
+		List	   *pathkeys;
+
+		/* Convert subpath's pathkeys to outer representation */
+		pathkeys = convert_subquery_pathkeys(root,
+											 rel,
+											 subpath->pathkeys,
+											 make_tlist_from_pathtarget(subpath->pathtarget));
+
+		/* Generate outer path using this subpath */
+		add_partial_path(rel, (Path *)
+						 create_subqueryscan_path(root, rel, subpath,
+												  pathkeys, required_outer));
 	}
 }
 
