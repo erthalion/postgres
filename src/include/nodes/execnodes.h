@@ -528,6 +528,14 @@ typedef struct EState
 
 	/* The per-query shared memory area to use for parallel execution. */
 	struct dsa_area *es_query_dsa;
+
+	/*
+	 * JIT information. es_jit_flags indicates whether JIT should be performed
+	 * and with which options.  es_jit is created on-demand when JITing is
+	 * performed.
+	 */
+	int			es_jit_flags;
+	struct JitContext *es_jit;
 } EState;
 
 
@@ -989,20 +997,21 @@ typedef struct ModifyTableState
 	List	  **mt_arowmarks;	/* per-subplan ExecAuxRowMark lists */
 	EPQState	mt_epqstate;	/* for evaluating EvalPlanQual rechecks */
 	bool		fireBSTriggers; /* do we need to fire stmt triggers? */
-	OnConflictAction mt_onconflict; /* ON CONFLICT type */
-	List	   *mt_arbiterindexes;	/* unique index OIDs to arbitrate taking
-									 * alt path */
 	TupleTableSlot *mt_existing;	/* slot to store existing target tuple in */
 	List	   *mt_excludedtlist;	/* the excluded pseudo relation's tlist  */
 	TupleTableSlot *mt_conflproj;	/* CONFLICT ... SET ... projection target */
-	struct PartitionTupleRouting *mt_partition_tuple_routing;
+
 	/* Tuple-routing support info */
-	struct TransitionCaptureState *mt_transition_capture;
+	struct PartitionTupleRouting *mt_partition_tuple_routing;
+
 	/* controls transition table population for specified operation */
-	struct TransitionCaptureState *mt_oc_transition_capture;
+	struct TransitionCaptureState *mt_transition_capture;
+
 	/* controls transition table population for INSERT...ON CONFLICT UPDATE */
-	TupleConversionMap **mt_per_subplan_tupconv_maps;
+	struct TransitionCaptureState *mt_oc_transition_capture;
+
 	/* Per plan map for tuple conversion from child to root */
+	TupleConversionMap **mt_per_subplan_tupconv_maps;
 } ModifyTableState;
 
 /* ----------------

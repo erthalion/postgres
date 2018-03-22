@@ -798,7 +798,6 @@ InsertPgClassTuple(Relation pg_class_desc,
 	values[Anum_pg_class_relnatts - 1] = Int16GetDatum(rd_rel->relnatts);
 	values[Anum_pg_class_relchecks - 1] = Int16GetDatum(rd_rel->relchecks);
 	values[Anum_pg_class_relhasoids - 1] = BoolGetDatum(rd_rel->relhasoids);
-	values[Anum_pg_class_relhaspkey - 1] = BoolGetDatum(rd_rel->relhaspkey);
 	values[Anum_pg_class_relhasrules - 1] = BoolGetDatum(rd_rel->relhasrules);
 	values[Anum_pg_class_relhastriggers - 1] = BoolGetDatum(rd_rel->relhastriggers);
 	values[Anum_pg_class_relrowsecurity - 1] = BoolGetDatum(rd_rel->relrowsecurity);
@@ -807,6 +806,7 @@ InsertPgClassTuple(Relation pg_class_desc,
 	values[Anum_pg_class_relispopulated - 1] = BoolGetDatum(rd_rel->relispopulated);
 	values[Anum_pg_class_relreplident - 1] = CharGetDatum(rd_rel->relreplident);
 	values[Anum_pg_class_relispartition - 1] = BoolGetDatum(rd_rel->relispartition);
+	values[Anum_pg_class_relrewrite - 1] = ObjectIdGetDatum(rd_rel->relrewrite);
 	values[Anum_pg_class_relfrozenxid - 1] = TransactionIdGetDatum(rd_rel->relfrozenxid);
 	values[Anum_pg_class_relminmxid - 1] = MultiXactIdGetDatum(rd_rel->relminmxid);
 	if (relacl != (Datum) 0)
@@ -1040,6 +1040,7 @@ heap_create_with_catalog(const char *relname,
 						 bool use_user_acl,
 						 bool allow_system_table_mods,
 						 bool is_internal,
+						 Oid relrewrite,
 						 ObjectAddress *typaddress)
 {
 	Relation	pg_class_desc;
@@ -1177,6 +1178,8 @@ heap_create_with_catalog(const char *relname,
 							   allow_system_table_mods);
 
 	Assert(relid == RelationGetRelid(new_rel_desc));
+
+	new_rel_desc->rd_rel->relrewrite = relrewrite;
 
 	/*
 	 * Decide whether to create an array type over the relation's rowtype. We
@@ -1772,7 +1775,8 @@ heap_drop_with_catalog(Oid relid)
 	 * could attempt to access the just-dropped relation as its partition. We
 	 * must therefore take a table lock strong enough to prevent all queries
 	 * on the table from proceeding until we commit and send out a
-	 * shared-cache-inval notice that will make them update their index lists.
+	 * shared-cache-inval notice that will make them update their partition
+	 * descriptors.
 	 */
 	tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
 	if (!HeapTupleIsValid(tuple))
@@ -3250,6 +3254,9 @@ RemovePartitionKeyByRelId(Oid relid)
  *		Update pg_class tuple of rel to store the partition bound and set
  *		relispartition to true
  *
+ * If this is the default partition, also update the default partition OID in
+ * pg_partitioned_table.
+ *
  * Also, invalidate the parent's relcache, so that the next rebuild will load
  * the new partition's info into its partition descriptor.  If there is a
  * default partition, we must invalidate its relcache entry as well.
@@ -3300,6 +3307,17 @@ StorePartitionBound(Relation rel, Relation parent, PartitionBoundSpec *bound)
 	CatalogTupleUpdate(classRel, &newtuple->t_self, newtuple);
 	heap_freetuple(newtuple);
 	heap_close(classRel, RowExclusiveLock);
+
+	/*
+	 * If we're storing bounds for the default partition, update
+	 * pg_partitioned_table too.
+	 */
+	if (bound->is_default)
+		update_default_partition_oid(RelationGetRelid(parent),
+									 RelationGetRelid(rel));
+
+	/* Make these updates visible */
+	CommandCounterIncrement();
 
 	/*
 	 * The partition constraint for the default partition depends on the

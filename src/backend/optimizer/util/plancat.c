@@ -1209,7 +1209,7 @@ get_relation_constraints(PlannerInfo *root,
 			 */
 			cexpr = eval_const_expressions(root, cexpr);
 
-			cexpr = (Node *) canonicalize_qual((Expr *) cexpr);
+			cexpr = (Node *) canonicalize_qual((Expr *) cexpr, true);
 
 			/* Fix Vars to have the desired varno */
 			if (varno != 1)
@@ -1262,11 +1262,13 @@ get_relation_constraints(PlannerInfo *root,
 	if (pcqual)
 	{
 		/*
-		 * Run each expression through const-simplification and
-		 * canonicalization similar to check constraints.
+		 * Run the partition quals through const-simplification similar to
+		 * check constraints.  We skip canonicalize_qual, though, because
+		 * partition quals should be in canonical form already; also, since
+		 * the qual is in implicit-AND format, we'd have to explicitly convert
+		 * it to explicit-AND format and back again.
 		 */
 		pcqual = (List *) eval_const_expressions(root, (Node *) pcqual);
-		pcqual = (List *) canonicalize_qual((Expr *) pcqual);
 
 		/* Fix Vars to have the desired varno */
 		if (varno != 1)
@@ -1421,7 +1423,11 @@ relation_excluded_by_constraints(PlannerInfo *root,
 			safe_restrictions = lappend(safe_restrictions, rinfo->clause);
 	}
 
-	if (predicate_refuted_by(safe_restrictions, safe_restrictions, false))
+	/*
+	 * We can use weak refutation here, since we're comparing restriction
+	 * clauses with restriction clauses.
+	 */
+	if (predicate_refuted_by(safe_restrictions, safe_restrictions, true))
 		return true;
 
 	/*
@@ -1469,6 +1475,9 @@ relation_excluded_by_constraints(PlannerInfo *root,
 	 * an obvious optimization.  Some of the clauses might be OR clauses that
 	 * have volatile and nonvolatile subclauses, and it's OK to make
 	 * deductions with the nonvolatile parts.
+	 *
+	 * We need strong refutation because we have to prove that the constraints
+	 * would yield false, not just NULL.
 	 */
 	if (predicate_refuted_by(safe_constraints, rel->baserestrictinfo, false))
 		return true;

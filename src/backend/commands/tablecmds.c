@@ -764,6 +764,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 										  true,
 										  allowSystemTableMods,
 										  false,
+										  InvalidOid,
 										  typaddress);
 
 	/* Store inheritance information for new rel. */
@@ -859,18 +860,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		/* Update the pg_class entry. */
 		StorePartitionBound(rel, parent, bound);
 
-		/* Update the default partition oid */
-		if (bound->is_default)
-			update_default_partition_oid(RelationGetRelid(parent), relationId);
-
 		heap_close(parent, NoLock);
-
-		/*
-		 * The code that follows may also update the pg_class tuple to update
-		 * relnumchecks, so bump up the command counter to avoid the "already
-		 * updated by self" error.
-		 */
-		CommandCounterIncrement();
 	}
 
 	/*
@@ -13651,10 +13641,11 @@ ComputePartitionAttrs(Relation rel, List *partParams, AttrNumber *partattrs,
 
 /*
  * PartConstraintImpliedByRelConstraint
- *		Does scanrel's existing constraints imply the partition constraint?
+ *		Do scanrel's existing constraints imply the partition constraint?
  *
- * Existing constraints includes its check constraints and column-level
- * NOT NULL constraints and partConstraint describes the partition constraint.
+ * "Existing constraints" include its check constraints and column-level
+ * NOT NULL constraints.  partConstraint describes the partition constraint,
+ * in implicit-AND form.
  */
 bool
 PartConstraintImpliedByRelConstraint(Relation scanrel,
@@ -13718,16 +13709,21 @@ PartConstraintImpliedByRelConstraint(Relation scanrel,
 		 * fail to detect valid matches without this.
 		 */
 		cexpr = eval_const_expressions(NULL, cexpr);
-		cexpr = (Node *) canonicalize_qual((Expr *) cexpr);
+		cexpr = (Node *) canonicalize_qual((Expr *) cexpr, true);
 
 		existConstraint = list_concat(existConstraint,
 									  make_ands_implicit((Expr *) cexpr));
 	}
 
-	if (existConstraint != NIL)
-		existConstraint = list_make1(make_ands_explicit(existConstraint));
-
-	/* And away we go ... */
+	/*
+	 * Try to make the proof.  Since we are comparing CHECK constraints, we
+	 * need to use weak implication, i.e., we assume existConstraint is
+	 * not-false and try to prove the same for partConstraint.
+	 *
+	 * Note that predicate_implied_by assumes its first argument is known
+	 * immutable.  That should always be true for partition constraints, so we
+	 * don't test it here.
+	 */
 	return predicate_implied_by(partConstraint, existConstraint, true);
 }
 
@@ -14021,11 +14017,6 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	/* OK to create inheritance.  Rest of the checks performed there */
 	CreateInheritance(attachrel, rel);
 
-	/* Update the default partition oid */
-	if (cmd->bound->is_default)
-		update_default_partition_oid(RelationGetRelid(rel),
-									 RelationGetRelid(attachrel));
-
 	/*
 	 * Check that the new partition's bound is valid and does not overlap any
 	 * of existing partitions of the parent - note that it does not return on
@@ -14052,10 +14043,18 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	/* Skip validation if there are no constraints to validate. */
 	if (partConstraint)
 	{
+		/*
+		 * Run the partition quals through const-simplification similar to
+		 * check constraints.  We skip canonicalize_qual, though, because
+		 * partition quals should be in canonical form already; also, since
+		 * the qual is in implicit-AND format, we'd have to explicitly convert
+		 * it to explicit-AND format and back again.
+		 */
 		partConstraint =
 			(List *) eval_const_expressions(NULL,
 											(Node *) partConstraint);
-		partConstraint = (List *) canonicalize_qual((Expr *) partConstraint);
+
+		/* XXX this sure looks wrong */
 		partConstraint = list_make1(make_ands_explicit(partConstraint));
 
 		/*
@@ -14242,7 +14241,7 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 			DefineIndex(RelationGetRelid(attachrel), stmt, InvalidOid,
 						RelationGetRelid(idxRel),
 						constraintOid,
-						false, false, false, false, false);
+						true, false, false, false, false);
 		}
 
 		index_close(idxRel, AccessShareLock);
@@ -14278,7 +14277,7 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 
 	/*
 	 * We must lock the default partition, because detaching this partition
-	 * will changing its partition constrant.
+	 * will change its partition constraint.
 	 */
 	defaultPartOid =
 		get_default_oid_from_partdesc(RelationGetPartitionDesc(rel));
@@ -14321,19 +14320,17 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 	if (OidIsValid(defaultPartOid))
 	{
 		/*
-		 * If the detach relation is the default partition itself, invalidate
-		 * its entry in pg_partitioned_table.
+		 * If the relation being detached is the default partition itself,
+		 * remove it from the parent's pg_partitioned_table entry.
+		 *
+		 * If not, we must invalidate default partition's relcache entry, as
+		 * in StorePartitionBound: its partition constraint depends on every
+		 * other partition's partition constraint.
 		 */
 		if (RelationGetRelid(partRel) == defaultPartOid)
 			update_default_partition_oid(RelationGetRelid(rel), InvalidOid);
 		else
-		{
-			/*
-			 * We must invalidate default partition's relcache, for the same
-			 * reasons explained in StorePartitionBound().
-			 */
 			CacheInvalidateRelcacheByRelid(defaultPartOid);
-		}
 	}
 
 	/* detach indexes too */
@@ -14570,8 +14567,6 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 			ConstraintSetParentConstraint(cldConstrId, constraintOid);
 
 		pfree(attmap);
-
-		CommandCounterIncrement();
 
 		validatePartitionedIndex(parentIdx, parentTbl);
 	}

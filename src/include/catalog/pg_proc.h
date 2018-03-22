@@ -2427,7 +2427,7 @@ DESCR("exponentiation");
 DATA(insert OID = 2169 ( power					PGNSP PGUID 12 1 0 0 0 f f f t f i s 2 0 1700 "1700 1700" _null_ _null_ _null_ _null_ _null_	numeric_power _null_ _null_ _null_ ));
 DESCR("exponentiation");
 DATA(insert OID = 1739 ( numeric_power			PGNSP PGUID 12 1 0 0 0 f f f t f i s 2 0 1700 "1700 1700" _null_ _null_ _null_ _null_ _null_	numeric_power _null_ _null_ _null_ ));
-DATA(insert OID = 8888 ( scale					PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 23 "1700" _null_ _null_ _null_ _null_ _null_ numeric_scale _null_ _null_ _null_ ));
+DATA(insert OID = 3281 ( scale					PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 23 "1700" _null_ _null_ _null_ _null_ _null_ numeric_scale _null_ _null_ _null_ ));
 DESCR("number of decimal digits in the fractional part");
 DATA(insert OID = 1740 ( numeric				PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 1700 "23" _null_ _null_ _null_ _null_ _null_ int4_numeric _null_ _null_ _null_ ));
 DESCR("convert int4 to numeric");
@@ -3371,6 +3371,8 @@ DATA(insert OID = 3935 ( pg_sleep_for			PGNSP PGUID 14 1 0 0 0 f f f t f v s 1 0
 DESCR("sleep for the specified interval");
 DATA(insert OID = 3936 ( pg_sleep_until			PGNSP PGUID 14 1 0 0 0 f f f t f v s 1 0 2278 "1184" _null_ _null_ _null_ _null_ _null_ "select pg_catalog.pg_sleep(extract(epoch from $1) operator(pg_catalog.-) extract(epoch from pg_catalog.clock_timestamp()))" _null_ _null_ _null_ ));
 DESCR("sleep until the specified time");
+DATA(insert OID = 315 (  pg_jit_available	PGNSP PGUID 12 1 0 0 0 f f f t f v s 0 0 16 "" _null_ _null_ _null_ _null_ _null_ pg_jit_available _null_ _null_ _null_ ));
+DESCR("Is JIT compilation available in this session?");
 
 DATA(insert OID = 2971 (  text				PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 25 "16" _null_ _null_ _null_ _null_ _null_ booltext _null_ _null_ _null_ ));
 DESCR("convert boolean to text");
