@@ -346,7 +346,7 @@ FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks)
  * new free-space information.
  */
 void
-FreeSpaceMapVacuum(Relation rel, Size threshold)
+FreeSpaceMapVacuum(Relation rel)
 {
 	bool		dummy;
 
@@ -650,8 +650,6 @@ fsm_extend(Relation rel, BlockNumber fsm_nblocks)
  * If minValue > 0, the updated page is also searched for a page with at
  * least minValue of free space. If one is found, its slot number is
  * returned, -1 otherwise.
- *
- * If minValue == 0, the value at the root node is returned.
  */
 static int
 fsm_set_and_search(Relation rel, FSMAddress addr, uint16 slot,
@@ -857,14 +855,6 @@ fsm_vacuum_page(Relation rel, FSMAddress addr,
 		for (slot = start_slot; slot <= end_slot; slot++)
 		{
 			int			child_avail;
-
-			/* Tree pruning for partial vacuums */
-			if (threshold)
-			{
-				child_avail = fsm_get_avail(page, slot);
-				if (child_avail >= threshold)
-					continue;
-			}
 
 			CHECK_FOR_INTERRUPTS();
 
