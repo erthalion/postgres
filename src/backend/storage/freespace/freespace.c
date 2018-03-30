@@ -674,10 +674,6 @@ fsm_set_and_search(Relation rel, FSMAddress addr, uint16 slot,
 								   addr.level == FSM_BOTTOM_LEVEL,
 								   true);
 	}
-	 else
-	{
-		newslot = fsm_get_avail(page, 0);
-	}
 
 	UnlockReleaseBuffer(buf);
 
