@@ -19,6 +19,9 @@
 #define PGJIT_NONE     0
 #define PGJIT_PERFORM  1 << 0
 #define PGJIT_OPT3     1 << 1
+#define PGJIT_INLINE   1 << 2
+#define PGJIT_EXPR	   1 << 3
+#define PGJIT_DEFORM   1 << 4
 
 
 typedef struct JitContext
@@ -34,6 +37,9 @@ typedef struct JitContext
 	/* accumulated time to generate code */
 	instr_time	generation_counter;
 
+	/* accumulated time for inlining */
+	instr_time	inlining_counter;
+
 	/* accumulated time for optimization */
 	instr_time	optimization_counter;
 
@@ -47,11 +53,14 @@ extern void _PG_jit_provider_init(JitProviderCallbacks *cb);
 typedef void (*JitProviderInit) (JitProviderCallbacks *cb);
 typedef void (*JitProviderResetAfterErrorCB) (void);
 typedef void (*JitProviderReleaseContextCB) (JitContext *context);
+struct ExprState;
+typedef bool (*JitProviderCompileExprCB) (struct ExprState *state);
 
 struct JitProviderCallbacks
 {
 	JitProviderResetAfterErrorCB reset_after_error;
 	JitProviderReleaseContextCB release_context;
+	JitProviderCompileExprCB compile_expr;
 };
 
 
@@ -60,12 +69,22 @@ extern bool jit_enabled;
 extern char *jit_provider;
 extern bool jit_debugging_support;
 extern bool jit_dump_bitcode;
+extern bool jit_expressions;
 extern bool jit_profiling_support;
+extern bool jit_tuple_deforming;
 extern double jit_above_cost;
+extern double jit_inline_above_cost;
 extern double jit_optimize_above_cost;
 
 
 extern void jit_reset_after_error(void);
 extern void jit_release_context(JitContext *context);
+
+/*
+ * Functions for attempting to JIT code. Callers must accept that these might
+ * not be able to perform JIT (i.e. return false).
+ */
+extern bool jit_compile_expr(struct ExprState *state);
+
 
 #endif							/* JIT_H */

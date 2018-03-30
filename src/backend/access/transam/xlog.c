@@ -2157,7 +2157,7 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic)
 
 		/*
 		 * If online backup is not in progress, mark the header to indicate
-		 * that* WAL records beginning in this page have removable backup
+		 * that WAL records beginning in this page have removable backup
 		 * blocks.  This allows the WAL archiver to know whether it is safe to
 		 * compress archived WAL data by transforming full-block records into
 		 * the non-full-block format.  It is sufficient to record this at the
@@ -9328,7 +9328,7 @@ CreateRestartPoint(int flags)
 	ereport((log_checkpoints ? LOG : DEBUG2),
 			(errmsg("recovery restart point at %X/%X",
 					(uint32) (lastCheckPoint.redo >> 32), (uint32) lastCheckPoint.redo),
-			 xtime ? errdetail("last completed transaction was at log time %s",
+			 xtime ? errdetail("Last completed transaction was at log time %s.",
 							   timestamptz_to_str(xtime)) : 0));
 
 	LWLockRelease(CheckpointLock);

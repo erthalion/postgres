@@ -29,8 +29,10 @@ extern "C"
 #endif
 
 
+#include "fmgr.h"
 #include "jit/jit.h"
 #include "nodes/pg_list.h"
+#include "access/tupdesc.h"
 
 
 typedef struct LLVMJitContext
@@ -55,10 +57,33 @@ typedef struct LLVMJitContext
 
 
 /* type and struct definitions */
+extern LLVMTypeRef TypeParamBool;
+extern LLVMTypeRef TypePGFunction;
 extern LLVMTypeRef TypeSizeT;
+extern LLVMTypeRef TypeStorageBool;
+
+extern LLVMTypeRef StructtupleDesc;
+extern LLVMTypeRef StructHeapTupleData;
+extern LLVMTypeRef StructTupleTableSlot;
+extern LLVMTypeRef StructMemoryContextData;
+extern LLVMTypeRef StructFunctionCallInfoData;
+extern LLVMTypeRef StructExprContext;
+extern LLVMTypeRef StructExprEvalStep;
+extern LLVMTypeRef StructExprState;
+extern LLVMTypeRef StructAggState;
+extern LLVMTypeRef StructAggStatePerTransData;
+extern LLVMTypeRef StructAggStatePerGroupData;
 
 extern LLVMValueRef AttributeTemplate;
 extern LLVMValueRef FuncStrlen;
+extern LLVMValueRef FuncVarsizeAny;
+extern LLVMValueRef FuncSlotGetsomeattrs;
+extern LLVMValueRef FuncSlotGetmissingattrs;
+extern LLVMValueRef FuncHeapGetsysattr;
+extern LLVMValueRef FuncMakeExpandedObjectReadOnlyInternal;
+extern LLVMValueRef FuncExecEvalArrayRefSubscript;
+extern LLVMValueRef FuncExecAggTransReparent;
+extern LLVMValueRef FuncExecAggInitGroup;
 
 
 extern void llvm_enter_fatal_on_oom(void);
@@ -73,7 +98,20 @@ extern void *llvm_get_function(LLVMJitContext *context, const char *funcname);
 extern void llvm_split_symbol_name(const char *name, char **modname, char **funcname);
 extern LLVMValueRef llvm_get_decl(LLVMModuleRef mod, LLVMValueRef f);
 extern void llvm_copy_attributes(LLVMValueRef from, LLVMValueRef to);
+extern LLVMValueRef llvm_function_reference(LLVMJitContext *context,
+						LLVMBuilderRef builder,
+						LLVMModuleRef mod,
+						FunctionCallInfo fcinfo);
 
+extern void llvm_inline(LLVMModuleRef mod);
+
+/*
+ ****************************************************************************
+ * Code ceneration functions.
+ ****************************************************************************
+ */
+extern bool llvm_compile_expr(struct ExprState *state);
+extern LLVMValueRef slot_compile_deform(struct LLVMJitContext *context, TupleDesc desc, int natts);
 
 /*
  ****************************************************************************

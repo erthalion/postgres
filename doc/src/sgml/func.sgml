@@ -10399,6 +10399,24 @@ SELECT xmlagg(x) FROM (SELECT * FROM test ORDER BY y DESC) AS tab;
     </para>
    </sect3>
 
+   <sect3>
+    <title><literal>IS NOT DOCUMENT</literal></title>
+
+    <indexterm>
+     <primary>IS NOT DOCUMENT</primary>
+    </indexterm>
+
+<synopsis>
+<replaceable>xml</replaceable> IS NOT DOCUMENT
+</synopsis>
+
+    <para>
+     The expression <literal>IS NOT DOCUMENT</literal> returns false if the
+     argument XML value is a proper XML document, true if it is not (that is,
+     it is a content fragment), or null if the argument is null.
+    </para>
+   </sect3>
+
    <sect3 id="xml-exists">
     <title><literal>XMLEXISTS</literal></title>
 
@@ -12761,7 +12779,7 @@ SELECT NULLIF(value, '(none)') ...
        <row>
         <entry>
          <literal>
-          <function>array_fill</function>(<type>anyelement</type>, <type>int[]</type>,
+          <function>array_fill</function>(<type>anyelement</type>, <type>int[]</type>
           <optional>, <type>int[]</type></optional>)
          </literal>
         </entry>
@@ -15940,6 +15958,14 @@ SELECT * FROM pg_ls_dir('.') WITH ORDINALITY AS t(ls,n);
        <entry><literal><function>pg_is_other_temp_schema(<type>oid</type>)</function></literal></entry>
        <entry><type>boolean</type></entry>
        <entry>is schema another session's temporary schema?</entry>
+      </row>
+
+      <row>
+       <entry><literal><function>pg_jit_available()</function></literal></entry>
+       <entry><type>boolean</type></entry>
+       <entry>is <acronym>JIT</acronym> compilation available in this session
+       (see <xref linkend="jit"/>)? Returns <literal>false</literal> if <xref
+       linkend="guc-jit"/> is set to false.</entry>
       </row>
 
       <row>

@@ -31,10 +31,8 @@ extern void XLogRecordPageWithFreeSpace(RelFileNode rnode, BlockNumber heapBlk,
 							Size spaceAvail);
 
 extern void FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks);
-extern void FreeSpaceMapVacuum(Relation rel, Size threshold);
-extern void UpdateFreeSpaceMap(Relation rel,
-				   BlockNumber startBlkNum,
-				   BlockNumber endBlkNum,
-				   Size freespace);
+extern void FreeSpaceMapVacuum(Relation rel);
+extern void FreeSpaceMapVacuumRange(Relation rel, BlockNumber start,
+						BlockNumber end);
 
 #endif							/* FREESPACE_H_ */

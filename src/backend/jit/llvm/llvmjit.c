@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include "jit/llvmjit.h"
+#include "jit/llvmjit_emit.h"
 
 #include "miscadmin.h"
 
@@ -45,9 +46,42 @@ typedef struct LLVMJitHandle
 
 /* types & functions commonly needed for JITing */
 LLVMTypeRef TypeSizeT;
+LLVMTypeRef TypeParamBool;
+LLVMTypeRef TypeStorageBool;
+LLVMTypeRef TypePGFunction;
+LLVMTypeRef StructHeapTupleFieldsField3;
+LLVMTypeRef StructHeapTupleFields;
+LLVMTypeRef StructHeapTupleHeaderData;
+LLVMTypeRef StructHeapTupleDataChoice;
+LLVMTypeRef StructHeapTupleData;
+LLVMTypeRef StructMinimalTupleData;
+LLVMTypeRef StructItemPointerData;
+LLVMTypeRef StructBlockId;
+LLVMTypeRef StructFormPgAttribute;
+LLVMTypeRef StructTupleConstr;
+LLVMTypeRef StructtupleDesc;
+LLVMTypeRef StructTupleTableSlot;
+LLVMTypeRef StructMemoryContextData;
+LLVMTypeRef StructPGFinfoRecord;
+LLVMTypeRef StructFmgrInfo;
+LLVMTypeRef StructFunctionCallInfoData;
+LLVMTypeRef StructExprContext;
+LLVMTypeRef StructExprEvalStep;
+LLVMTypeRef StructExprState;
+LLVMTypeRef StructAggState;
+LLVMTypeRef StructAggStatePerGroupData;
+LLVMTypeRef StructAggStatePerTransData;
 
 LLVMValueRef AttributeTemplate;
 LLVMValueRef FuncStrlen;
+LLVMValueRef FuncVarsizeAny;
+LLVMValueRef FuncSlotGetsomeattrs;
+LLVMValueRef FuncSlotGetmissingattrs;
+LLVMValueRef FuncHeapGetsysattr;
+LLVMValueRef FuncMakeExpandedObjectReadOnlyInternal;
+LLVMValueRef FuncExecEvalArrayRefSubscript;
+LLVMValueRef FuncExecAggTransReparent;
+LLVMValueRef FuncExecAggInitGroup;
 
 
 static bool llvm_session_initialized = false;
@@ -85,6 +119,7 @@ _PG_jit_provider_init(JitProviderCallbacks *cb)
 {
 	cb->reset_after_error = llvm_reset_after_error;
 	cb->release_context = llvm_release_context;
+	cb->compile_expr = llvm_compile_expr;
 }
 
 /*
@@ -213,7 +248,7 @@ llvm_get_function(LLVMJitContext *context, const char *funcname)
 
 	/*
 	 * If there is a pending / not emitted module, compile and emit now.
-	 * Otherwise we migh not find the [correct] function.
+	 * Otherwise we might not find the [correct] function.
 	 */
 	if (!context->compiled)
 	{
@@ -232,7 +267,7 @@ llvm_get_function(LLVMJitContext *context, const char *funcname)
 
 		addr = 0;
 		if (LLVMOrcGetSymbolAddressIn(handle->stack, &addr, handle->orc_handle, funcname))
-			elog(ERROR, "failed to lookup symbol \"%s\"", funcname);
+			elog(ERROR, "failed to look up symbol \"%s\"", funcname);
 		if (addr)
 			return (void *) (uintptr_t) addr;
 	}
@@ -246,11 +281,11 @@ llvm_get_function(LLVMJitContext *context, const char *funcname)
 		return (void *) (uintptr_t) addr;
 #else
 	if (LLVMOrcGetSymbolAddress(llvm_opt0_orc, &addr, funcname))
-		elog(ERROR, "failed to lookup symbol \"%s\"", funcname);
+		elog(ERROR, "failed to look up symbol \"%s\"", funcname);
 	if (addr)
 		return (void *) (uintptr_t) addr;
 	if (LLVMOrcGetSymbolAddress(llvm_opt3_orc, &addr, funcname))
-		elog(ERROR, "failed to lookup symbol \"%s\"", funcname);
+		elog(ERROR, "failed to look up symbol \"%s\"", funcname);
 	if (addr)
 		return (void *) (uintptr_t) addr;
 #endif							/* LLVM_VERSION_MAJOR */
@@ -308,6 +343,68 @@ llvm_copy_attributes(LLVMValueRef v_from, LLVMValueRef v_to)
 		LLVMAddAttributeAtIndex(v_to, LLVMAttributeFunctionIndex,
 								attrs[attno]);
 	}
+}
+
+/*
+ * Return a callable LLVMValueRef for fcinfo.
+ */
+LLVMValueRef
+llvm_function_reference(LLVMJitContext *context,
+						LLVMBuilderRef builder,
+						LLVMModuleRef mod,
+						FunctionCallInfo fcinfo)
+{
+	char	   *modname;
+	char	   *basename;
+	char	   *funcname;
+
+	LLVMValueRef v_fn;
+
+	fmgr_symbol(fcinfo->flinfo->fn_oid, &modname, &basename);
+
+	if (modname != NULL && basename != NULL)
+	{
+		/* external function in loadable library */
+		funcname = psprintf("pgextern.%s.%s", modname, basename);
+	}
+	else if (basename != NULL)
+	{
+		/* internal function */
+		funcname = psprintf("%s", basename);
+	}
+	else
+	{
+		/*
+		 * Function we don't know to handle, return pointer. We do so by
+		 * creating a global constant containing a pointer to the function.
+		 * Makes IR more readable.
+		 */
+		LLVMValueRef v_fn_addr;
+
+		funcname = psprintf("pgoidextern.%u",
+							fcinfo->flinfo->fn_oid);
+		v_fn = LLVMGetNamedGlobal(mod, funcname);
+		if (v_fn != 0)
+			return LLVMBuildLoad(builder, v_fn, "");
+
+		v_fn_addr = l_ptr_const(fcinfo->flinfo->fn_addr, TypePGFunction);
+
+		v_fn = LLVMAddGlobal(mod, TypePGFunction, funcname);
+		LLVMSetInitializer(v_fn, v_fn_addr);
+		LLVMSetGlobalConstant(v_fn, true);
+
+		return LLVMBuildLoad(builder, v_fn, "");
+		return v_fn;
+	}
+
+	/* check if function already has been added */
+	v_fn = LLVMGetNamedFunction(mod, funcname);
+	if (v_fn != 0)
+		return v_fn;
+
+	v_fn = LLVMAddFunction(mod, funcname, LLVMGetElementType(TypePGFunction));
+
+	return v_fn;
 }
 
 /*
@@ -371,6 +468,10 @@ llvm_optimize_module(LLVMJitContext *context, LLVMModuleRef module)
 	/* always use always-inliner pass */
 	if (!(context->base.flags & PGJIT_OPT3))
 		LLVMAddAlwaysInlinerPass(llvm_mpm);
+	/* if doing inlining, but no expensive optimization, add inlining pass */
+	if (context->base.flags & PGJIT_INLINE
+		&& !(context->base.flags & PGJIT_OPT3))
+		LLVMAddFunctionInliningPass(llvm_mpm);
 	LLVMRunPassManager(llvm_mpm, context->module);
 	LLVMDisposePassManager(llvm_mpm);
 
@@ -393,6 +494,16 @@ llvm_compile_module(LLVMJitContext *context)
 		compile_orc = llvm_opt3_orc;
 	else
 		compile_orc = llvm_opt0_orc;
+
+	/* perform inlining */
+	if (context->base.flags & PGJIT_INLINE)
+	{
+		INSTR_TIME_SET_CURRENT(starttime);
+		llvm_inline(context->module);
+		INSTR_TIME_SET_CURRENT(endtime);
+		INSTR_TIME_ACCUM_DIFF(context->base.inlining_counter,
+							  endtime, starttime);
+	}
 
 	if (jit_dump_bitcode)
 	{
@@ -431,12 +542,17 @@ llvm_compile_module(LLVMJitContext *context)
 	 * faster instruction selection mechanism is used.
 	 */
 	INSTR_TIME_SET_CURRENT(starttime);
-#if LLVM_VERSION_MAJOR < 5
+#if LLVM_VERSION_MAJOR > 6
 	{
-		orc_handle = LLVMOrcAddEagerlyCompiledIR(compile_orc, context->module,
-												 llvm_resolve_symbol, NULL);
+		if (LLVMOrcAddEagerlyCompiledIR(compile_orc, &orc_handle, context->module,
+										llvm_resolve_symbol, NULL))
+		{
+			elog(ERROR, "failed to JIT module");
+		}
+
+		/* LLVMOrcAddEagerlyCompiledIR takes ownership of the module */
 	}
-#else
+#elif LLVM_VERSION_MAJOR > 4
 	{
 		LLVMSharedModuleRef smod;
 
@@ -444,9 +560,15 @@ llvm_compile_module(LLVMJitContext *context)
 		if (LLVMOrcAddEagerlyCompiledIR(compile_orc, &orc_handle, smod,
 										llvm_resolve_symbol, NULL))
 		{
-			elog(ERROR, "failed to jit module");
+			elog(ERROR, "failed to JIT module");
 		}
 		LLVMOrcDisposeSharedModuleRef(smod);
+	}
+#else							/* LLVM 4.0 and 3.9 */
+	{
+		orc_handle = LLVMOrcAddEagerlyCompiledIR(compile_orc, context->module,
+												 llvm_resolve_symbol, NULL);
+		LLVMDisposeModule(context->module);
 	}
 #endif
 	INSTR_TIME_SET_CURRENT(endtime);
@@ -470,7 +592,8 @@ llvm_compile_module(LLVMJitContext *context)
 	MemoryContextSwitchTo(oldcontext);
 
 	ereport(DEBUG1,
-			(errmsg("time to opt: %.3fs, emit: %.3fs",
+			(errmsg("time to inline: %.3fs, opt: %.3fs, emit: %.3fs",
+					INSTR_TIME_GET_DOUBLE(context->base.inlining_counter),
 					INSTR_TIME_GET_DOUBLE(context->base.optimization_counter),
 					INSTR_TIME_GET_DOUBLE(context->base.emission_counter)),
 			 errhidestmt(true),
@@ -589,7 +712,7 @@ llvm_shutdown(int code, Datum arg)
 	}
 }
 
-/* helper for llvm_create_types */
+/* helper for llvm_create_types, returning a global var's type */
 static LLVMTypeRef
 load_type(LLVMModuleRef mod, const char *name)
 {
@@ -606,6 +729,31 @@ load_type(LLVMModuleRef mod, const char *name)
 	Assert(typ != NULL);
 	typ = LLVMGetElementType(typ);
 	Assert(typ != NULL);
+	return typ;
+}
+
+/* helper for llvm_create_types, returning a function's return type */
+static LLVMTypeRef
+load_return_type(LLVMModuleRef mod, const char *name)
+{
+	LLVMValueRef value;
+	LLVMTypeRef typ;
+
+	/* this'll return a *pointer* to the function */
+	value = LLVMGetNamedFunction(mod, name);
+	if (!value)
+		elog(ERROR, "function %s is unknown", name);
+
+	/* get type of function pointer */
+	typ = LLVMTypeOf(value);
+	Assert(typ != NULL);
+	/* dereference pointer */
+	typ = LLVMGetElementType(typ);
+	Assert(typ != NULL);
+	/* and look at return type */
+	typ = LLVMGetReturnType(typ);
+	Assert(typ != NULL);
+
 	return typ;
 }
 
@@ -647,9 +795,31 @@ llvm_create_types(void)
 	llvm_layout = pstrdup(LLVMGetDataLayoutStr(mod));
 
 	TypeSizeT = load_type(mod, "TypeSizeT");
+	TypeParamBool = load_return_type(mod, "FunctionReturningBool");
+	TypeStorageBool = load_type(mod, "TypeStorageBool");
+	TypePGFunction = load_type(mod, "TypePGFunction");
+	StructExprContext = load_type(mod, "StructExprContext");
+	StructExprEvalStep = load_type(mod, "StructExprEvalStep");
+	StructExprState = load_type(mod, "StructExprState");
+	StructFunctionCallInfoData = load_type(mod, "StructFunctionCallInfoData");
+	StructMemoryContextData = load_type(mod, "StructMemoryContextData");
+	StructTupleTableSlot = load_type(mod, "StructTupleTableSlot");
+	StructHeapTupleData = load_type(mod, "StructHeapTupleData");
+	StructtupleDesc = load_type(mod, "StructtupleDesc");
+	StructAggState = load_type(mod, "StructAggState");
+	StructAggStatePerGroupData = load_type(mod, "StructAggStatePerGroupData");
+	StructAggStatePerTransData = load_type(mod, "StructAggStatePerTransData");
 
 	AttributeTemplate = LLVMGetNamedFunction(mod, "AttributeTemplate");
 	FuncStrlen = LLVMGetNamedFunction(mod, "strlen");
+	FuncVarsizeAny = LLVMGetNamedFunction(mod, "varsize_any");
+	FuncSlotGetsomeattrs = LLVMGetNamedFunction(mod, "slot_getsomeattrs");
+	FuncSlotGetmissingattrs = LLVMGetNamedFunction(mod, "slot_getmissingattrs");
+	FuncHeapGetsysattr = LLVMGetNamedFunction(mod, "heap_getsysattr");
+	FuncMakeExpandedObjectReadOnlyInternal = LLVMGetNamedFunction(mod, "MakeExpandedObjectReadOnlyInternal");
+	FuncExecEvalArrayRefSubscript = LLVMGetNamedFunction(mod, "ExecEvalArrayRefSubscript");
+	FuncExecAggTransReparent = LLVMGetNamedFunction(mod, "ExecAggTransReparent");
+	FuncExecAggInitGroup = LLVMGetNamedFunction(mod, "ExecAggInitGroup");
 
 	/*
 	 * Leave the module alive, otherwise references to function would be
@@ -705,7 +875,7 @@ llvm_resolve_symbol(const char *symname, void *ctx)
 	char	   *modname;
 
 	/*
-	 * OSX prefixes all object level symbols with an underscore. But neither
+	 * macOS prefixes all object level symbols with an underscore. But neither
 	 * dlsym() nor PG's inliner expect that. So undo.
 	 */
 #if defined(__darwin__)

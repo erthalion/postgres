@@ -1762,6 +1762,17 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"jit_expressions", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Allow JIT compilation of expressions."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&jit_expressions,
+		true,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"jit_profiling_support", PGC_SU_BACKEND, DEVELOPER_OPTIONS,
 			gettext_noop("Register JIT compiled function with perf profiler."),
 			NULL,
@@ -1774,6 +1785,17 @@ static struct config_bool ConfigureNamesBool[] =
 		 * oriented option, it doesn't seem worth adding code checking
 		 * availability.
 		 */
+		NULL, NULL, NULL
+	},
+
+	{
+		{"jit_tuple_deforming", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Allow JIT compilation of tuple deforming."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&jit_tuple_deforming,
+		true,
 		NULL, NULL, NULL
 	},
 
@@ -3091,6 +3113,16 @@ static struct config_real ConfigureNamesReal[] =
 			gettext_noop("-1 disables optimization.")
 		},
 		&jit_optimize_above_cost,
+		500000, -1, DBL_MAX,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"jit_inline_above_cost", PGC_USERSET, QUERY_TUNING_COST,
+			gettext_noop("Perform JIT inlining if query is more expensive."),
+			gettext_noop("-1 disables inlining.")
+		},
+		&jit_inline_above_cost,
 		500000, -1, DBL_MAX,
 		NULL, NULL, NULL
 	},

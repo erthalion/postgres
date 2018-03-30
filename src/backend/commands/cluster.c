@@ -453,7 +453,7 @@ check_index_is_clusterable(Relation OldHeap, Oid indexOid, bool recheck, LOCKMOD
 	 * seqscan pass over the table to copy the missing rows, but that seems
 	 * expensive and tedious.
 	 */
-	if (!heap_attisnull(OldIndex->rd_indextuple, Anum_pg_index_indpred))
+	if (!heap_attisnull(OldIndex->rd_indextuple, Anum_pg_index_indpred, NULL))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot cluster on partial index \"%s\"",
@@ -1539,7 +1539,7 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 						frozenXid, cutoffMulti, mapped_tables);
 
 	/*
-	 * If it's a system catalog, queue an sinval message to flush all
+	 * If it's a system catalog, queue a sinval message to flush all
 	 * catcaches on the catalog when we reach CommandCounterIncrement.
 	 */
 	if (is_system_catalog)
@@ -1667,6 +1667,16 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 			RenameRelationInternal(toastidx,
 								   NewToastName, true);
 		}
+		relation_close(newrel, NoLock);
+	}
+
+	/* if it's not a catalog table, clear any missing attribute settings */
+	if (!is_system_catalog)
+	{
+		Relation	newrel;
+
+		newrel = heap_open(OIDOldHeap, NoLock);
+		RelationClearMissing(newrel);
 		relation_close(newrel, NoLock);
 	}
 }
