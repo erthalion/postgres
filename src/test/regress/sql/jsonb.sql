@@ -1089,6 +1089,9 @@ select to_tsvector('simple', '{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c"
 -- jsonb to tsvector with stop words
 select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": ["the eee fff ggg"], "c": {"d": "hhh. iii"}}'::jsonb);
 
+-- json to tsvector with numeric values
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::jsonb);
+
 -- ts_vector corner cases
 select to_tsvector('""'::jsonb);
 select to_tsvector('{}'::jsonb);

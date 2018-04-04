@@ -1117,6 +1117,36 @@ LANGUAGE INTERNAL
 STRICT IMMUTABLE PARALLEL SAFE
 AS 'jsonb_insert';
 
+CREATE OR REPLACE FUNCTION
+  to_tsvector(jsonb_in jsonb, all_types boolean DEFAULT false)
+RETURNS tsvector
+LANGUAGE INTERNAL
+STRICT IMMUTABLE PARALLEL SAFE
+AS 'jsonb_to_tsvector';
+
+CREATE OR REPLACE FUNCTION
+  to_tsvector(config_in regconfig, jsonb_in jsonb,
+            all_types boolean DEFAULT false)
+RETURNS tsvector
+LANGUAGE INTERNAL
+STRICT IMMUTABLE PARALLEL SAFE
+AS 'jsonb_to_tsvector_byid';
+
+CREATE OR REPLACE FUNCTION
+  to_tsvector(json_in json, all_types boolean DEFAULT false)
+RETURNS tsvector
+LANGUAGE INTERNAL
+STRICT IMMUTABLE PARALLEL SAFE
+AS 'json_to_tsvector';
+
+CREATE OR REPLACE FUNCTION
+  to_tsvector(config_in regconfig, json_in json,
+            all_types boolean DEFAULT false)
+RETURNS tsvector
+LANGUAGE INTERNAL
+STRICT IMMUTABLE PARALLEL SAFE
+AS 'json_to_tsvector_byid';
+
 --
 -- The default permissions for functions mean that anyone can execute them.
 -- A number of functions shouldn't be executable by just anyone, but rather

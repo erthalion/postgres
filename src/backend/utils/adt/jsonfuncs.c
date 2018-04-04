@@ -474,8 +474,9 @@ static void setPathArray(JsonbIterator **it, Datum *path_elems,
 			 int level, Jsonb *newval, uint32 nelems, int op_type);
 static void addJsonbToParseState(JsonbParseState **jbps, Jsonb *jb);
 
-/* function supporting iterate_json_string_values */
+/* function supporting iterate_json_values */
 static void iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype);
+static void iterate_all_values_scalar(void *state, char *token, JsonTokenType tokentype);
 
 /* functions supporting transform_json_string_values */
 static void transform_string_values_object_start(void *state);
@@ -4939,8 +4940,8 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
 }
 
 /*
- * Iterate over jsonb string values or elements, and pass them together with an
- * iteration state to a specified JsonIterateStringValuesAction.
+ * Iterate over jsonb string/numeric values or elements, and pass them together
+ * with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
 iterate_jsonb_string_values(Jsonb *jb, void *state, JsonIterateStringValuesAction action)
@@ -4961,11 +4962,50 @@ iterate_jsonb_string_values(Jsonb *jb, void *state, JsonIterateStringValuesActio
 }
 
 /*
- * Iterate over json string values or elements, and pass them together with an
+ * Iterate over jsonb string/numeric/boolean values or elements, and pass them
+ * together with an iteration state to a specified JsonIterateStringValuesAction.
+ */
+void
+iterate_jsonb_all_values(Jsonb *jb, void *state, JsonIterateStringValuesAction action)
+{
+	JsonbIterator *it;
+	JsonbValue	v;
+	JsonbIteratorToken type;
+	char *val;
+
+	it = JsonbIteratorInit(&jb->root);
+
+	while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+	{
+		if (type == WJB_VALUE || type == WJB_ELEM)
+		{
+
+			if (v.type == jbvString)
+				action(state, v.val.string.val, v.val.string.len);
+
+			if (v.type == jbvNumeric)
+			{
+				val = DatumGetCString(DirectFunctionCall1(numeric_out,
+									  NumericGetDatum(v.val.numeric)));
+				action(state, val, strlen(val));
+			}
+
+			if (v.type == jbvNumeric)
+			{
+				val = v.val.boolean ? "true" : "false";
+				action(state, val, strlen(val));
+			}
+		}
+	}
+}
+
+/*
+ * Iterate over json values or elements, and pass them together with an
  * iteration state to a specified JsonIterateStringValuesAction.
  */
 void
-iterate_json_string_values(text *json, void *action_state, JsonIterateStringValuesAction action)
+iterate_json_values(text *json, bool all_types, void *action_state,
+					JsonIterateStringValuesAction action)
 {
 	JsonLexContext *lex = makeJsonLexContext(json, true);
 	JsonSemAction *sem = palloc0(sizeof(JsonSemAction));
@@ -4976,14 +5016,17 @@ iterate_json_string_values(text *json, void *action_state, JsonIterateStringValu
 	state->action_state = action_state;
 
 	sem->semstate = (void *) state;
-	sem->scalar = iterate_string_values_scalar;
+	if (all_types)
+		sem->scalar = iterate_all_values_scalar;
+	else
+		sem->scalar = iterate_string_values_scalar;
 
 	pg_parse_json(lex, sem);
 }
 
 /*
- * An auxiliary function for iterate_json_string_values to invoke a specified
- * JsonIterateStringValuesAction.
+ * An auxiliary function for iterate_json_values to invoke a specified
+ * JsonIterateStringValuesAction for string values.
  */
 static void
 iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype)
@@ -4991,6 +5034,20 @@ iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype)
 	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
 
 	if (tokentype == JSON_TOKEN_STRING)
+		_state->action(_state->action_state, token, strlen(token));
+}
+
+/*
+ * An auxiliary function for iterate_json_values to invoke a specified
+ * JsonIterateStringValuesAction for all values.
+ */
+static void
+iterate_all_values_scalar(void *state, char *token, JsonTokenType tokentype)
+{
+	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
+
+	if (tokentype == JSON_TOKEN_STRING || tokentype == JSON_TOKEN_NUMBER ||
+		tokentype == JSON_TOKEN_TRUE || tokentype == JSON_TOKEN_FALSE)
 		_state->action(_state->action_state, token, strlen(token));
 }
 

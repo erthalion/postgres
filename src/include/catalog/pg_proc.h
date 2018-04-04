@@ -4974,13 +4974,13 @@ DATA(insert OID = 3751 (  plainto_tsquery	PGNSP PGUID 12 100 0 0 0 f f f t f s s
 DESCR("transform to tsquery");
 DATA(insert OID = 5001 (  phraseto_tsquery	PGNSP PGUID 12 100 0 0 0 f f f t f s s 1 0 3615 "25" _null_ _null_ _null_ _null_ _null_ phraseto_tsquery _null_ _null_ _null_ ));
 DESCR("transform to tsquery");
-DATA(insert OID = 4209 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f s s 1 0 3614 "3802" _null_ _null_ _null_ _null_ _null_ jsonb_to_tsvector _null_ _null_ _null_ ));
+DATA(insert OID = 4209 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f i s 2 0 3614 "3802 16" _null_ _null_ _null_ _null_ _null_ jsonb_to_tsvector _null_ _null_ _null_ ));
 DESCR("transform jsonb to tsvector");
-DATA(insert OID = 4210 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f s s 1 0 3614 "114" _null_ _null_ _null_ _null_ _null_ json_to_tsvector _null_ _null_ _null_ ));
+DATA(insert OID = 4210 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f i s 2 0 3614 "114 16" _null_ _null_ _null_ _null_ _null_ json_to_tsvector _null_ _null_ _null_ ));
 DESCR("transform json to tsvector");
-DATA(insert OID = 4211 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f i s 2 0 3614 "3734 3802" _null_ _null_ _null_ _null_ _null_ jsonb_to_tsvector_byid _null_ _null_ _null_ ));
+DATA(insert OID = 4211 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f i s 3 0 3614 "3734 3802 16" _null_ _null_ _null_ _null_ _null_ jsonb_to_tsvector_byid _null_ _null_ _null_ ));
 DESCR("transform jsonb to tsvector");
-DATA(insert OID = 4212 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f i s 2 0 3614 "3734 114" _null_ _null_ _null_ _null_ _null_ json_to_tsvector_byid _null_ _null_ _null_ ));
+DATA(insert OID = 4212 (  to_tsvector		PGNSP PGUID 12 100 0 0 0 f f f t f i s 3 0 3614 "3734 114 16" _null_ _null_ _null_ _null_ _null_ json_to_tsvector_byid _null_ _null_ _null_ ));
 DESCR("transform json to tsvector");
 
 DATA(insert OID = 3752 (  tsvector_update_trigger			PGNSP PGUID 12 1 0 0 0 f f f f f v s 0 0 2279 "" _null_ _null_ _null_ _null_ _null_ tsvector_update_trigger_byid _null_ _null_ _null_ ));

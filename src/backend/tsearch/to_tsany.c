@@ -272,6 +272,7 @@ jsonb_to_tsvector_byid(PG_FUNCTION_ARGS)
 {
 	Oid			cfgId = PG_GETARG_OID(0);
 	Jsonb	   *jb = PG_GETARG_JSONB_P(1);
+	bool	    iterate_all_types = PG_GETARG_BOOL(2);
 	TSVector	result;
 	TSVectorBuildState state;
 	ParsedText	prs;
@@ -281,7 +282,10 @@ jsonb_to_tsvector_byid(PG_FUNCTION_ARGS)
 	state.prs = &prs;
 	state.cfgId = cfgId;
 
-	iterate_jsonb_string_values(jb, &state, add_to_tsvector);
+	if (iterate_all_types)
+		iterate_jsonb_all_values(jb, &state, add_to_tsvector);
+	else
+		iterate_jsonb_string_values(jb, &state, add_to_tsvector);
 
 	PG_FREE_IF_COPY(jb, 1);
 
@@ -294,12 +298,14 @@ Datum
 jsonb_to_tsvector(PG_FUNCTION_ARGS)
 {
 	Jsonb	   *jb = PG_GETARG_JSONB_P(0);
+	bool	    iterate_all_types = PG_GETARG_BOOL(1);
 	Oid			cfgId;
 
 	cfgId = getTSCurrentConfig(true);
-	PG_RETURN_DATUM(DirectFunctionCall2(jsonb_to_tsvector_byid,
+	PG_RETURN_DATUM(DirectFunctionCall3(jsonb_to_tsvector_byid,
 										ObjectIdGetDatum(cfgId),
-										JsonbPGetDatum(jb)));
+										JsonbPGetDatum(jb),
+										BoolGetDatum(iterate_all_types)));
 }
 
 Datum
@@ -307,6 +313,7 @@ json_to_tsvector_byid(PG_FUNCTION_ARGS)
 {
 	Oid			cfgId = PG_GETARG_OID(0);
 	text	   *json = PG_GETARG_TEXT_P(1);
+	bool	    iterate_all_types = PG_GETARG_BOOL(2);
 	TSVector	result;
 	TSVectorBuildState state;
 	ParsedText	prs;
@@ -316,7 +323,7 @@ json_to_tsvector_byid(PG_FUNCTION_ARGS)
 	state.prs = &prs;
 	state.cfgId = cfgId;
 
-	iterate_json_string_values(json, &state, add_to_tsvector);
+	iterate_json_values(json, iterate_all_types, &state, add_to_tsvector);
 
 	PG_FREE_IF_COPY(json, 1);
 
@@ -329,12 +336,14 @@ Datum
 json_to_tsvector(PG_FUNCTION_ARGS)
 {
 	text	   *json = PG_GETARG_TEXT_P(0);
+	bool	    iterate_all_types = PG_GETARG_BOOL(1);
 	Oid			cfgId;
 
 	cfgId = getTSCurrentConfig(true);
-	PG_RETURN_DATUM(DirectFunctionCall2(json_to_tsvector_byid,
+	PG_RETURN_DATUM(DirectFunctionCall3(json_to_tsvector_byid,
 										ObjectIdGetDatum(cfgId),
-										PointerGetDatum(json)));
+										PointerGetDatum(json),
+										BoolGetDatum(iterate_all_types)));
 }
 
 /*
