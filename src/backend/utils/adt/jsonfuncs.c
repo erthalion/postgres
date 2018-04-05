@@ -4940,7 +4940,7 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
 }
 
 /*
- * Iterate over jsonb string/numeric values or elements, and pass them together
+ * Iterate over jsonb string values or elements, and pass them together
  * with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
@@ -5000,7 +5000,7 @@ iterate_jsonb_all_values(Jsonb *jb, void *state, JsonIterateStringValuesAction a
 }
 
 /*
- * Iterate over json values or elements, and pass them together with an
+ * Iterate over json values and elements, and pass them together with an
  * iteration state to a specified JsonIterateStringValuesAction.
  */
 void
@@ -5039,7 +5039,7 @@ iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype)
 
 /*
  * An auxiliary function for iterate_json_values to invoke a specified
- * JsonIterateStringValuesAction for all values.
+ * JsonIterateStringValuesAction for string/numeric/boolean values.
  */
 static void
 iterate_all_values_scalar(void *state, char *token, JsonTokenType tokentype)

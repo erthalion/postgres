@@ -268,7 +268,7 @@ to_tsvector(PG_FUNCTION_ARGS)
 }
 
 /*
- * Worker function for jsonb_(all)_to_tsvector(_byid)
+ * Worker function for jsonb(_all)_to_tsvector(_byid)
  */
 static TSVector
 jsonb_to_tsvector_worker(Oid cfgId, Jsonb *jb, bool allTypes)
@@ -345,7 +345,7 @@ jsonb_all_to_tsvector(PG_FUNCTION_ARGS)
 }
 
 /*
- * Worker function for json_(all)_to_tsvector(_byid)
+ * Worker function for json(_all)_to_tsvector(_byid)
  */
 static TSVector
 json_to_tsvector_worker(Oid cfgId, text *json, bool allTypes)
