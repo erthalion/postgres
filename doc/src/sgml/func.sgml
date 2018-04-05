@@ -9688,11 +9688,23 @@ CREATE TYPE rainbow AS ENUM ('red', 'orange', 'yellow', 'green', 'blue', 'purple
         </entry>
         <entry><type>tsvector</type></entry>
         <entry>
-          reduce each string or numeric value in the document to a <type>tsvector</type>, and then
+          reduce each string value in the document to a <type>tsvector</type>, and then
           concatenate those in document order to produce a single <type>tsvector</type>
         </entry>
         <entry><literal>to_tsvector('english', '{"a": "The Fat Rats"}'::json)</literal></entry>
         <entry><literal>'fat':2 'rat':3</literal></entry>
+       </row>
+       <row>
+        <entry>
+         <literal><function>json(b)_all_to_tsvector(<optional> <replaceable class="parameter">config</replaceable> <type>regconfig</type> , </optional> <replaceable class="parameter">document</replaceable> <type>json(b)</type>)</function></literal>
+        </entry>
+        <entry><type>tsvector</type></entry>
+        <entry>
+          reduce each string, numeric or boolean value in the document to a <type>tsvector</type>,
+          and then concatenate those in document order to produce a single <type>tsvector</type>
+        </entry>
+        <entry><literal>json_all_to_tsvector('english', '{"a": "The Fat Rats", "b": 123}'::json)</literal></entry>
+        <entry><literal>'123':5 'fat':2 'rat':3</literal></entry>
        </row>
        <row>
         <entry>
