@@ -619,7 +619,7 @@ DESCR("GiST index internal text representation for text search");
 DATA(insert OID = 3615 ( tsquery		PGNSP PGUID -1 f b U f t \054 0 0 3645 tsqueryin tsqueryout tsqueryrecv tsquerysend - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("query representation for text search");
 #define TSQUERYOID		3615
-DATA(insert OID = 3734 ( regconfig		PGNSP PGUID 4 t b N f t \054 0 0 3735 regconfigin regconfigout regconfigrecv regconfigsend - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 3734 ( regconfig		PGNSP PGUID 4 t b S f t \054 0 0 3735 regconfigin regconfigout regconfigrecv regconfigsend - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("registered text search configuration");
 #define REGCONFIGOID	3734
 DATA(insert OID = 3769 ( regdictionary	PGNSP PGUID 4 t b N f t \054 0 0 3770 regdictionaryin regdictionaryout regdictionaryrecv regdictionarysend - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
