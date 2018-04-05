@@ -765,6 +765,7 @@ select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": ["the eee fff gg
 
 -- json to tsvector with numeric values
 select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::json);
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::json, true);
 
 -- ts_vector corner cases
 select to_tsvector('""'::json);
