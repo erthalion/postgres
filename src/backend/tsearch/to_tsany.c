@@ -267,6 +267,9 @@ to_tsvector(PG_FUNCTION_ARGS)
 										PointerGetDatum(in)));
 }
 
+/*
+ * Worker function for jsonb_(all)_to_tsvector(_byid)
+ */
 static TSVector
 jsonb_to_tsvector_worker(Oid cfgId, Jsonb *jb, bool allTypes)
 {
@@ -341,6 +344,9 @@ jsonb_all_to_tsvector(PG_FUNCTION_ARGS)
 	PG_RETURN_TSVECTOR(result);
 }
 
+/*
+ * Worker function for json_(all)_to_tsvector(_byid)
+ */
 static TSVector
 json_to_tsvector_worker(Oid cfgId, text *json, bool allTypes)
 {
