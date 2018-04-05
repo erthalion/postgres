@@ -140,7 +140,9 @@ typedef text *(*JsonTransformStringValuesAction) (void *state, char *elem_value,
 
 extern void iterate_jsonb_string_values(Jsonb *jb, void *state,
 							JsonIterateStringValuesAction action);
-extern void iterate_json_string_values(text *json, void *action_state,
+extern void iterate_jsonb_all_values(Jsonb *jb, void *state,
+							JsonIterateStringValuesAction action);
+extern void iterate_json_values(text *json, bool allTypes, void *action_state,
 						   JsonIterateStringValuesAction action);
 extern Jsonb *transform_jsonb_string_values(Jsonb *jsonb, void *action_state,
 							  JsonTransformStringValuesAction transform_action);

@@ -763,11 +763,19 @@ select to_tsvector('simple', '{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c"
 -- json to tsvector with stop words
 select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": ["the eee fff ggg"], "c": {"d": "hhh. iii"}}'::json);
 
+-- json to tsvector with numeric values
+select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::json);
+select json_all_to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::json);
+
 -- ts_vector corner cases
 select to_tsvector('""'::json);
+select json_all_to_tsvector('""'::json);
 select to_tsvector('{}'::json);
+select json_all_to_tsvector('{}'::json);
 select to_tsvector('[]'::json);
+select json_all_to_tsvector('[]'::json);
 select to_tsvector('null'::json);
+select json_all_to_tsvector('null'::json);
 
 -- ts_headline for json
 select ts_headline('{"a": "aaa bbb", "b": {"c": "ccc ddd fff", "c1": "ccc1 ddd1"}, "d": ["ggg hhh", "iii jjj"]}'::json, tsquery('bbb & ddd & hhh'));
