@@ -4130,9 +4130,9 @@ select to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}':
 (1 row)
 
 select jsonb_all_to_tsvector('english', '{"a": "aaa in bbb ddd ccc", "b": 123, "c": 456}'::jsonb);
-                    jsonb_all_to_tsvector                     
---------------------------------------------------------------
- '123':7 '456':11 'aaa':1 'bbb':3 'ccc':5 'ddd':4 'true':9,13
+              jsonb_all_to_tsvector              
+-------------------------------------------------
+ '123':7 '456':9 'aaa':1 'bbb':3 'ccc':5 'ddd':4
 (1 row)
 
 -- ts_vector corner cases

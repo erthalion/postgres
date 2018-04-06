@@ -4990,7 +4990,7 @@ iterate_jsonb_all_values(Jsonb *jb, void *state, JsonIterateStringValuesAction a
 				action(state, val, strlen(val));
 			}
 
-			if (v.type == jbvNumeric)
+			if (v.type == jbvBool)
 			{
 				val = v.val.boolean ? "true" : "false";
 				action(state, val, strlen(val));
