@@ -4993,7 +4993,7 @@ parse_jsonb_index_flags(Jsonb *jb)
 }
 
 /*
- * Iterate over jsonb string/numeric/boolean values or elements, and pass them
+ * Iterate over jsonb values or elements, specified by flags, and pass them
  * together with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
@@ -5047,8 +5047,8 @@ iterate_jsonb_values(Jsonb *jb, uint32 flags, void *state,
 }
 
 /*
- * Iterate over json values and elements, and pass them together with an
- * iteration state to a specified JsonIterateStringValuesAction.
+ * Iterate over json values and elements, specified by flags, and pass them
+ * together with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
 iterate_json_values(text *json, uint32 flags, void *action_state,
@@ -5072,7 +5072,7 @@ iterate_json_values(text *json, uint32 flags, void *action_state,
 
 /*
  * An auxiliary function for iterate_json_values to invoke a specified
- * JsonIterateStringValuesAction for string/numeric/boolean values.
+ * JsonIterateStringValuesAction for specified values.
  */
 static void
 iterate_values_scalar(void *state, char *token, JsonTokenType tokentype)

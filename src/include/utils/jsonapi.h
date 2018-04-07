@@ -133,7 +133,7 @@ extern JsonLexContext *makeJsonLexContextCstringLen(char *json,
 extern bool IsValidJsonNumber(const char *str, int len);
 
 /*
- * Flag types for iterate_json(b)_values to specify, what elements from a
+ * Flag types for iterate_json(b)_values to specify what elements from a
  * json(b) document we want to iterate.
  */
 typedef enum JsonToIndex {
