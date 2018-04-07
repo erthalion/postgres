@@ -4255,7 +4255,7 @@ select jsonb_to_tsvector('null'::jsonb, '"all"');
 select jsonb_to_tsvector('{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '""');
 ERROR:  string, numeric, boolean, key and all are only accepted
 select jsonb_to_tsvector('{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '{}');
-ERROR:  wrong flag type
+ERROR:  wrong flag type, only arrays and scalars are allowed
 select jsonb_to_tsvector('{"a": "aaa in bbb", "b": 123, "c": 456, "d": true, "f": false, "g": null}'::jsonb, '[]');
  jsonb_to_tsvector 
 -------------------

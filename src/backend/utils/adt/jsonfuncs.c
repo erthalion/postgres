@@ -4958,12 +4958,15 @@ parse_jsonb_index_flags(Jsonb *jb)
 	type = JsonbIteratorNext(&it, &v, false);
 
 	if (type != WJB_BEGIN_ARRAY)
-		elog(ERROR, "wrong flag type");
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("wrong flag type, only arrays and scalars are allowed")));
 
 	while ((type = JsonbIteratorNext(&it, &v, false)) == WJB_ELEM)
 	{
 		if (v.type != jbvString)
-			elog(ERROR, "text is only accepted");
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("text is only accepted")));
 
 		if (v.val.string.len == 3 &&
 				 pg_strncasecmp(v.val.string.val, "all", 3) == 0)
@@ -4981,11 +4984,13 @@ parse_jsonb_index_flags(Jsonb *jb)
 				 pg_strncasecmp(v.val.string.val, "boolean", 7) == 0)
 			flags |= jtiBool;
 		else
-			elog(ERROR, "string, numeric, boolean, key and all are only accepted");
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("string, numeric, boolean, key and all are only accepted")));
 	}
 
 	if (type != WJB_END_ARRAY)
-		elog(ERROR, "wrong flag type");
+		elog(ERROR, "wrong flag type, only arrays and scalars are allowed");
 
 	JsonbIteratorNext(&it, &v, false);
 
