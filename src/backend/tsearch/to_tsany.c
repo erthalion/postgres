@@ -271,7 +271,7 @@ to_tsvector(PG_FUNCTION_ARGS)
  * Worker function for jsonb(_all)_to_tsvector(_byid)
  */
 static TSVector
-jsonb_to_tsvector_worker(Oid cfgId, Jsonb *jb, bool allTypes)
+jsonb_to_tsvector_worker(Oid cfgId, Jsonb *jb, uint32 flags)
 {
 	TSVectorBuildState state;
 	ParsedText	prs;
@@ -281,13 +281,36 @@ jsonb_to_tsvector_worker(Oid cfgId, Jsonb *jb, bool allTypes)
 	state.prs = &prs;
 	state.cfgId = cfgId;
 
-	if (allTypes)
-		iterate_jsonb_all_values(jb, &state, add_to_tsvector);
-	else
-		iterate_jsonb_string_values(jb, &state, add_to_tsvector);
-
+	iterate_jsonb_values(jb, flags, &state, add_to_tsvector);
 
 	return make_tsvector(&prs);
+}
+
+Datum
+jsonb_string_to_tsvector_byid(PG_FUNCTION_ARGS)
+{
+	Oid			cfgId = PG_GETARG_OID(0);
+	Jsonb	   *jb = PG_GETARG_JSONB_P(1);
+	TSVector	result;
+
+	result = jsonb_to_tsvector_worker(cfgId, jb, jtiString);
+	PG_FREE_IF_COPY(jb, 1);
+
+	PG_RETURN_TSVECTOR(result);
+}
+
+Datum
+jsonb_string_to_tsvector(PG_FUNCTION_ARGS)
+{
+	Jsonb	   *jb = PG_GETARG_JSONB_P(0);
+	Oid			cfgId;
+	TSVector	result;
+
+	cfgId = getTSCurrentConfig(true);
+	result = jsonb_to_tsvector_worker(cfgId, jb, jtiString);
+	PG_FREE_IF_COPY(jb, 1);
+
+	PG_RETURN_TSVECTOR(result);
 }
 
 Datum
@@ -295,9 +318,11 @@ jsonb_to_tsvector_byid(PG_FUNCTION_ARGS)
 {
 	Oid			cfgId = PG_GETARG_OID(0);
 	Jsonb	   *jb = PG_GETARG_JSONB_P(1);
+	Jsonb	   *jbFlags = PG_GETARG_JSONB_P(2);
 	TSVector	result;
+	uint32		flags = parse_jsonb_index_flags(jbFlags);
 
-	result = jsonb_to_tsvector_worker(cfgId, jb, false);
+	result = jsonb_to_tsvector_worker(cfgId, jb, flags);
 	PG_FREE_IF_COPY(jb, 1);
 
 	PG_RETURN_TSVECTOR(result);
@@ -307,38 +332,13 @@ Datum
 jsonb_to_tsvector(PG_FUNCTION_ARGS)
 {
 	Jsonb	   *jb = PG_GETARG_JSONB_P(0);
+	Jsonb	   *jbFlags = PG_GETARG_JSONB_P(1);
 	Oid			cfgId;
 	TSVector	result;
+	uint32		flags = parse_jsonb_index_flags(jbFlags);
 
 	cfgId = getTSCurrentConfig(true);
-	result = jsonb_to_tsvector_worker(cfgId, jb, false);
-	PG_FREE_IF_COPY(jb, 1);
-
-	PG_RETURN_TSVECTOR(result);
-}
-
-Datum
-jsonb_all_to_tsvector_byid(PG_FUNCTION_ARGS)
-{
-	Oid			cfgId = PG_GETARG_OID(0);
-	Jsonb	   *jb = PG_GETARG_JSONB_P(1);
-	TSVector	result;
-
-	result = jsonb_to_tsvector_worker(cfgId, jb, true);
-	PG_FREE_IF_COPY(jb, 1);
-
-	PG_RETURN_TSVECTOR(result);
-}
-
-Datum
-jsonb_all_to_tsvector(PG_FUNCTION_ARGS)
-{
-	Jsonb	   *jb = PG_GETARG_JSONB_P(0);
-	Oid			cfgId;
-	TSVector	result;
-
-	cfgId = getTSCurrentConfig(true);
-	result = jsonb_to_tsvector_worker(cfgId, jb, true);
+	result = jsonb_to_tsvector_worker(cfgId, jb, flags);
 	PG_FREE_IF_COPY(jb, 1);
 
 	PG_RETURN_TSVECTOR(result);
@@ -348,7 +348,7 @@ jsonb_all_to_tsvector(PG_FUNCTION_ARGS)
  * Worker function for json(_all)_to_tsvector(_byid)
  */
 static TSVector
-json_to_tsvector_worker(Oid cfgId, text *json, bool allTypes)
+json_to_tsvector_worker(Oid cfgId, text *json, uint32 flags)
 {
 	TSVectorBuildState state;
 	ParsedText	prs;
@@ -358,9 +358,36 @@ json_to_tsvector_worker(Oid cfgId, text *json, bool allTypes)
 	state.prs = &prs;
 	state.cfgId = cfgId;
 
-	iterate_json_values(json, allTypes, &state, add_to_tsvector);
+	iterate_json_values(json, flags, &state, add_to_tsvector);
 
 	return make_tsvector(&prs);
+}
+
+Datum
+json_string_to_tsvector_byid(PG_FUNCTION_ARGS)
+{
+	Oid			cfgId = PG_GETARG_OID(0);
+	text	   *json = PG_GETARG_TEXT_P(1);
+	TSVector	result;
+
+	result = json_to_tsvector_worker(cfgId, json, jtiString);
+	PG_FREE_IF_COPY(json, 1);
+
+	PG_RETURN_TSVECTOR(result);
+}
+
+Datum
+json_string_to_tsvector(PG_FUNCTION_ARGS)
+{
+	text	   *json = PG_GETARG_TEXT_P(0);
+	Oid			cfgId;
+	TSVector	result;
+
+	cfgId = getTSCurrentConfig(true);
+	result = json_to_tsvector_worker(cfgId, json, jtiString);
+	PG_FREE_IF_COPY(json, 1);
+
+	PG_RETURN_TSVECTOR(result);
 }
 
 Datum
@@ -368,9 +395,11 @@ json_to_tsvector_byid(PG_FUNCTION_ARGS)
 {
 	Oid			cfgId = PG_GETARG_OID(0);
 	text	   *json = PG_GETARG_TEXT_P(1);
+	Jsonb	   *jbFlags = PG_GETARG_JSONB_P(2);
 	TSVector	result;
+	uint32		flags = parse_jsonb_index_flags(jbFlags);
 
-	result = json_to_tsvector_worker(cfgId, json, false);
+	result = json_to_tsvector_worker(cfgId, json, flags);
 	PG_FREE_IF_COPY(json, 1);
 
 	PG_RETURN_TSVECTOR(result);
@@ -380,38 +409,13 @@ Datum
 json_to_tsvector(PG_FUNCTION_ARGS)
 {
 	text	   *json = PG_GETARG_TEXT_P(0);
+	Jsonb	   *jbFlags = PG_GETARG_JSONB_P(1);
 	Oid			cfgId;
 	TSVector	result;
+	uint32		flags = parse_jsonb_index_flags(jbFlags);
 
 	cfgId = getTSCurrentConfig(true);
-	result = json_to_tsvector_worker(cfgId, json, false);
-	PG_FREE_IF_COPY(json, 1);
-
-	PG_RETURN_TSVECTOR(result);
-}
-
-Datum
-json_all_to_tsvector_byid(PG_FUNCTION_ARGS)
-{
-	Oid			cfgId = PG_GETARG_OID(0);
-	text	   *json = PG_GETARG_TEXT_P(1);
-	TSVector	result;
-
-	result = json_to_tsvector_worker(cfgId, json, true);
-	PG_FREE_IF_COPY(json, 1);
-
-	PG_RETURN_TSVECTOR(result);
-}
-
-Datum
-json_all_to_tsvector(PG_FUNCTION_ARGS)
-{
-	text	   *json = PG_GETARG_TEXT_P(0);
-	Oid			cfgId;
-	TSVector	result;
-
-	cfgId = getTSCurrentConfig(true);
-	result = json_to_tsvector_worker(cfgId, json, true);
+	result = json_to_tsvector_worker(cfgId, json, flags);
 	PG_FREE_IF_COPY(json, 1);
 
 	PG_RETURN_TSVECTOR(result);

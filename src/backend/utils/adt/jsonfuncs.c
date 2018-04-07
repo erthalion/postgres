@@ -60,6 +60,7 @@ typedef struct IterateJsonStringValuesState
 	JsonIterateStringValuesAction action;	/* an action that will be applied
 											 * to each json value */
 	void	   *action_state;	/* any necessary context for iteration */
+	uint32      flags;			/* what kind of elements from a json we want to iterate */
 } IterateJsonStringValuesState;
 
 /* state for transform_json_string_values function */
@@ -475,8 +476,8 @@ static void setPathArray(JsonbIterator **it, Datum *path_elems,
 static void addJsonbToParseState(JsonbParseState **jbps, Jsonb *jb);
 
 /* function supporting iterate_json_values */
-static void iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype);
-static void iterate_all_values_scalar(void *state, char *token, JsonTokenType tokentype);
+static void iterate_values_scalar(void *state, char *token, JsonTokenType tokentype);
+static void iterate_values_object_field_start(void *state, char *fname, bool isnull);
 
 /* functions supporting transform_json_string_values */
 static void transform_string_values_object_start(void *state);
@@ -4940,25 +4941,55 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
 }
 
 /*
- * Iterate over jsonb string values or elements, and pass them together
- * with an iteration state to a specified JsonIterateStringValuesAction.
+ * Parse information about what elements of a jsonb document we want to iterate
+ * in functions iterate_json(b)_values. This information is presented in jsonb
+ * format, so that it can be easily extended in the future.
  */
-void
-iterate_jsonb_string_values(Jsonb *jb, void *state, JsonIterateStringValuesAction action)
+uint32
+parse_jsonb_index_flags(Jsonb *jb)
 {
-	JsonbIterator *it;
-	JsonbValue	v;
-	JsonbIteratorToken type;
+	JsonbIterator	   *it;
+	JsonbValue			v;
+	JsonbIteratorToken	type;
+	uint32				flags = 0;
 
 	it = JsonbIteratorInit(&jb->root);
 
-	while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
+	type = JsonbIteratorNext(&it, &v, false);
+
+	if (type != WJB_BEGIN_ARRAY)
+		elog(ERROR, "wrong flag type");
+
+	while ((type = JsonbIteratorNext(&it, &v, false)) == WJB_ELEM)
 	{
-		if ((type == WJB_VALUE || type == WJB_ELEM) && v.type == jbvString)
-		{
-			action(state, v.val.string.val, v.val.string.len);
-		}
+		if (v.type != jbvString)
+			elog(ERROR, "text is only accepted");
+
+		if (v.val.string.len == 3 &&
+				 pg_strncasecmp(v.val.string.val, "all", 3) == 0)
+			flags |= jtiAll;
+		else if (v.val.string.len == 3 &&
+				 pg_strncasecmp(v.val.string.val, "key", 3) == 0)
+			flags |= jtiKey;
+		else if (v.val.string.len == 6 &&
+				 pg_strncasecmp(v.val.string.val, "string", 5) == 0)
+			flags |= jtiString;
+		else if (v.val.string.len == 7 &&
+				 pg_strncasecmp(v.val.string.val, "numeric", 7) == 0)
+			flags |= jtiNumeric;
+		else if (v.val.string.len == 7 &&
+				 pg_strncasecmp(v.val.string.val, "boolean", 7) == 0)
+			flags |= jtiBool;
+		else
+			elog(ERROR, "string, numeric, boolean, key and all are only accepted");
 	}
+
+	if (type != WJB_END_ARRAY)
+		elog(ERROR, "wrong flag type");
+
+	JsonbIteratorNext(&it, &v, false);
+
+	return flags;
 }
 
 /*
@@ -4966,34 +4997,50 @@ iterate_jsonb_string_values(Jsonb *jb, void *state, JsonIterateStringValuesActio
  * together with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
-iterate_jsonb_all_values(Jsonb *jb, void *state, JsonIterateStringValuesAction action)
+iterate_jsonb_values(Jsonb *jb, uint32 flags, void *state,
+					 JsonIterateStringValuesAction action)
 {
 	JsonbIterator *it;
 	JsonbValue	v;
 	JsonbIteratorToken type;
-	char *val;
 
 	it = JsonbIteratorInit(&jb->root);
 
 	while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
 	{
-		if (type == WJB_VALUE || type == WJB_ELEM)
+		if (type == WJB_KEY && (flags & jtiKey))
+			action(state, v.val.string.val, v.val.string.len);
+
+		else if (type == WJB_VALUE || type == WJB_ELEM)
 		{
-
-			if (v.type == jbvString)
-				action(state, v.val.string.val, v.val.string.len);
-
-			if (v.type == jbvNumeric)
+			switch(v.type)
 			{
-				val = DatumGetCString(DirectFunctionCall1(numeric_out,
-									  NumericGetDatum(v.val.numeric)));
-				action(state, val, strlen(val));
-			}
+				case jbvString:
+					if (flags & jtiString)
+						action(state, v.val.string.val, v.val.string.len);
+					break;
+				case jbvNumeric:
+					if (flags & jtiNumeric)
+					{
+						char *val;
 
-			if (v.type == jbvBool)
-			{
-				val = v.val.boolean ? "true" : "false";
-				action(state, val, strlen(val));
+						val = DatumGetCString(DirectFunctionCall1(numeric_out,
+									NumericGetDatum(v.val.numeric)));
+
+						action(state, val, strlen(val));
+					}
+					break;
+				case jbvBool:
+					if (flags & jtiBool)
+					{
+						if (v.val.boolean)
+							action(state, pstrdup("true"), 4);
+						else
+							action(state, pstrdup("false"), 5);
+					}
+					break;
+				default:
+					break;
 			}
 		}
 	}
@@ -5004,7 +5051,7 @@ iterate_jsonb_all_values(Jsonb *jb, void *state, JsonIterateStringValuesAction a
  * iteration state to a specified JsonIterateStringValuesAction.
  */
 void
-iterate_json_values(text *json, bool all_types, void *action_state,
+iterate_json_values(text *json, uint32 flags, void *action_state,
 					JsonIterateStringValuesAction action)
 {
 	JsonLexContext *lex = makeJsonLexContext(json, true);
@@ -5014,27 +5061,13 @@ iterate_json_values(text *json, bool all_types, void *action_state,
 	state->lex = lex;
 	state->action = action;
 	state->action_state = action_state;
+	state->flags = flags;
 
 	sem->semstate = (void *) state;
-	if (all_types)
-		sem->scalar = iterate_all_values_scalar;
-	else
-		sem->scalar = iterate_string_values_scalar;
+	sem->scalar = iterate_values_scalar;
+	sem->object_field_start = iterate_values_object_field_start;
 
 	pg_parse_json(lex, sem);
-}
-
-/*
- * An auxiliary function for iterate_json_values to invoke a specified
- * JsonIterateStringValuesAction for string values.
- */
-static void
-iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype)
-{
-	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
-
-	if (tokentype == JSON_TOKEN_STRING)
-		_state->action(_state->action_state, token, strlen(token));
 }
 
 /*
@@ -5042,13 +5075,40 @@ iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype)
  * JsonIterateStringValuesAction for string/numeric/boolean values.
  */
 static void
-iterate_all_values_scalar(void *state, char *token, JsonTokenType tokentype)
+iterate_values_scalar(void *state, char *token, JsonTokenType tokentype)
 {
 	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
 
-	if (tokentype == JSON_TOKEN_STRING || tokentype == JSON_TOKEN_NUMBER ||
-		tokentype == JSON_TOKEN_TRUE || tokentype == JSON_TOKEN_FALSE)
-		_state->action(_state->action_state, token, strlen(token));
+	switch(tokentype)
+	{
+		case JSON_TOKEN_STRING:
+			if (_state->flags & jtiString)
+				_state->action(_state->action_state, token, strlen(token));
+			break;
+		case JSON_TOKEN_NUMBER:
+			if (_state->flags & jtiNumeric)
+				_state->action(_state->action_state, token, strlen(token));
+			break;
+		case JSON_TOKEN_TRUE:
+		case JSON_TOKEN_FALSE:
+			if (_state->flags & jtiBool)
+				_state->action(_state->action_state, token, strlen(token));
+			break;
+		default:
+			break;
+	}
+}
+
+static void
+iterate_values_object_field_start(void *state, char *fname, bool isnull)
+{
+	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
+
+	if (_state->flags & jtiKey)
+	{
+		char *val = pstrdup(fname);
+		_state->action(_state->action_state, val, strlen(val));
+	}
 }
 
 /*
