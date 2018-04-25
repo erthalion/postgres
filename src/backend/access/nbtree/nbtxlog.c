@@ -108,6 +108,8 @@ _bt_restore_meta(XLogReaderState *record, uint8 block_id)
 	md->btm_level = xlrec->level;
 	md->btm_fastroot = xlrec->fastroot;
 	md->btm_fastlevel = xlrec->fastlevel;
+	md->btm_oldest_btpo_xact = xlrec->oldest_btpo_xact;
+	md->btm_last_cleanup_num_heap_tuples = xlrec->last_cleanup_num_heap_tuples;
 
 	pageop = (BTPageOpaque) PageGetSpecialPointer(metapg);
 	pageop->btpo_flags = BTP_META;
@@ -200,7 +202,7 @@ btree_xlog_insert(bool isleaf, bool ismeta, XLogReaderState *record)
 }
 
 static void
-btree_xlog_split(bool onleft, XLogReaderState *record)
+btree_xlog_split(bool onleft, bool lhighkey, XLogReaderState *record)
 {
 	XLogRecPtr	lsn = record->EndRecPtr;
 	xl_btree_split *xlrec = (xl_btree_split *) XLogRecGetData(record);
@@ -247,13 +249,15 @@ btree_xlog_split(bool onleft, XLogReaderState *record)
 	_bt_restore_page(rpage, datapos, datalen);
 
 	/*
-	 * On leaf level, the high key of the left page is equal to the first key
-	 * on the right page.
+	 * When the high key isn't present is the wal record, then we assume it to
+	 * be equal to the first key on the right page.  It must be from the leaf
+	 * level.
 	 */
-	if (isleaf)
+	if (!lhighkey)
 	{
 		ItemId		hiItemId = PageGetItemId(rpage, P_FIRSTDATAKEY(ropaque));
 
+		Assert(isleaf);
 		left_hikey = (IndexTuple) PageGetItem(rpage, hiItemId);
 		left_hikeysz = ItemIdGetLength(hiItemId);
 	}
@@ -294,13 +298,14 @@ btree_xlog_split(bool onleft, XLogReaderState *record)
 		}
 
 		/* Extract left hikey and its size (assuming 16-bit alignment) */
-		if (!isleaf)
+		if (lhighkey)
 		{
 			left_hikey = (IndexTuple) datapos;
 			left_hikeysz = MAXALIGN(IndexTupleSize(left_hikey));
 			datapos += left_hikeysz;
 			datalen -= left_hikeysz;
 		}
+
 		Assert(datalen == 0);
 
 		newlpage = PageGetTempPageCopySpecial(lpage);
@@ -762,11 +767,11 @@ btree_xlog_mark_page_halfdead(uint8 info, XLogReaderState *record)
 		nextoffset = OffsetNumberNext(poffset);
 		itemid = PageGetItemId(page, nextoffset);
 		itup = (IndexTuple) PageGetItem(page, itemid);
-		rightsib = ItemPointerGetBlockNumber(&itup->t_tid);
+		rightsib = BTreeInnerTupleGetDownLink(itup);
 
 		itemid = PageGetItemId(page, poffset);
 		itup = (IndexTuple) PageGetItem(page, itemid);
-		ItemPointerSet(&(itup->t_tid), rightsib, P_HIKEY);
+		BTreeInnerTupleSetDownLink(itup, rightsib);
 		nextoffset = OffsetNumberNext(poffset);
 		PageIndexTupleDelete(page, nextoffset);
 
@@ -795,10 +800,8 @@ btree_xlog_mark_page_halfdead(uint8 info, XLogReaderState *record)
 	 */
 	MemSet(&trunctuple, 0, sizeof(IndexTupleData));
 	trunctuple.t_info = sizeof(IndexTupleData);
-	if (xlrec->topparent != InvalidBlockNumber)
-		ItemPointerSet(&trunctuple.t_tid, xlrec->topparent, P_HIKEY);
-	else
-		ItemPointerSetInvalid(&trunctuple.t_tid);
+	BTreeTupleSetTopParent(&trunctuple, xlrec->topparent);
+
 	if (PageAddItem(page, (Item) &trunctuple, sizeof(IndexTupleData), P_HIKEY,
 					false, false) == InvalidOffsetNumber)
 		elog(ERROR, "could not add dummy high key to half-dead page");
@@ -905,10 +908,8 @@ btree_xlog_unlink_page(uint8 info, XLogReaderState *record)
 		/* Add a dummy hikey item */
 		MemSet(&trunctuple, 0, sizeof(IndexTupleData));
 		trunctuple.t_info = sizeof(IndexTupleData);
-		if (xlrec->topparent != InvalidBlockNumber)
-			ItemPointerSet(&trunctuple.t_tid, xlrec->topparent, P_HIKEY);
-		else
-			ItemPointerSetInvalid(&trunctuple.t_tid);
+		BTreeTupleSetTopParent(&trunctuple, xlrec->topparent);
+
 		if (PageAddItem(page, (Item) &trunctuple, sizeof(IndexTupleData), P_HIKEY,
 						false, false) == InvalidOffsetNumber)
 			elog(ERROR, "could not add dummy high key to half-dead page");
@@ -985,7 +986,6 @@ btree_xlog_reuse_page(XLogReaderState *record)
 	}
 }
 
-
 void
 btree_redo(XLogReaderState *record)
 {
@@ -1003,10 +1003,16 @@ btree_redo(XLogReaderState *record)
 			btree_xlog_insert(false, true, record);
 			break;
 		case XLOG_BTREE_SPLIT_L:
-			btree_xlog_split(true, record);
+			btree_xlog_split(true, false, record);
+			break;
+		case XLOG_BTREE_SPLIT_L_HIGHKEY:
+			btree_xlog_split(true, true, record);
 			break;
 		case XLOG_BTREE_SPLIT_R:
-			btree_xlog_split(false, record);
+			btree_xlog_split(false, false, record);
+			break;
+		case XLOG_BTREE_SPLIT_R_HIGHKEY:
+			btree_xlog_split(false, true, record);
 			break;
 		case XLOG_BTREE_VACUUM:
 			btree_xlog_vacuum(record);
@@ -1026,6 +1032,9 @@ btree_redo(XLogReaderState *record)
 			break;
 		case XLOG_BTREE_REUSE_PAGE:
 			btree_xlog_reuse_page(record);
+			break;
+		case XLOG_BTREE_META_CLEANUP:
+			_bt_restore_meta(record, 0);
 			break;
 		default:
 			elog(PANIC, "btree_redo: unknown op code %u", info);

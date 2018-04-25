@@ -1533,30 +1533,50 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 
 	/*
 	 * If this was an xlog-switch, it's not enough to write the switch record,
-	 * we also have to consume all the remaining space in the WAL segment. We
-	 * have already reserved it for us, but we still need to make sure it's
-	 * allocated and zeroed in the WAL buffers so that when the caller (or
-	 * someone else) does XLogWrite(), it can really write out all the zeros.
+	 * we also have to consume all the remaining space in the WAL segment.  We
+	 * have already reserved that space, but we need to actually fill it.
 	 */
 	if (isLogSwitch && XLogSegmentOffset(CurrPos, wal_segment_size) != 0)
 	{
 		/* An xlog-switch record doesn't contain any data besides the header */
 		Assert(write_len == SizeOfXLogRecord);
 
+		/* Assert that we did reserve the right amount of space */
+		Assert(XLogSegmentOffset(EndPos, wal_segment_size) == 0);
+
+		/* Use up all the remaining space on the current page */
+		CurrPos += freespace;
+
 		/*
+		 * Cause all remaining pages in the segment to be flushed, leaving the
+		 * XLog position where it should be, at the start of the next segment.
 		 * We do this one page at a time, to make sure we don't deadlock
 		 * against ourselves if wal_buffers < wal_segment_size.
 		 */
-		Assert(XLogSegmentOffset(EndPos, wal_segment_size) == 0);
-
-		/* Use up all the remaining space on the first page */
-		CurrPos += freespace;
-
 		while (CurrPos < EndPos)
 		{
-			/* initialize the next page (if not initialized already) */
-			WALInsertLockUpdateInsertingAt(CurrPos);
-			AdvanceXLInsertBuffer(CurrPos, false);
+			/*
+			 * The minimal action to flush the page would be to call
+			 * WALInsertLockUpdateInsertingAt(CurrPos) followed by
+			 * AdvanceXLInsertBuffer(...).  The page would be left initialized
+			 * mostly to zeros, except for the page header (always the short
+			 * variant, as this is never a segment's first page).
+			 *
+			 * The large vistas of zeros are good for compressibility, but the
+			 * headers interrupting them every XLOG_BLCKSZ (with values that
+			 * differ from page to page) are not.  The effect varies with
+			 * compression tool, but bzip2 for instance compresses about an
+			 * order of magnitude worse if those headers are left in place.
+			 *
+			 * Rather than complicating AdvanceXLInsertBuffer itself (which is
+			 * called in heavily-loaded circumstances as well as this lightly-
+			 * loaded one) with variant behavior, we just use GetXLogBuffer
+			 * (which itself calls the two methods we need) to get the pointer
+			 * and zero most of the page.  Then we just zero the page header.
+			 */
+			currpos = GetXLogBuffer(CurrPos);
+			MemSet(currpos, 0, SizeOfXLogShortPHD);
+
 			CurrPos += XLOG_BLCKSZ;
 		}
 	}
@@ -4086,7 +4106,7 @@ ValidateXLOGDirectoryStructure(void)
 	{
 		ereport(LOG,
 				(errmsg("creating missing WAL directory \"%s\"", path)));
-		if (mkdir(path, S_IRWXU) < 0)
+		if (MakePGDirectory(path) < 0)
 			ereport(FATAL,
 					(errmsg("could not create missing directory \"%s\": %m",
 							path)));
@@ -9765,11 +9785,20 @@ xlog_redo(XLogReaderState *record)
 								  checkPoint.nextXid))
 			ShmemVariableCache->nextXid = checkPoint.nextXid;
 		LWLockRelease(XidGenLock);
-		/* ... but still treat OID counter as exact */
-		LWLockAcquire(OidGenLock, LW_EXCLUSIVE);
-		ShmemVariableCache->nextOid = checkPoint.nextOid;
-		ShmemVariableCache->oidCount = 0;
-		LWLockRelease(OidGenLock);
+
+		/*
+		 * We ignore the nextOid counter in an ONLINE checkpoint, preferring
+		 * to track OID assignment through XLOG_NEXTOID records.  The nextOid
+		 * counter is from the start of the checkpoint and might well be stale
+		 * compared to later XLOG_NEXTOID records.  We could try to take the
+		 * maximum of the nextOid counter and our latest value, but since
+		 * there's no particular guarantee about the speed with which the OID
+		 * counter wraps around, that's a risky thing to do.  In any case,
+		 * users of the nextOid counter are required to avoid assignment of
+		 * duplicates, so that a somewhat out-of-date value should be safe.
+		 */
+
+		/* Handle multixact */
 		MultiXactAdvanceNextMXact(checkPoint.nextMulti,
 								  checkPoint.nextMultiOffset);
 

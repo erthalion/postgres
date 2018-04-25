@@ -900,7 +900,7 @@ tuplesort_begin_cluster(TupleDesc tupDesc,
 			 workMem, randomAccess ? 't' : 'f');
 #endif
 
-	state->nKeys = RelationGetNumberOfAttributes(indexRel);
+	state->nKeys = IndexRelationGetNumberOfKeyAttributes(indexRel);
 
 	TRACE_POSTGRESQL_SORT_START(CLUSTER_SORT,
 								false,	/* no unique check */
@@ -995,7 +995,7 @@ tuplesort_begin_index_btree(Relation heapRel,
 			 workMem, randomAccess ? 't' : 'f');
 #endif
 
-	state->nKeys = RelationGetNumberOfAttributes(indexRel);
+	state->nKeys = IndexRelationGetNumberOfKeyAttributes(indexRel);
 
 	TRACE_POSTGRESQL_SORT_START(INDEX_SORT,
 								enforceUnique,
@@ -1015,7 +1015,6 @@ tuplesort_begin_index_btree(Relation heapRel,
 	state->enforceUnique = enforceUnique;
 
 	indexScanKey = _bt_mkscankey_nodata(indexRel);
-	state->nKeys = RelationGetNumberOfAttributes(indexRel);
 
 	/* Prepare SortSupport data for each column */
 	state->sortKeys = (SortSupport) palloc0(state->nKeys *
@@ -3719,7 +3718,7 @@ comparetup_cluster(const SortTuple *a, const SortTuple *b,
 				datum2;
 	bool		isnull1,
 				isnull2;
-	AttrNumber	leading = state->indexInfo->ii_KeyAttrNumbers[0];
+	AttrNumber	leading = state->indexInfo->ii_IndexAttrNumbers[0];
 
 	/* Be prepared to compare additional sort keys */
 	ltup = (HeapTuple) a->tuple;
@@ -3762,7 +3761,7 @@ comparetup_cluster(const SortTuple *a, const SortTuple *b,
 
 		for (; nkey < state->nKeys; nkey++, sortKey++)
 		{
-			AttrNumber	attno = state->indexInfo->ii_KeyAttrNumbers[nkey];
+			AttrNumber	attno = state->indexInfo->ii_IndexAttrNumbers[nkey];
 
 			datum1 = heap_getattr(ltup, attno, tupDesc, &isnull1);
 			datum2 = heap_getattr(rtup, attno, tupDesc, &isnull2);
@@ -3834,11 +3833,11 @@ copytup_cluster(Tuplesortstate *state, SortTuple *stup, void *tup)
 	 * set up first-column key value, and potentially abbreviate, if it's a
 	 * simple column
 	 */
-	if (state->indexInfo->ii_KeyAttrNumbers[0] == 0)
+	if (state->indexInfo->ii_IndexAttrNumbers[0] == 0)
 		return;
 
 	original = heap_getattr(tuple,
-							state->indexInfo->ii_KeyAttrNumbers[0],
+							state->indexInfo->ii_IndexAttrNumbers[0],
 							state->tupDesc,
 							&stup->isnull1);
 
@@ -3882,7 +3881,7 @@ copytup_cluster(Tuplesortstate *state, SortTuple *stup, void *tup)
 
 			tuple = (HeapTuple) mtup->tuple;
 			mtup->datum1 = heap_getattr(tuple,
-										state->indexInfo->ii_KeyAttrNumbers[0],
+										state->indexInfo->ii_IndexAttrNumbers[0],
 										state->tupDesc,
 										&mtup->isnull1);
 		}
@@ -3936,9 +3935,9 @@ readtup_cluster(Tuplesortstate *state, SortTuple *stup,
 							 &tuplen, sizeof(tuplen));
 	stup->tuple = (void *) tuple;
 	/* set up first-column key value, if it's a simple column */
-	if (state->indexInfo->ii_KeyAttrNumbers[0] != 0)
+	if (state->indexInfo->ii_IndexAttrNumbers[0] != 0)
 		stup->datum1 = heap_getattr(tuple,
-									state->indexInfo->ii_KeyAttrNumbers[0],
+									state->indexInfo->ii_IndexAttrNumbers[0],
 									state->tupDesc,
 									&stup->isnull1);
 }

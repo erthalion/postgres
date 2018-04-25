@@ -41,9 +41,8 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
-#include "catalog/pg_constraint_fn.h"
 #include "catalog/pg_depend.h"
-#include "catalog/pg_inherits_fn.h"
+#include "catalog/pg_inherits.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_tablespace.h"
@@ -238,9 +237,9 @@ index_check_primary_key(Relation heapRel,
 	 * null, otherwise attempt to ALTER TABLE .. SET NOT NULL
 	 */
 	cmds = NIL;
-	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 	{
-		AttrNumber	attnum = indexInfo->ii_KeyAttrNumbers[i];
+		AttrNumber	attnum = indexInfo->ii_IndexAttrNumbers[i];
 		HeapTuple	atttuple;
 		Form_pg_attribute attform;
 
@@ -298,6 +297,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 						 Oid *classObjectId)
 {
 	int			numatts = indexInfo->ii_NumIndexAttrs;
+	int			numkeyatts = indexInfo->ii_NumIndexKeyAttrs;
 	ListCell   *colnames_item = list_head(indexColNames);
 	ListCell   *indexpr_item = list_head(indexInfo->ii_Expressions);
 	IndexAmRoutine *amroutine;
@@ -325,7 +325,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	 */
 	for (i = 0; i < numatts; i++)
 	{
-		AttrNumber	atnum = indexInfo->ii_KeyAttrNumbers[i];
+		AttrNumber	atnum = indexInfo->ii_IndexAttrNumbers[i];
 		Form_pg_attribute to = TupleDescAttr(indexTupDesc, i);
 		HeapTuple	tuple;
 		Form_pg_type typeTup;
@@ -376,7 +376,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			to->attidentity = '\0';
 			to->attislocal = true;
 			to->attinhcount = 0;
-			to->attcollation = collationObjectId[i];
+			to->attcollation = (i < numkeyatts) ?
+							collationObjectId[i] : InvalidOid;
 		}
 		else
 		{
@@ -412,7 +413,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			to->attcacheoff = -1;
 			to->atttypmod = exprTypmod(indexkey);
 			to->attislocal = true;
-			to->attcollation = collationObjectId[i];
+			to->attcollation = (i < numkeyatts) ?
+							collationObjectId[i] : InvalidOid;
 
 			ReleaseSysCache(tuple);
 
@@ -447,32 +449,40 @@ ConstructTupleDescriptor(Relation heapRelation,
 
 		/*
 		 * Check the opclass and index AM to see if either provides a keytype
-		 * (overriding the attribute type).  Opclass takes precedence.
+		 * (overriding the attribute type).  Opclass (if exists) takes
+		 * precedence.
 		 */
-		tuple = SearchSysCache1(CLAOID, ObjectIdGetDatum(classObjectId[i]));
-		if (!HeapTupleIsValid(tuple))
-			elog(ERROR, "cache lookup failed for opclass %u",
-				 classObjectId[i]);
-		opclassTup = (Form_pg_opclass) GETSTRUCT(tuple);
-		if (OidIsValid(opclassTup->opckeytype))
-			keyType = opclassTup->opckeytype;
-		else
-			keyType = amroutine->amkeytype;
+		keyType = amroutine->amkeytype;
 
 		/*
-		 * If keytype is specified as ANYELEMENT, and opcintype is ANYARRAY,
-		 * then the attribute type must be an array (else it'd not have
-		 * matched this opclass); use its element type.
+		 * Code below is concerned to the opclasses which are not used with
+		 * the included columns.
 		 */
-		if (keyType == ANYELEMENTOID && opclassTup->opcintype == ANYARRAYOID)
+		if (i < indexInfo->ii_NumIndexKeyAttrs)
 		{
-			keyType = get_base_element_type(to->atttypid);
-			if (!OidIsValid(keyType))
-				elog(ERROR, "could not get element type of array type %u",
-					 to->atttypid);
-		}
+			tuple = SearchSysCache1(CLAOID, ObjectIdGetDatum(classObjectId[i]));
+			if (!HeapTupleIsValid(tuple))
+				elog(ERROR, "cache lookup failed for opclass %u",
+					 classObjectId[i]);
+			opclassTup = (Form_pg_opclass) GETSTRUCT(tuple);
+			if (OidIsValid(opclassTup->opckeytype))
+				keyType = opclassTup->opckeytype;
 
-		ReleaseSysCache(tuple);
+			/*
+			 * If keytype is specified as ANYELEMENT, and opcintype is
+			 * ANYARRAY, then the attribute type must be an array (else it'd
+			 * not have matched this opclass); use its element type.
+			 */
+			if (keyType == ANYELEMENTOID && opclassTup->opcintype == ANYARRAYOID)
+			{
+				keyType = get_base_element_type(to->atttypid);
+				if (!OidIsValid(keyType))
+					elog(ERROR, "could not get element type of array type %u",
+						 to->atttypid);
+			}
+
+			ReleaseSysCache(tuple);
+		}
 
 		/*
 		 * If a key type different from the heap value is specified, update
@@ -600,10 +610,10 @@ UpdateIndexRelation(Oid indexoid,
 	 */
 	indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
 	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
-		indkey->values[i] = indexInfo->ii_KeyAttrNumbers[i];
-	indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexAttrs);
-	indclass = buildoidvector(classOids, indexInfo->ii_NumIndexAttrs);
-	indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexAttrs);
+		indkey->values[i] = indexInfo->ii_IndexAttrNumbers[i];
+	indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexKeyAttrs);
+	indclass = buildoidvector(classOids, indexInfo->ii_NumIndexKeyAttrs);
+	indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexKeyAttrs);
 
 	/*
 	 * Convert the index expressions (if any) to a text datum
@@ -647,6 +657,7 @@ UpdateIndexRelation(Oid indexoid,
 	values[Anum_pg_index_indexrelid - 1] = ObjectIdGetDatum(indexoid);
 	values[Anum_pg_index_indrelid - 1] = ObjectIdGetDatum(heapoid);
 	values[Anum_pg_index_indnatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexAttrs);
+	values[Anum_pg_index_indnkeyatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexKeyAttrs);
 	values[Anum_pg_index_indisunique - 1] = BoolGetDatum(indexInfo->ii_Unique);
 	values[Anum_pg_index_indisprimary - 1] = BoolGetDatum(primary);
 	values[Anum_pg_index_indisexclusion - 1] = BoolGetDatum(isexclusion);
@@ -925,6 +936,7 @@ index_create(Relation heapRelation,
 	indexRelation->rd_rel->relowner = heapRelation->rd_rel->relowner;
 	indexRelation->rd_rel->relam = accessMethodObjectId;
 	indexRelation->rd_rel->relhasoids = false;
+	indexRelation->rd_rel->relispartition = OidIsValid(parentIndexRelid);
 
 	/*
 	 * store index's pg_class entry
@@ -1032,11 +1044,11 @@ index_create(Relation heapRelation,
 			/* Create auto dependencies on simply-referenced columns */
 			for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 			{
-				if (indexInfo->ii_KeyAttrNumbers[i] != 0)
+				if (indexInfo->ii_IndexAttrNumbers[i] != 0)
 				{
 					referenced.classId = RelationRelationId;
 					referenced.objectId = heapRelationId;
-					referenced.objectSubId = indexInfo->ii_KeyAttrNumbers[i];
+					referenced.objectSubId = indexInfo->ii_IndexAttrNumbers[i];
 
 					recordDependencyOn(&myself, &referenced, deptype);
 
@@ -1072,7 +1084,7 @@ index_create(Relation heapRelation,
 
 		/* Store dependency on collations */
 		/* The default collation is pinned, so don't bother recording it */
-		for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+		for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 		{
 			if (OidIsValid(collationObjectId[i]) &&
 				collationObjectId[i] != DEFAULT_COLLATION_OID)
@@ -1086,7 +1098,7 @@ index_create(Relation heapRelation,
 		}
 
 		/* Store dependency on operator classes */
-		for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+		for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 		{
 			referenced.classId = OperatorClassRelationId;
 			referenced.objectId = classObjectId[i];
@@ -1141,6 +1153,8 @@ index_create(Relation heapRelation,
 		RelationInitIndexAccessInfo(indexRelation);
 	else
 		Assert(indexRelation->rd_indexcxt != NULL);
+
+	indexRelation->rd_index->indnkeyatts = indexInfo->ii_NumIndexKeyAttrs;
 
 	/*
 	 * If this is bootstrap (initdb) time, then we don't actually fill in the
@@ -1286,7 +1300,8 @@ index_constraint_create(Relation heapRelation,
 								   true,
 								   parentConstraintId,
 								   RelationGetRelid(heapRelation),
-								   indexInfo->ii_KeyAttrNumbers,
+								   indexInfo->ii_IndexAttrNumbers,
+								   indexInfo->ii_NumIndexKeyAttrs,
 								   indexInfo->ii_NumIndexAttrs,
 								   InvalidOid,	/* no domain */
 								   indexRelationId, /* index OID */
@@ -1732,16 +1747,20 @@ BuildIndexInfo(Relation index)
 	IndexInfo  *ii = makeNode(IndexInfo);
 	Form_pg_index indexStruct = index->rd_index;
 	int			i;
-	int			numKeys;
+	int			numAtts;
 
 	/* check the number of keys, and copy attr numbers into the IndexInfo */
-	numKeys = indexStruct->indnatts;
-	if (numKeys < 1 || numKeys > INDEX_MAX_KEYS)
+	numAtts = indexStruct->indnatts;
+	if (numAtts < 1 || numAtts > INDEX_MAX_KEYS)
 		elog(ERROR, "invalid indnatts %d for index %u",
-			 numKeys, RelationGetRelid(index));
-	ii->ii_NumIndexAttrs = numKeys;
-	for (i = 0; i < numKeys; i++)
-		ii->ii_KeyAttrNumbers[i] = indexStruct->indkey.values[i];
+			 numAtts, RelationGetRelid(index));
+	ii->ii_NumIndexAttrs = numAtts;
+	ii->ii_NumIndexKeyAttrs = indexStruct->indnkeyatts;
+	Assert(ii->ii_NumIndexKeyAttrs != 0);
+	Assert(ii->ii_NumIndexKeyAttrs <= ii->ii_NumIndexAttrs);
+
+	for (i = 0; i < numAtts; i++)
+		ii->ii_IndexAttrNumbers[i] = indexStruct->indkey.values[i];
 
 	/* fetch any expressions needed for expressional indexes */
 	ii->ii_Expressions = RelationGetIndexExpressions(index);
@@ -1816,6 +1835,11 @@ CompareIndexInfo(IndexInfo *info1, IndexInfo *info2,
 	if (info1->ii_NumIndexAttrs != info2->ii_NumIndexAttrs)
 		return false;
 
+	/* and same number of key attributes */
+	if (info1->ii_NumIndexKeyAttrs != info2->ii_NumIndexKeyAttrs)
+		return false;
+
+
 	/*
 	 * and columns match through the attribute map (actual attribute numbers
 	 * might differ!)  Note that this implies that index columns that are
@@ -1824,14 +1848,18 @@ CompareIndexInfo(IndexInfo *info1, IndexInfo *info2,
 	 */
 	for (i = 0; i < info1->ii_NumIndexAttrs; i++)
 	{
-		if (maplen < info2->ii_KeyAttrNumbers[i])
+		if (maplen < info2->ii_IndexAttrNumbers[i])
 			elog(ERROR, "incorrect attribute map");
 
 		/* ignore expressions at this stage */
-		if ((info1->ii_KeyAttrNumbers[i] != InvalidAttrNumber) &&
-			(attmap[info2->ii_KeyAttrNumbers[i] - 1] !=
-			info1->ii_KeyAttrNumbers[i]))
+		if ((info1->ii_IndexAttrNumbers[i] != InvalidAttrNumber) &&
+			(attmap[info2->ii_IndexAttrNumbers[i] - 1] !=
+			info1->ii_IndexAttrNumbers[i]))
 			return false;
+
+		/* collation and opfamily is not valid for including columns */
+		if (i >= info1->ii_NumIndexKeyAttrs)
+			continue;
 
 		if (collations1[i] != collations2[i])
 			return false;
@@ -1911,8 +1939,10 @@ CompareIndexInfo(IndexInfo *info1, IndexInfo *info2,
 void
 BuildSpeculativeIndexInfo(Relation index, IndexInfo *ii)
 {
-	int			ncols = index->rd_rel->relnatts;
+	int			indnkeyatts;
 	int			i;
+
+	indnkeyatts = IndexRelationGetNumberOfKeyAttributes(index);
 
 	/*
 	 * fetch info for checking unique indexes
@@ -1922,16 +1952,16 @@ BuildSpeculativeIndexInfo(Relation index, IndexInfo *ii)
 	if (index->rd_rel->relam != BTREE_AM_OID)
 		elog(ERROR, "unexpected non-btree speculative unique index");
 
-	ii->ii_UniqueOps = (Oid *) palloc(sizeof(Oid) * ncols);
-	ii->ii_UniqueProcs = (Oid *) palloc(sizeof(Oid) * ncols);
-	ii->ii_UniqueStrats = (uint16 *) palloc(sizeof(uint16) * ncols);
+	ii->ii_UniqueOps = (Oid *) palloc(sizeof(Oid) * indnkeyatts);
+	ii->ii_UniqueProcs = (Oid *) palloc(sizeof(Oid) * indnkeyatts);
+	ii->ii_UniqueStrats = (uint16 *) palloc(sizeof(uint16) * indnkeyatts);
 
 	/*
 	 * We have to look up the operator's strategy number.  This provides a
 	 * cross-check that the operator does match the index.
 	 */
 	/* We need the func OIDs and strategy numbers too */
-	for (i = 0; i < ncols; i++)
+	for (i = 0; i < indnkeyatts; i++)
 	{
 		ii->ii_UniqueStrats[i] = BTEqualStrategyNumber;
 		ii->ii_UniqueOps[i] =
@@ -1989,7 +2019,7 @@ FormIndexDatum(IndexInfo *indexInfo,
 
 	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 	{
-		int			keycol = indexInfo->ii_KeyAttrNumbers[i];
+		int			keycol = indexInfo->ii_IndexAttrNumbers[i];
 		Datum		iDatum;
 		bool		isNull;
 
@@ -4064,8 +4094,7 @@ RemoveReindexPending(Oid indexOid)
 static void
 ResetReindexPending(void)
 {
-	if (IsInParallelMode())
-		elog(ERROR, "cannot modify reindex state during a parallel operation");
+	/* This may be called in leader error path */
 	pendingReindexedIndexes = NIL;
 }
 

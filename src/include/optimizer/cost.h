@@ -71,6 +71,7 @@ extern PGDLLIMPORT bool enable_partitionwise_join;
 extern PGDLLIMPORT bool enable_partitionwise_aggregate;
 extern PGDLLIMPORT bool enable_parallel_append;
 extern PGDLLIMPORT bool enable_parallel_hash;
+extern PGDLLIMPORT bool enable_partition_pruning;
 extern PGDLLIMPORT int	constraint_exclusion;
 
 extern double clamp_row_est(double nrows);
@@ -166,6 +167,7 @@ extern void cost_subplan(PlannerInfo *root, SubPlan *subplan, Plan *plan);
 extern void cost_qual_eval(QualCost *cost, List *quals, PlannerInfo *root);
 extern void cost_qual_eval_node(QualCost *cost, Node *qual, PlannerInfo *root);
 extern void compute_semi_anti_join_factors(PlannerInfo *root,
+							   RelOptInfo *joinrel,
 							   RelOptInfo *outerrel,
 							   RelOptInfo *innerrel,
 							   JoinType jointype,

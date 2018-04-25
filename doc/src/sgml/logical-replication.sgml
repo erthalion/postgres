@@ -108,8 +108,8 @@
 
   <para>
    Publications can choose to limit the changes they produce to
-   any combination of <command>INSERT</command>, <command>UPDATE</command>, and
-   <command>DELETE</command>, similar to how triggers are fired by
+   any combination of <command>INSERT</command>, <command>UPDATE</command>,
+   <command>DELETE</command>, and <command>TRUNCATE</command>, similar to how triggers are fired by
    particular event types.  By default, all operation types are replicated.
   </para>
 
@@ -366,15 +366,6 @@
 
    <listitem>
     <para>
-     <command>TRUNCATE</command> commands are not replicated.  This can, of
-     course, be worked around by using <command>DELETE</command> instead.  To
-     avoid accidental <command>TRUNCATE</command> invocations, you can revoke
-     the <literal>TRUNCATE</literal> privilege from tables.
-    </para>
-   </listitem>
-
-   <listitem>
-    <para>
      Large objects (see <xref linkend="largeobjects"/>) are not replicated.
      There is no workaround for that, other than storing data in normal
      tables.
@@ -486,7 +477,14 @@
   <para>
    The role used for the replication connection must have
    the <literal>REPLICATION</literal> attribute (or be a superuser).  Access for the role must be
-   configured in <filename>pg_hba.conf</filename>.
+   configured in <filename>pg_hba.conf</filename> and it must have the
+   <literal>LOGIN</literal> attribute.
+  </para>
+
+  <para>
+   In order to be able to copy the initial table data, the role used for the
+   replication connection must have the <literal>SELECT</literal> privilege on
+   a published table (or be a superuser).
   </para>
 
   <para>

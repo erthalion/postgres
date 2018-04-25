@@ -44,16 +44,15 @@
 #include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
-#include "catalog/pg_proc_fn.h"
 #include "catalog/pg_transform.h"
 #include "catalog/pg_type.h"
-#include "catalog/pg_type_fn.h"
 #include "commands/alter.h"
 #include "commands/defrem.h"
 #include "commands/proclang.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "optimizer/clauses.h"
 #include "optimizer/var.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
@@ -2228,7 +2227,30 @@ ExecuteCallStmt(CallStmt *stmt, ParamListInfo params, bool atomic, DestReceiver 
 	if (aclresult != ACLCHECK_OK)
 		aclcheck_error(aclresult, OBJECT_PROCEDURE, get_func_name(fexpr->funcid));
 
+	/* Prep the context object we'll pass to the procedure */
+	callcontext = makeNode(CallContext);
+	callcontext->atomic = atomic;
+
+	tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+
+	/*
+	 * If proconfig is set we can't allow transaction commands because of the
+	 * way the GUC stacking works: The transaction boundary would have to pop
+	 * the proconfig setting off the stack.  That restriction could be lifted
+	 * by redesigning the GUC nesting mechanism a bit.
+	 */
+	if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL))
+		callcontext->atomic = true;
+
+	/*
+	 * Expand named arguments, defaults, etc.
+	 */
+	fexpr->args = expand_function_arguments(fexpr->args, fexpr->funcresulttype, tp);
 	nargs = list_length(fexpr->args);
+
+	ReleaseSysCache(tp);
 
 	/* safety check; see ExecInitFunc() */
 	if (nargs > FUNC_MAX_ARGS)
@@ -2238,23 +2260,6 @@ ExecuteCallStmt(CallStmt *stmt, ParamListInfo params, bool atomic, DestReceiver 
 							   "cannot pass more than %d arguments to a procedure",
 							   FUNC_MAX_ARGS,
 							   FUNC_MAX_ARGS)));
-
-	/* Prep the context object we'll pass to the procedure */
-	callcontext = makeNode(CallContext);
-	callcontext->atomic = atomic;
-
-	/*
-	 * If proconfig is set we can't allow transaction commands because of the
-	 * way the GUC stacking works: The transaction boundary would have to pop
-	 * the proconfig setting off the stack.  That restriction could be lifted
-	 * by redesigning the GUC nesting mechanism a bit.
-	 */
-	tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
-	if (!HeapTupleIsValid(tp))
-		elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
-	if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL))
-		callcontext->atomic = true;
-	ReleaseSysCache(tp);
 
 	/* Initialize function call structure */
 	InvokeFunctionExecuteHook(fexpr->funcid);

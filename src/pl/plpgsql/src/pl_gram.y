@@ -199,7 +199,7 @@ static	void			check_raise_parameters(PLpgSQL_stmt_raise *stmt);
 %type <stmt>	stmt_return stmt_raise stmt_assert stmt_execsql
 %type <stmt>	stmt_dynexecute stmt_for stmt_perform stmt_call stmt_getdiag
 %type <stmt>	stmt_open stmt_fetch stmt_move stmt_close stmt_null
-%type <stmt>	stmt_commit stmt_rollback
+%type <stmt>	stmt_commit stmt_rollback stmt_set
 %type <stmt>	stmt_case stmt_foreach_a
 
 %type <list>	proc_exceptions
@@ -326,6 +326,7 @@ static	void			check_raise_parameters(PLpgSQL_stmt_raise *stmt);
 %token <keyword>	K_QUERY
 %token <keyword>	K_RAISE
 %token <keyword>	K_RELATIVE
+%token <keyword>	K_RESET
 %token <keyword>	K_RESULT_OID
 %token <keyword>	K_RETURN
 %token <keyword>	K_RETURNED_SQLSTATE
@@ -336,6 +337,7 @@ static	void			check_raise_parameters(PLpgSQL_stmt_raise *stmt);
 %token <keyword>	K_SCHEMA
 %token <keyword>	K_SCHEMA_NAME
 %token <keyword>	K_SCROLL
+%token <keyword>	K_SET
 %token <keyword>	K_SLICE
 %token <keyword>	K_SQLSTATE
 %token <keyword>	K_STACKED
@@ -891,6 +893,8 @@ proc_stmt		: pl_block ';'
 				| stmt_commit
 						{ $$ = $1; }
 				| stmt_rollback
+						{ $$ = $1; }
+				| stmt_set
 						{ $$ = $1; }
 				;
 
@@ -2201,6 +2205,30 @@ stmt_rollback	: K_ROLLBACK ';'
 					}
 				;
 
+stmt_set	: K_SET
+					{
+						PLpgSQL_stmt_set *new;
+
+						new = palloc0(sizeof(PLpgSQL_stmt_set));
+						new->cmd_type = PLPGSQL_STMT_SET;
+						new->lineno = plpgsql_location_to_lineno(@1);
+						new->expr = read_sql_stmt("SET ");
+
+						$$ = (PLpgSQL_stmt *)new;
+					}
+			| K_RESET
+					{
+						PLpgSQL_stmt_set *new;
+
+						new = palloc0(sizeof(PLpgSQL_stmt_set));
+						new->cmd_type = PLPGSQL_STMT_SET;
+						new->lineno = plpgsql_location_to_lineno(@1);
+						new->expr = read_sql_stmt("RESET ");
+
+						$$ = (PLpgSQL_stmt *)new;
+					}
+			;
+
 
 cursor_variable	: T_DATUM
 					{
@@ -2488,6 +2516,7 @@ unreserved_keyword	:
 				| K_QUERY
 				| K_RAISE
 				| K_RELATIVE
+				| K_RESET
 				| K_RESULT_OID
 				| K_RETURN
 				| K_RETURNED_SQLSTATE
@@ -2498,6 +2527,7 @@ unreserved_keyword	:
 				| K_SCHEMA
 				| K_SCHEMA_NAME
 				| K_SCROLL
+				| K_SET
 				| K_SLICE
 				| K_SQLSTATE
 				| K_STACKED

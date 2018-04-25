@@ -25,9 +25,8 @@
 #include "catalog/indexing.h"
 #include "catalog/partition.h"
 #include "catalog/pg_am.h"
-#include "catalog/pg_constraint_fn.h"
+#include "catalog/pg_constraint.h"
 #include "catalog/pg_inherits.h"
-#include "catalog/pg_inherits_fn.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_tablespace.h"
@@ -57,6 +56,7 @@
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/partcache.h"
 #include "utils/regproc.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -109,8 +109,10 @@ static void ReindexPartitionedIndex(Relation parentIdx);
  * indexes.  We acknowledge this when all operator classes, collations and
  * exclusion operators match.  Though we could further permit intra-opfamily
  * changes for btree and hash indexes, that adds subtle complexity with no
- * concrete benefit for core types.
-
+ * concrete benefit for core types. Note, that INCLUDE columns aren't
+ * checked by this function, for them it's enough that table rewrite is
+ * skipped.
+ *
  * When a comparison or exclusion operator has a polymorphic input type, the
  * actual input types must also match.  This defends against the possibility
  * that operators could vary behavior in response to get_fn_expr_argtype().
@@ -181,9 +183,13 @@ CheckIndexCompatible(Oid oldId,
 	 * the new index, so we can test whether it's compatible with the existing
 	 * one.  Note that ComputeIndexAttrs might fail here, but that's OK:
 	 * DefineIndex would have called this function with the same arguments
-	 * later on, and it would have failed then anyway.
+	 * later on, and it would have failed then anyway.  Our attributeList
+	 * contains only key attributes, thus we're filling ii_NumIndexAttrs and
+	 * ii_NumIndexKeyAttrs with same value.
 	 */
 	indexInfo = makeNode(IndexInfo);
+	indexInfo->ii_NumIndexAttrs = numberOfAttributes;
+	indexInfo->ii_NumIndexKeyAttrs = numberOfAttributes;
 	indexInfo->ii_Expressions = NIL;
 	indexInfo->ii_ExpressionsState = NIL;
 	indexInfo->ii_PredicateState = NULL;
@@ -224,7 +230,7 @@ CheckIndexCompatible(Oid oldId,
 	}
 
 	/* Any change in operator class or collation breaks compatibility. */
-	old_natts = indexForm->indnatts;
+	old_natts = indexForm->indnkeyatts;
 	Assert(old_natts == numberOfAttributes);
 
 	d = SysCacheGetAttr(INDEXRELID, tuple, Anum_pg_index_indcollation, &isnull);
@@ -337,6 +343,7 @@ DefineIndex(Oid relationId,
 	Oid			tablespaceId;
 	Oid			createdConstraintId = InvalidOid;
 	List	   *indexColNames;
+	List	   *allIndexParams;
 	Relation	rel;
 	Relation	indexRelation;
 	HeapTuple	tuple;
@@ -351,6 +358,7 @@ DefineIndex(Oid relationId,
 	bits16		flags;
 	bits16		constr_flags;
 	int			numberOfAttributes;
+	int			numberOfKeyAttributes;
 	TransactionId limitXmin;
 	VirtualTransactionId *old_snapshots;
 	ObjectAddress address;
@@ -361,10 +369,28 @@ DefineIndex(Oid relationId,
 	Snapshot	snapshot;
 	int			i;
 
+	if (list_intersection(stmt->indexParams, stmt->indexIncludingParams) != NIL)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("included columns must not intersect with key columns")));
+
 	/*
-	 * count attributes in index
+	 * count key attributes in index
 	 */
-	numberOfAttributes = list_length(stmt->indexParams);
+	numberOfKeyAttributes = list_length(stmt->indexParams);
+
+	/*
+	 * Calculate the new list of index columns including both key columns and
+	 * INCLUDE columns.  Later we can determine which of these are key columns,
+	 * and which are just part of the INCLUDE list by checking the list
+	 * position.  A list item in a position less than ii_NumIndexKeyAttrs is
+	 * part of the key columns, and anything equal to and over is part of the
+	 * INCLUDE columns.
+	 */
+	allIndexParams = list_concat(list_copy(stmt->indexParams),
+								 list_copy(stmt->indexIncludingParams));
+	numberOfAttributes = list_length(allIndexParams);
+
 	if (numberOfAttributes <= 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
@@ -520,7 +546,7 @@ DefineIndex(Oid relationId,
 	/*
 	 * Choose the index column names.
 	 */
-	indexColNames = ChooseIndexColumnNames(stmt->indexParams);
+	indexColNames = ChooseIndexColumnNames(allIndexParams);
 
 	/*
 	 * Select name for index if caller didn't specify
@@ -568,6 +594,11 @@ DefineIndex(Oid relationId,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("access method \"%s\" does not support unique indexes",
 						accessMethodName)));
+	if (list_length(stmt->indexIncludingParams) > 0 && !amRoutine->amcaninclude)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("access method \"%s\" does not support included columns",
+						accessMethodName)));
 	if (numberOfAttributes > 1 && !amRoutine->amcanmulticol)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -605,6 +636,7 @@ DefineIndex(Oid relationId,
 	 */
 	indexInfo = makeNode(IndexInfo);
 	indexInfo->ii_NumIndexAttrs = numberOfAttributes;
+	indexInfo->ii_NumIndexKeyAttrs = numberOfKeyAttributes;
 	indexInfo->ii_Expressions = NIL;	/* for now */
 	indexInfo->ii_ExpressionsState = NIL;
 	indexInfo->ii_Predicate = make_ands_implicit((Expr *) stmt->whereClause);
@@ -628,7 +660,7 @@ DefineIndex(Oid relationId,
 	coloptions = (int16 *) palloc(numberOfAttributes * sizeof(int16));
 	ComputeIndexAttrs(indexInfo,
 					  typeObjectId, collationObjectId, classObjectId,
-					  coloptions, stmt->indexParams,
+					  coloptions, allIndexParams,
 					  stmt->excludeOpNames, relationId,
 					  accessMethodName, accessMethodId,
 					  amcanorder, stmt->isconstraint);
@@ -694,7 +726,7 @@ DefineIndex(Oid relationId,
 
 			for (j = 0; j < indexInfo->ii_NumIndexAttrs; j++)
 			{
-				if (key->partattrs[i] == indexInfo->ii_KeyAttrNumbers[j])
+				if (key->partattrs[i] == indexInfo->ii_IndexAttrNumbers[j])
 				{
 					found = true;
 					break;
@@ -723,7 +755,7 @@ DefineIndex(Oid relationId,
 	 */
 	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 	{
-		AttrNumber	attno = indexInfo->ii_KeyAttrNumbers[i];
+		AttrNumber	attno = indexInfo->ii_IndexAttrNumbers[i];
 
 		if (attno < 0 && attno != ObjectIdAttributeNumber)
 			ereport(ERROR,
@@ -856,8 +888,8 @@ DefineIndex(Oid relationId,
 			memcpy(part_oids, partdesc->oids, sizeof(Oid) * nparts);
 
 			parentDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-			opfamOids = palloc(sizeof(Oid) * numberOfAttributes);
-			for (i = 0; i < numberOfAttributes; i++)
+			opfamOids = palloc(sizeof(Oid) * numberOfKeyAttributes);
+			for (i = 0; i < numberOfKeyAttributes; i++)
 				opfamOids[i] = get_opclass_family(classObjectId[i]);
 
 			heap_close(rel, NoLock);
@@ -1165,14 +1197,25 @@ DefineIndex(Oid relationId,
 	 * doing CREATE INDEX CONCURRENTLY, which would see our snapshot as one
 	 * they must wait for.  But first, save the snapshot's xmin to use as
 	 * limitXmin for GetCurrentVirtualXIDs().
-	 *
-	 * Our catalog snapshot could have the same effect, so drop that one too.
 	 */
 	limitXmin = snapshot->xmin;
 
 	PopActiveSnapshot();
 	UnregisterSnapshot(snapshot);
-	InvalidateCatalogSnapshot();
+
+	/*
+	 * The snapshot subsystem could still contain registered snapshots that
+	 * are holding back our process's advertised xmin; in particular, if
+	 * default_transaction_isolation = serializable, there is a transaction
+	 * snapshot that is still active.  The CatalogSnapshot is likewise a
+	 * hazard.  To ensure no deadlocks, we must commit and start yet another
+	 * transaction, and do our wait before any snapshot has been taken in it.
+	 */
+	CommitTransactionCommand();
+	StartTransactionCommand();
+
+	/* We should now definitely not be advertising any xmin. */
+	Assert(MyPgXact->xmin == InvalidTransactionId);
 
 	/*
 	 * The index is now valid in the sense that it contains all currently
@@ -1329,7 +1372,8 @@ CheckPredicate(Expr *predicate)
 
 /*
  * Compute per-index-column information, including indexed column numbers
- * or index expressions, opclasses, and indoptions.
+ * or index expressions, opclasses, and indoptions. Note, all output vectors
+ * should be allocated for all columns, including "including" ones.
  */
 static void
 ComputeIndexAttrs(IndexInfo *indexInfo,
@@ -1348,16 +1392,15 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 	ListCell   *nextExclOp;
 	ListCell   *lc;
 	int			attn;
+	int			nkeycols = indexInfo->ii_NumIndexKeyAttrs;
 
 	/* Allocate space for exclusion operator info, if needed */
 	if (exclusionOpNames)
 	{
-		int			ncols = list_length(attList);
-
-		Assert(list_length(exclusionOpNames) == ncols);
-		indexInfo->ii_ExclusionOps = (Oid *) palloc(sizeof(Oid) * ncols);
-		indexInfo->ii_ExclusionProcs = (Oid *) palloc(sizeof(Oid) * ncols);
-		indexInfo->ii_ExclusionStrats = (uint16 *) palloc(sizeof(uint16) * ncols);
+		Assert(list_length(exclusionOpNames) == nkeycols);
+		indexInfo->ii_ExclusionOps = (Oid *) palloc(sizeof(Oid) * nkeycols);
+		indexInfo->ii_ExclusionProcs = (Oid *) palloc(sizeof(Oid) * nkeycols);
+		indexInfo->ii_ExclusionStrats = (uint16 *) palloc(sizeof(uint16) * nkeycols);
 		nextExclOp = list_head(exclusionOpNames);
 	}
 	else
@@ -1399,7 +1442,7 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 									attribute->name)));
 			}
 			attform = (Form_pg_attribute) GETSTRUCT(atttuple);
-			indexInfo->ii_KeyAttrNumbers[attn] = attform->attnum;
+			indexInfo->ii_IndexAttrNumbers[attn] = attform->attnum;
 			atttype = attform->atttypid;
 			attcollation = attform->attcollation;
 			ReleaseSysCache(atttuple);
@@ -1410,6 +1453,11 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 			Node	   *expr = attribute->expr;
 
 			Assert(expr != NULL);
+
+			if (attn >= nkeycols)
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("expressions are not supported in included columns")));
 			atttype = exprType(expr);
 			attcollation = exprCollation(expr);
 
@@ -1427,11 +1475,11 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 				 * User wrote "(column)" or "(column COLLATE something)".
 				 * Treat it like simple attribute anyway.
 				 */
-				indexInfo->ii_KeyAttrNumbers[attn] = ((Var *) expr)->varattno;
+				indexInfo->ii_IndexAttrNumbers[attn] = ((Var *) expr)->varattno;
 			}
 			else
 			{
-				indexInfo->ii_KeyAttrNumbers[attn] = 0; /* marks expression */
+				indexInfo->ii_IndexAttrNumbers[attn] = 0; /* marks expression */
 				indexInfo->ii_Expressions = lappend(indexInfo->ii_Expressions,
 													expr);
 
@@ -1455,6 +1503,36 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 		}
 
 		typeOidP[attn] = atttype;
+
+		/*
+		 * Included columns have no collation, no opclass and no ordering options.
+		 */
+		if (attn >= nkeycols)
+		{
+			if (attribute->collation)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						 errmsg("including column does not support a collation")));
+			if (attribute->opclass)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						 errmsg("including column does not support an operator class")));
+			if (attribute->ordering != SORTBY_DEFAULT)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						 errmsg("including column does not support ASC/DESC options")));
+			if (attribute->nulls_ordering != SORTBY_NULLS_DEFAULT)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						 errmsg("including column does not support NULLS FIRST/LAST options")));
+
+			classOidP[attn] = InvalidOid;
+			colOptionP[attn] = 0;
+			collationOidP[attn] = InvalidOid;
+			attn++;
+
+			continue;
+		}
 
 		/*
 		 * Apply collation override if any
@@ -2091,7 +2169,7 @@ ReindexIndex(RangeVar *indexRelation, int options)
 	 * used here must match the index lock obtained in reindex_index().
 	 */
 	indOid = RangeVarGetRelidExtended(indexRelation, AccessExclusiveLock,
-									  false, false,
+									  0,
 									  RangeVarCallbackForReindexIndex,
 									  (void *) &heapOid);
 
@@ -2183,7 +2261,7 @@ ReindexTable(RangeVar *relation, int options)
 	Oid			heapOid;
 
 	/* The lock level used here should match reindex_relation(). */
-	heapOid = RangeVarGetRelidExtended(relation, ShareLock, false, false,
+	heapOid = RangeVarGetRelidExtended(relation, ShareLock, 0,
 									   RangeVarCallbackOwnsTable, NULL);
 
 	if (!reindex_relation(heapOid,

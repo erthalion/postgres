@@ -43,7 +43,7 @@ my $contrib_extrasource = {
 my @contrib_excludes = (
 	'commit_ts',       'hstore_plperl',
 	'hstore_plpython', 'intagg',
-	'jsonb_plpython',
+	'jsonb_plperl',    'jsonb_plpython',
 	'ltree_plpython',  'pgcrypto',
 	'sepgsql',         'brin',
 	'test_extensions', 'test_pg_dump',
@@ -101,7 +101,7 @@ sub mkvcbuild
 
 	if ($vsVersion >= '9.00')
 	{
-		push(@pgportfiles, 'pg_crc32c_choose.c');
+		push(@pgportfiles, 'pg_crc32c_sse42_choose.c');
 		push(@pgportfiles, 'pg_crc32c_sse42.c');
 		push(@pgportfiles, 'pg_crc32c_sb8.c');
 	}
@@ -111,8 +111,8 @@ sub mkvcbuild
 	}
 
 	our @pgcommonallfiles = qw(
-	  base64.c config_info.c controldata_utils.c exec.c ip.c keywords.c
-	  md5.c pg_lzcompress.c pgfnames.c psprintf.c relpath.c rmtree.c
+	  base64.c config_info.c controldata_utils.c exec.c file_perm.c ip.c
+	  keywords.c md5.c pg_lzcompress.c pgfnames.c psprintf.c relpath.c rmtree.c
 	  saslprep.c scram-common.c string.c unicode_norm.c username.c
 	  wait_error.c);
 
@@ -746,15 +746,19 @@ sub mkvcbuild
 			}
 		}
 
-		# Add transform module dependent on plperl
+		# Add transform modules dependent on plperl
 		my $hstore_plperl = AddTransformModule(
 			'hstore_plperl', 'contrib/hstore_plperl',
 			'plperl',        'src/pl/plperl',
 			'hstore',        'contrib/hstore');
+		my $jsonb_plperl = AddTransformModule(
+			'jsonb_plperl', 'contrib/jsonb_plperl',
+			'plperl',        'src/pl/plperl');
 
 		foreach my $f (@perl_embed_ccflags)
 		{
 			$hstore_plperl->AddDefine($f);
+			$jsonb_plperl->AddDefine($f);
 		}
 	}
 

@@ -17,7 +17,6 @@
 #include <limits.h>
 
 #include "miscadmin.h"
-#include "catalog/partition.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
@@ -27,6 +26,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/tlist.h"
+#include "partitioning/partbounds.h"
 #include "utils/hsearch.h"
 
 
@@ -154,9 +154,11 @@ build_simple_rel(PlannerInfo *root, int relid, RelOptInfo *parent)
 	rel->part_scheme = NULL;
 	rel->nparts = 0;
 	rel->boundinfo = NULL;
+	rel->partition_qual = NIL;
 	rel->part_rels = NULL;
 	rel->partexprs = NULL;
 	rel->nullable_partexprs = NULL;
+	rel->partitioned_child_rels = NIL;
 
 	/*
 	 * Pass top parent's relids down the inheritance hierarchy. If the parent
@@ -567,9 +569,11 @@ build_join_rel(PlannerInfo *root,
 	joinrel->part_scheme = NULL;
 	joinrel->nparts = 0;
 	joinrel->boundinfo = NULL;
+	joinrel->partition_qual = NIL;
 	joinrel->part_rels = NULL;
 	joinrel->partexprs = NULL;
 	joinrel->nullable_partexprs = NULL;
+	joinrel->partitioned_child_rels = NIL;
 
 	/* Compute information relevant to the foreign relations. */
 	set_foreign_rel_properties(joinrel, outer_rel, inner_rel);
@@ -734,9 +738,13 @@ build_child_join_rel(PlannerInfo *root, RelOptInfo *outer_rel,
 	joinrel->has_eclass_joins = false;
 	joinrel->top_parent_relids = NULL;
 	joinrel->part_scheme = NULL;
+	joinrel->nparts = 0;
+	joinrel->boundinfo = NULL;
+	joinrel->partition_qual = NIL;
 	joinrel->part_rels = NULL;
 	joinrel->partexprs = NULL;
 	joinrel->nullable_partexprs = NULL;
+	joinrel->partitioned_child_rels = NIL;
 
 	joinrel->top_parent_relids = bms_union(outer_rel->top_parent_relids,
 										   inner_rel->top_parent_relids);
@@ -1621,7 +1629,8 @@ build_joinrel_partition_info(RelOptInfo *joinrel, RelOptInfo *outer_rel,
 	 */
 	if (!IS_PARTITIONED_REL(outer_rel) || !IS_PARTITIONED_REL(inner_rel) ||
 		outer_rel->part_scheme != inner_rel->part_scheme ||
-		!have_partkey_equi_join(outer_rel, inner_rel, jointype, restrictlist))
+		!have_partkey_equi_join(joinrel, outer_rel, inner_rel,
+								jointype, restrictlist))
 	{
 		Assert(!IS_PARTITIONED_REL(joinrel));
 		return;

@@ -305,6 +305,8 @@ static int exec_stmt_commit(PLpgSQL_execstate *estate,
 				 PLpgSQL_stmt_commit *stmt);
 static int exec_stmt_rollback(PLpgSQL_execstate *estate,
 				   PLpgSQL_stmt_rollback *stmt);
+static int exec_stmt_set(PLpgSQL_execstate *estate,
+				   PLpgSQL_stmt_set *stmt);
 
 static void plpgsql_estate_setup(PLpgSQL_execstate *estate,
 					 PLpgSQL_function *func,
@@ -2005,6 +2007,10 @@ exec_stmt(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 			rc = exec_stmt_rollback(estate, (PLpgSQL_stmt_rollback *) stmt);
 			break;
 
+		case PLPGSQL_STMT_SET:
+			rc = exec_stmt_set(estate, (PLpgSQL_stmt_set *) stmt);
+			break;
+
 		default:
 			estate->err_stmt = save_estmt;
 			elog(ERROR, "unrecognized cmd_type: %d", stmt->cmd_type);
@@ -2060,6 +2066,7 @@ static int
 exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 {
 	PLpgSQL_expr *expr = stmt->expr;
+	SPIPlanPtr	plan;
 	ParamListInfo paramLI;
 	LocalTransactionId before_lxid;
 	LocalTransactionId after_lxid;
@@ -2069,7 +2076,9 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 	{
 		/*
 		 * Don't save the plan if not in atomic context.  Otherwise,
-		 * transaction ends would cause warnings about plan leaks.
+		 * transaction ends would cause errors about plancache leaks.  XXX
+		 * This would be fixable with some plancache/resowner surgery
+		 * elsewhere, but for now we'll just work around this here.
 		 */
 		exec_prepare_plan(estate, expr, 0, estate->atomic);
 
@@ -2084,8 +2093,27 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 
 	before_lxid = MyProc->lxid;
 
-	rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI,
-										 estate->readonly_func, 0);
+	PG_TRY();
+	{
+		rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI,
+											 estate->readonly_func, 0);
+	}
+	PG_CATCH();
+	{
+		/*
+		 * If we aren't saving the plan, unset the pointer.  Note that it
+		 * could have been unset already, in case of a recursive call.
+		 */
+		if (expr->plan && !expr->plan->saved)
+			expr->plan = NULL;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	plan = expr->plan;
+
+	if (expr->plan && !expr->plan->saved)
+		expr->plan = NULL;
 
 	after_lxid = MyProc->lxid;
 
@@ -2118,7 +2146,6 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 			FuncExpr   *funcexpr;
 			int			i;
 			HeapTuple	tuple;
-			int			numargs PG_USED_FOR_ASSERTS_ONLY;
 			Oid		   *argtypes;
 			char	  **argnames;
 			char	   *argmodes;
@@ -2129,7 +2156,7 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 			/*
 			 * Get the original CallStmt
 			 */
-			node = linitial_node(Query, ((CachedPlanSource *) linitial(expr->plan->plancache_list))->query_list)->utilityStmt;
+			node = linitial_node(Query, ((CachedPlanSource *) linitial(plan->plancache_list))->query_list)->utilityStmt;
 			if (!IsA(node, CallStmt))
 				elog(ERROR, "returned row from not a CallStmt");
 
@@ -2141,10 +2168,8 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcexpr->funcid));
 			if (!HeapTupleIsValid(tuple))
 				elog(ERROR, "cache lookup failed for function %u", funcexpr->funcid);
-			numargs = get_func_arg_info(tuple, &argtypes, &argnames, &argmodes);
+			get_func_arg_info(tuple, &argtypes, &argnames, &argmodes);
 			ReleaseSysCache(tuple);
-
-			Assert(numargs == list_length(funcexpr->args));
 
 			/*
 			 * Construct row
@@ -2164,16 +2189,36 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 
 				if (argmodes && argmodes[i] == PROARGMODE_INOUT)
 				{
-					Param	   *param;
+					if (IsA(n, Param))
+					{
+						Param	   *param = castNode(Param, n);
 
-					if (!IsA(n, Param))
+						/* paramid is offset by 1 (see make_datum_param()) */
+						row->varnos[nfields++] = param->paramid - 1;
+					}
+					else if (IsA(n, NamedArgExpr))
+					{
+						NamedArgExpr *nexpr = castNode(NamedArgExpr, n);
+						Param	   *param;
+
+						if (!IsA(nexpr->arg, Param))
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("argument %d is an output argument but is not writable", i + 1)));
+
+						param = castNode(Param, nexpr->arg);
+
+						/*
+						 * Named arguments must be after positional arguments,
+						 * so we can increase nfields.
+						 */
+						row->varnos[nexpr->argnumber] = param->paramid - 1;
+						nfields++;
+					}
+					else
 						ereport(ERROR,
 								(errcode(ERRCODE_SYNTAX_ERROR),
 								 errmsg("argument %d is an output argument but is not writable", i + 1)));
-
-					param = castNode(Param, n);
-					/* paramid is offset by 1 (see make_datum_param()) */
-					row->varnos[nfields++] = param->paramid - 1;
 				}
 				i++;
 			}
@@ -4703,6 +4748,35 @@ exec_stmt_rollback(PLpgSQL_execstate *estate, PLpgSQL_stmt_rollback *stmt)
 
 	estate->simple_eval_estate = NULL;
 	plpgsql_create_econtext(estate);
+
+	return PLPGSQL_RC_OK;
+}
+
+/*
+ * exec_stmt_set
+ *
+ * Execute SET/RESET statement.
+ *
+ * We just parse and execute the statement normally, but we have to do it
+ * without setting a snapshot, for things like SET TRANSACTION.
+ */
+static int
+exec_stmt_set(PLpgSQL_execstate *estate, PLpgSQL_stmt_set *stmt)
+{
+	PLpgSQL_expr *expr = stmt->expr;
+	int			rc;
+
+	if (expr->plan == NULL)
+	{
+		exec_prepare_plan(estate, expr, 0, true);
+		expr->plan->no_snapshots = true;
+	}
+
+	rc = SPI_execute_plan(expr->plan, NULL, NULL, estate->readonly_func, 0);
+
+	if (rc != SPI_OK_UTILITY)
+		elog(ERROR, "SPI_execute_plan failed executing query \"%s\": %s",
+			 expr->query, SPI_result_code_string(rc));
 
 	return PLPGSQL_RC_OK;
 }

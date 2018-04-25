@@ -260,6 +260,7 @@ CXX = @CXX@
 CFLAGS = @CFLAGS@
 CFLAGS_VECTOR = @CFLAGS_VECTOR@
 CFLAGS_SSE42 = @CFLAGS_SSE42@
+CFLAGS_ARMV8_CRC32C = @CFLAGS_ARMV8_CRC32C@
 CXXFLAGS = @CXXFLAGS@
 
 LLVM_CPPFLAGS = @LLVM_CPPFLAGS@
@@ -290,17 +291,26 @@ LLVM_LIBS=@LLVM_LIBS@
 LD = @LD@
 with_gnu_ld = @with_gnu_ld@
 
-# We want -L for libpgport.a and libpgcommon.a to be first in LDFLAGS.  We
-# also need LDFLAGS to be a "recursively expanded" variable, else adjustments
-# to rpathdir don't work right.  So we must NOT do LDFLAGS := something,
-# meaning this has to be done first and elsewhere we must only do LDFLAGS +=
-# something.
+# It's critical that within LDFLAGS, all -L switches pointing to build-tree
+# directories come before any -L switches pointing to external directories.
+# Otherwise it's possible for, e.g., a platform-provided copy of libpq.so
+# to get linked in place of the one we've built.  Therefore we adopt the
+# convention that the first component of LDFLAGS is an extra variable
+# LDFLAGS_INTERNAL, and -L and -l switches for PG's own libraries must be
+# put into LDFLAGS_INTERNAL, so they will appear ahead of those for external
+# libraries.
+#
+# We need LDFLAGS and LDFLAGS_INTERNAL to be "recursively expanded" variables,
+# else adjustments to, e.g., rpathdir don't work right.  So we must NOT do
+# "LDFLAGS := something" anywhere, ditto for LDFLAGS_INTERNAL.
+# These initial assignments must be "=" type, and elsewhere we must only do
+# "LDFLAGS += something" or "LDFLAGS_INTERNAL += something".
 ifdef PGXS
-  LDFLAGS = -L$(libdir)
+  LDFLAGS_INTERNAL = -L$(libdir)
 else
-  LDFLAGS = -L$(top_builddir)/src/port -L$(top_builddir)/src/common
+  LDFLAGS_INTERNAL = -L$(top_builddir)/src/port -L$(top_builddir)/src/common
 endif
-LDFLAGS += @LDFLAGS@
+LDFLAGS = $(LDFLAGS_INTERNAL) @LDFLAGS@
 
 LDFLAGS_EX = @LDFLAGS_EX@
 # LDFLAGS_SL might have already been assigned by calling makefile
@@ -338,12 +348,40 @@ XGETTEXT = @XGETTEXT@
 GZIP	= gzip
 BZIP2	= bzip2
 
+
+# Tree-wide build support
+
+# Just about every code subdirectory wants to have the generated headers
+# available before building, but we don't want parallel makes all trying
+# to build the same headers.  These rules, together with the recursion rules
+# below, ensure that we update the generated headers once, if needed,
+# at the top level of any "make all/install/check" request.  If a particular
+# subdirectory knows this isn't needed in itself or its children, it can set
+# NO_GENERATED_HEADERS.
+
+all install check: submake-generated-headers
+
+.PHONY: submake-generated-headers
+
+submake-generated-headers:
+ifndef NO_GENERATED_HEADERS
+ifeq ($(MAKELEVEL),0)
+	$(MAKE) -C $(top_builddir)/src/backend generated-headers
+endif
+endif
+
+
 # Testing
+
+# In much the same way as above, these rules ensure that we build a temp
+# install tree just once in any recursive "make check".  The additional test
+# on abs_top_builddir prevents doing anything foolish to the root directory.
 
 check: temp-install
 
 .PHONY: temp-install
-temp-install:
+
+temp-install: | submake-generated-headers
 ifndef NO_TEMP_INSTALL
 ifneq ($(abs_top_builddir),)
 ifeq ($(MAKELEVEL),0)
@@ -522,22 +560,19 @@ endif
 #
 # Commonly used submake targets
 
-submake-libpq:
+submake-libpq: | submake-generated-headers
 	$(MAKE) -C $(libpq_builddir) all
 
-submake-libpgport:
+submake-libpgport: | submake-generated-headers
 	$(MAKE) -C $(top_builddir)/src/port all
 	$(MAKE) -C $(top_builddir)/src/common all
 
-submake-libpgfeutils:
+submake-libpgfeutils: | submake-generated-headers
 	$(MAKE) -C $(top_builddir)/src/port all
 	$(MAKE) -C $(top_builddir)/src/common all
 	$(MAKE) -C $(top_builddir)/src/fe_utils all
 
-submake-generated-headers:
-	$(MAKE) -C $(top_builddir)/src/backend generated-headers
-
-.PHONY: submake-libpq submake-libpgport submake-libpgfeutils submake-generated-headers
+.PHONY: submake-libpq submake-libpgport submake-libpgfeutils
 
 
 ##########################################################################
@@ -772,7 +807,9 @@ endif
 
 # This function is only for internal use below.  It should be called
 # using $(eval).  It will set up a target so that it recurses into
-# a given subdirectory.  Note that to avoid a nasty bug in make 3.80,
+# a given subdirectory.  For the tree-wide all/install/check cases,
+# ensure we do our one-time tasks before recursing (see targets above).
+# Note that to avoid a nasty bug in make 3.80,
 # this function has to avoid using any complicated constructs (like
 # multiple targets on a line) and also not contain any lines that expand
 # to more than about 200 bytes.  This is why we make it apply to just one
@@ -783,7 +820,7 @@ endif
 define _create_recursive_target
 .PHONY: $(1)-$(2)-recurse
 $(1): $(1)-$(2)-recurse
-$(1)-$(2)-recurse: $(if $(filter check, $(3)), temp-install)
+$(1)-$(2)-recurse: $(if $(filter all install check, $(3)), submake-generated-headers) $(if $(filter check, $(3)), temp-install)
 	$$(MAKE) -C $(2) $(3)
 endef
 # Note that the use of $$ on the last line above is important; we want

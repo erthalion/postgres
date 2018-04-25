@@ -30,7 +30,6 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
-#include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/storage.h"
 #include "commands/async.h"
@@ -5246,9 +5245,7 @@ XactLogCommitRecord(TimestampTz commit_time,
 	xl_xact_invals xl_invals;
 	xl_xact_twophase xl_twophase;
 	xl_xact_origin xl_origin;
-
 	uint8		info;
-	int			gidlen = 0;
 
 	Assert(CritSectionCount > 0);
 
@@ -5314,10 +5311,7 @@ XactLogCommitRecord(TimestampTz commit_time,
 		Assert(twophase_gid != NULL);
 
 		if (XLogLogicalInfoActive())
-		{
 			xl_xinfo.xinfo |= XACT_XINFO_HAS_GID;
-			gidlen = strlen(twophase_gid) + 1; /* include '\0' */
-		}
 	}
 
 	/* dump transaction origin information */
@@ -5371,12 +5365,7 @@ XactLogCommitRecord(TimestampTz commit_time,
 	{
 		XLogRegisterData((char *) (&xl_twophase), sizeof(xl_xact_twophase));
 		if (xl_xinfo.xinfo & XACT_XINFO_HAS_GID)
-		{
-			static const char zeroes[MAXIMUM_ALIGNOF] = { 0 };
-			XLogRegisterData((char*) twophase_gid, gidlen);
-			if (MAXALIGN(gidlen) != gidlen)
-				XLogRegisterData((char*) zeroes, MAXALIGN(gidlen) - gidlen);
-		}
+			XLogRegisterData((char *) twophase_gid, strlen(twophase_gid));
 	}
 
 	if (xl_xinfo.xinfo & XACT_XINFO_HAS_ORIGIN)
@@ -5410,7 +5399,6 @@ XactLogAbortRecord(TimestampTz abort_time,
 	xl_xact_origin xl_origin;
 
 	uint8		info;
-	int			gidlen = 0;
 
 	Assert(CritSectionCount > 0);
 
@@ -5449,10 +5437,7 @@ XactLogAbortRecord(TimestampTz abort_time,
 		Assert(twophase_gid != NULL);
 
 		if (XLogLogicalInfoActive())
-		{
 			xl_xinfo.xinfo |= XACT_XINFO_HAS_GID;
-			gidlen = strlen(twophase_gid) + 1; /* include '\0' */
-		}
 	}
 
 	if (TransactionIdIsValid(twophase_xid) && XLogLogicalInfoActive())
@@ -5488,7 +5473,6 @@ XactLogAbortRecord(TimestampTz abort_time,
 	if (xl_xinfo.xinfo & XACT_XINFO_HAS_DBINFO)
 		XLogRegisterData((char *) (&xl_dbinfo), sizeof(xl_dbinfo));
 
-
 	if (xl_xinfo.xinfo & XACT_XINFO_HAS_SUBXACTS)
 	{
 		XLogRegisterData((char *) (&xl_subxacts),
@@ -5509,12 +5493,7 @@ XactLogAbortRecord(TimestampTz abort_time,
 	{
 		XLogRegisterData((char *) (&xl_twophase), sizeof(xl_xact_twophase));
 		if (xl_xinfo.xinfo & XACT_XINFO_HAS_GID)
-		{
-			static const char zeroes[MAXIMUM_ALIGNOF] = { 0 };
-			XLogRegisterData((char*) twophase_gid, gidlen);
-			if (MAXALIGN(gidlen) != gidlen)
-				XLogRegisterData((char*) zeroes, MAXALIGN(gidlen) - gidlen);
-		}
+			XLogRegisterData((char *) twophase_gid, strlen(twophase_gid) + 1);
 	}
 
 	if (xl_xinfo.xinfo & XACT_XINFO_HAS_ORIGIN)

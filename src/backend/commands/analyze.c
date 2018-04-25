@@ -27,7 +27,7 @@
 #include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_collation.h"
-#include "catalog/pg_inherits_fn.h"
+#include "catalog/pg_inherits.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_statistic_ext.h"
 #include "commands/dbcommands.h"
@@ -495,7 +495,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
 				tcnt = 0;
 				for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 				{
-					int			keycol = indexInfo->ii_KeyAttrNumbers[i];
+					int			keycol = indexInfo->ii_IndexAttrNumbers[i];
 
 					if (keycol == 0)
 					{

@@ -19,8 +19,7 @@
 #include "pg_rewind.h"
 
 #include "common/string.h"
-#include "catalog/catalog.h"
-#include "catalog/pg_tablespace.h"
+#include "catalog/pg_tablespace_d.h"
 #include "storage/fd.h"
 
 filemap_t  *filemap = NULL;

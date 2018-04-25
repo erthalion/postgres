@@ -1330,6 +1330,49 @@ _readOnConflictExpr(void)
 	READ_DONE();
 }
 
+static PartitionPruneStepOp *
+_readPartitionPruneStepOp(void)
+{
+	READ_LOCALS(PartitionPruneStepOp);
+
+	READ_INT_FIELD(step.step_id);
+	READ_INT_FIELD(opstrategy);
+	READ_NODE_FIELD(exprs);
+	READ_NODE_FIELD(cmpfns);
+	READ_BITMAPSET_FIELD(nullkeys);
+
+	READ_DONE();
+}
+
+static PartitionPruneStepCombine *
+_readPartitionPruneStepCombine(void)
+{
+	READ_LOCALS(PartitionPruneStepCombine);
+
+	READ_INT_FIELD(step.step_id);
+	READ_ENUM_FIELD(combineOp, PartitionPruneCombineOp);
+	READ_NODE_FIELD(source_stepids);
+
+	READ_DONE();
+}
+
+static PartitionPruneInfo *
+_readPartitionPruneInfo(void)
+{
+	READ_LOCALS(PartitionPruneInfo);
+
+	READ_OID_FIELD(reloid);
+	READ_NODE_FIELD(pruning_steps);
+	READ_BITMAPSET_FIELD(present_parts);
+	READ_INT_FIELD(nparts);
+	READ_INT_ARRAY(subnode_map, local_node->nparts);
+	READ_INT_ARRAY(subpart_map, local_node->nparts);
+	READ_BITMAPSET_FIELD(extparams);
+	READ_BITMAPSET_FIELD(execparams);
+
+	READ_DONE();
+}
+
 /*
  *	Stuff from parsenodes.h.
  */
@@ -1610,6 +1653,7 @@ _readAppend(void)
 	READ_NODE_FIELD(partitioned_rels);
 	READ_NODE_FIELD(appendplans);
 	READ_INT_FIELD(first_partial_plan);
+	READ_NODE_FIELD(part_prune_infos);
 
 	READ_DONE();
 }
@@ -2574,6 +2618,12 @@ parseNodeString(void)
 		return_value = _readFromExpr();
 	else if (MATCH("ONCONFLICTEXPR", 14))
 		return_value = _readOnConflictExpr();
+	else if (MATCH("PARTITIONPRUNESTEPOP", 20))
+		return_value = _readPartitionPruneStepOp();
+	else if (MATCH("PARTITIONPRUNESTEPCOMBINE", 25))
+		return_value = _readPartitionPruneStepCombine();
+	else if (MATCH("PARTITIONPRUNEINFO", 18))
+		return_value = _readPartitionPruneInfo();
 	else if (MATCH("RTE", 3))
 		return_value = _readRangeTblEntry();
 	else if (MATCH("RANGETBLFUNCTION", 16))

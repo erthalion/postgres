@@ -23,7 +23,7 @@
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
-#include "catalog/pg_inherits_fn.h"
+#include "catalog/pg_inherits.h"
 #include "catalog/toasting.h"
 #include "commands/alter.h"
 #include "commands/async.h"
@@ -68,6 +68,7 @@
 #include "utils/acl.h"
 #include "utils/guc.h"
 #include "utils/syscache.h"
+#include "utils/rel.h"
 
 
 /* Hook for plugins to get control in ProcessUtility() */
@@ -1305,7 +1306,7 @@ ProcessUtilitySlow(ParseState *pstate,
 						: ShareLock;
 					relid =
 						RangeVarGetRelidExtended(stmt->relation, lockmode,
-												 false, false,
+												 0,
 												 RangeVarCallbackOwnsRelation,
 												 NULL);
 

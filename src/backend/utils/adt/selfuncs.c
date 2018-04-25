@@ -1488,6 +1488,16 @@ likesel(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		prefixsel			- selectivity of prefix operator
+ */
+Datum
+prefixsel(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_FLOAT8(patternsel(fcinfo, Pattern_Type_Prefix, false));
+}
+
+/*
+ *
  *		iclikesel			- Selectivity of ILIKE pattern match.
  */
 Datum
@@ -2904,6 +2914,15 @@ Datum
 likejoinsel(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_FLOAT8(patternjoinsel(fcinfo, Pattern_Type_Like, false));
+}
+
+/*
+ *		prefixjoinsel			- Join selectivity of prefix operator
+ */
+Datum
+prefixjoinsel(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_FLOAT8(patternjoinsel(fcinfo, Pattern_Type_Prefix, false));
 }
 
 /*
@@ -4883,7 +4902,7 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 						 * should match has_unique_index().
 						 */
 						if (index->unique &&
-							index->ncolumns == 1 &&
+							index->nkeycolumns == 1 &&
 							(index->indpred == NIL || index->predOK))
 							vardata->isunique = true;
 
@@ -5946,6 +5965,20 @@ pattern_fixed_prefix(Const *patt, Pattern_Type ptype, Oid collation,
 		case Pattern_Type_Regex_IC:
 			result = regex_fixed_prefix(patt, true, collation,
 										prefix, rest_selec);
+			break;
+		case Pattern_Type_Prefix:
+			/* Prefix type work is trivial.  */
+			result = Pattern_Prefix_Partial;
+			*rest_selec = 1.0;	/* all */
+			*prefix = makeConst(patt->consttype,
+								patt->consttypmod,
+								patt->constcollid,
+								patt->constlen,
+								datumCopy(patt->constvalue,
+										  patt->constbyval,
+										  patt->constlen),
+								patt->constisnull,
+								patt->constbyval);
 			break;
 		default:
 			elog(ERROR, "unrecognized ptype: %d", (int) ptype);
@@ -7020,7 +7053,7 @@ btcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 	 * NullTest invalidates that theory, even though it sets eqQualHere.
 	 */
 	if (index->unique &&
-		indexcol == index->ncolumns - 1 &&
+		indexcol == index->nkeycolumns - 1 &&
 		eqQualHere &&
 		!found_saop &&
 		!found_is_null_op)
@@ -7403,6 +7436,8 @@ gincost_pattern(IndexOptInfo *index, int indexcol,
 	bool	   *nullFlags = NULL;
 	int32		searchMode = GIN_SEARCH_MODE_DEFAULT;
 	int32		i;
+
+	Assert(indexcol < index->nkeycolumns);
 
 	/*
 	 * Get the operator's strategy number and declared input data types within

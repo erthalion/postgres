@@ -64,6 +64,7 @@ typedef struct IterateJsonStringValuesState
 	JsonIterateStringValuesAction action;	/* an action that will be applied
 											 * to each json value */
 	void	   *action_state;	/* any necessary context for iteration */
+	uint32      flags;			/* what kind of elements from a json we want to iterate */
 } IterateJsonStringValuesState;
 
 /* state for transform_json_string_values function */
@@ -479,8 +480,9 @@ static void setPathArray(JsonbIterator **it, Datum *path_elems,
 			 bool *path_nulls, int path_len, JsonbParseState **st,
 			 int level, JsonbValue *newval, uint32 nelems, int op_type);
 
-/* function supporting iterate_json_string_values */
-static void iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype);
+/* function supporting iterate_json_values */
+static void iterate_values_scalar(void *state, char *token, JsonTokenType tokentype);
+static void iterate_values_object_field_start(void *state, char *fname, bool isnull);
 
 /* functions supporting transform_json_string_values */
 static void transform_string_values_object_start(void *state);
@@ -1186,7 +1188,7 @@ get_object_field_end(void *state, char *fname, bool isnull)
 	if (get_last && _state->result_start != NULL)
 	{
 		/*
-		 * make a text object from the string from the prevously noted json
+		 * make a text object from the string from the previously noted json
 		 * start up to the end of the previous token (the lexer is by now
 		 * ahead of us on whatever came after what we're interested in).
 		 */
@@ -1811,6 +1813,7 @@ each_worker_jsonb(FunctionCallInfo fcinfo, const char *funcname, bool as_text)
 			 * matter what shape it is.
 			 */
 			r = JsonbIteratorNext(&it, &v, skipNested);
+			Assert(r != WJB_DONE);
 
 			values[0] = PointerGetDatum(key);
 
@@ -4239,7 +4242,7 @@ jsonb_delete(PG_FUNCTION_ARGS)
 
 	it = JsonbIteratorInit(&in->root);
 
-	while ((r = JsonbIteratorNext(&it, &v, skipNested)) != 0)
+	while ((r = JsonbIteratorNext(&it, &v, skipNested)) != WJB_DONE)
 	{
 		skipNested = true;
 
@@ -4249,7 +4252,7 @@ jsonb_delete(PG_FUNCTION_ARGS)
 		{
 			/* skip corresponding value as well */
 			if (r == WJB_KEY)
-				JsonbIteratorNext(&it, &v, true);
+				(void) JsonbIteratorNext(&it, &v, true);
 
 			continue;
 		}
@@ -4304,7 +4307,7 @@ jsonb_delete_array(PG_FUNCTION_ARGS)
 
 	it = JsonbIteratorInit(&in->root);
 
-	while ((r = JsonbIteratorNext(&it, &v, skipNested)) != 0)
+	while ((r = JsonbIteratorNext(&it, &v, skipNested)) != WJB_DONE)
 	{
 		skipNested = true;
 
@@ -4334,7 +4337,7 @@ jsonb_delete_array(PG_FUNCTION_ARGS)
 			{
 				/* skip corresponding value as well */
 				if (r == WJB_KEY)
-					JsonbIteratorNext(&it, &v, true);
+					(void) JsonbIteratorNext(&it, &v, true);
 
 				continue;
 			}
@@ -4400,7 +4403,7 @@ jsonb_delete_idx(PG_FUNCTION_ARGS)
 
 	pushJsonbValue(&state, r, NULL);
 
-	while ((r = JsonbIteratorNext(&it, &v, true)) != 0)
+	while ((r = JsonbIteratorNext(&it, &v, true)) != WJB_DONE)
 	{
 		if (r == WJB_ELEM)
 		{
@@ -4593,7 +4596,7 @@ IteratorConcat(JsonbIterator **it1, JsonbIterator **it2,
 		 * Append the all tokens from v2 to res, include last WJB_END_OBJECT
 		 * (the concatenation will be completed).
 		 */
-		while ((r2 = JsonbIteratorNext(it2, &v2, true)) != 0)
+		while ((r2 = JsonbIteratorNext(it2, &v2, true)) != WJB_DONE)
 			res = pushJsonbValue(state, r2, r2 != WJB_END_OBJECT ? &v2 : NULL);
 	}
 
@@ -4633,10 +4636,10 @@ IteratorConcat(JsonbIterator **it1, JsonbIterator **it2,
 		if (prepend)
 		{
 			pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
-			while ((r1 = JsonbIteratorNext(it_object, &v1, true)) != 0)
+			while ((r1 = JsonbIteratorNext(it_object, &v1, true)) != WJB_DONE)
 				pushJsonbValue(state, r1, r1 != WJB_END_OBJECT ? &v1 : NULL);
 
-			while ((r2 = JsonbIteratorNext(it_array, &v2, true)) != 0)
+			while ((r2 = JsonbIteratorNext(it_array, &v2, true)) != WJB_DONE)
 				res = pushJsonbValue(state, r2, r2 != WJB_END_ARRAY ? &v2 : NULL);
 		}
 		else
@@ -4645,7 +4648,7 @@ IteratorConcat(JsonbIterator **it1, JsonbIterator **it2,
 				pushJsonbValue(state, r1, &v1);
 
 			pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
-			while ((r2 = JsonbIteratorNext(it_object, &v2, true)) != 0)
+			while ((r2 = JsonbIteratorNext(it_object, &v2, true)) != WJB_DONE)
 				pushJsonbValue(state, r2, r2 != WJB_END_OBJECT ? &v2 : NULL);
 
 			res = pushJsonbValue(state, WJB_END_ARRAY, NULL);
@@ -5083,11 +5086,81 @@ jsonb_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 }
 
 /*
- * Iterate over jsonb string values or elements, and pass them together with an
- * iteration state to a specified JsonIterateStringValuesAction.
+ * Parse information about what elements of a jsonb document we want to iterate
+ * in functions iterate_json(b)_values. This information is presented in jsonb
+ * format, so that it can be easily extended in the future.
+ */
+uint32
+parse_jsonb_index_flags(Jsonb *jb)
+{
+	JsonbIterator	   *it;
+	JsonbValue			v;
+	JsonbIteratorToken	type;
+	uint32				flags = 0;
+
+	it = JsonbIteratorInit(&jb->root);
+
+	type = JsonbIteratorNext(&it, &v, false);
+
+	/*
+	 * We iterate over array (scalar internally is represented as array, so, we
+	 * will accept it too) to check all its elements.  Flag names are chosen
+	 * the same as jsonb_typeof uses.
+	 */
+	if (type != WJB_BEGIN_ARRAY)
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("wrong flag type, only arrays and scalars are allowed")));
+
+	while ((type = JsonbIteratorNext(&it, &v, false)) == WJB_ELEM)
+	{
+		if (v.type != jbvString)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("flag array element is not a string"),
+					 errhint("Possible values are: \"string\", \"numeric\", \"boolean\", \"key\" and \"all\"")));
+
+		if (v.val.string.len == 3 &&
+				 pg_strncasecmp(v.val.string.val, "all", 3) == 0)
+			flags |= jtiAll;
+		else if (v.val.string.len == 3 &&
+				 pg_strncasecmp(v.val.string.val, "key", 3) == 0)
+			flags |= jtiKey;
+		else if (v.val.string.len == 6 &&
+				 pg_strncasecmp(v.val.string.val, "string", 5) == 0)
+			flags |= jtiString;
+		else if (v.val.string.len == 7 &&
+				 pg_strncasecmp(v.val.string.val, "numeric", 7) == 0)
+			flags |= jtiNumeric;
+		else if (v.val.string.len == 7 &&
+				 pg_strncasecmp(v.val.string.val, "boolean", 7) == 0)
+			flags |= jtiBool;
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("wrong flag in flag array: \"%s\"",
+							pnstrdup(v.val.string.val, v.val.string.len)),
+					 errhint("Possible values are: \"string\", \"numeric\", \"boolean\", \"key\" and \"all\"")));
+	}
+
+	/* expect end of array now */
+	if (type != WJB_END_ARRAY)
+		elog(ERROR, "unexpected end of flag array");
+
+	/* get final WJB_DONE and free iterator */
+	type = JsonbIteratorNext(&it, &v, false);
+	if (type != WJB_DONE)
+		elog(ERROR, "unexpected end of flag array");
+
+	return flags;
+}
+
+/*
+ * Iterate over jsonb values or elements, specified by flags, and pass them
+ * together with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
-iterate_jsonb_string_values(Jsonb *jb, void *state, JsonIterateStringValuesAction action)
+iterate_jsonb_values(Jsonb *jb, uint32 flags, void *state,
+					 JsonIterateStringValuesAction action)
 {
 	JsonbIterator *it;
 	JsonbValue	v;
@@ -5095,21 +5168,67 @@ iterate_jsonb_string_values(Jsonb *jb, void *state, JsonIterateStringValuesActio
 
 	it = JsonbIteratorInit(&jb->root);
 
+	/*
+	 * Just recursively iterating over jsonb and call callback on all
+	 * correspoding elements
+	 */
 	while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
 	{
-		if ((type == WJB_VALUE || type == WJB_ELEM) && v.type == jbvString)
+		if (type == WJB_KEY)
 		{
-			action(state, v.val.string.val, v.val.string.len);
+			if (flags & jtiKey)
+				action(state, v.val.string.val, v.val.string.len);
+
+			continue;
+		}
+		else if (!(type == WJB_VALUE || type == WJB_ELEM))
+		{
+			/* do not call callback for composite JsonbValue */
+			continue;
+		}
+
+		/* JsonbValue is a value of object or element of array */
+		switch(v.type)
+		{
+			case jbvString:
+				if (flags & jtiString)
+					action(state, v.val.string.val, v.val.string.len);
+				break;
+			case jbvNumeric:
+				if (flags & jtiNumeric)
+				{
+					char *val;
+
+					val = DatumGetCString(DirectFunctionCall1(numeric_out,
+								NumericGetDatum(v.val.numeric)));
+
+					action(state, val, strlen(val));
+					pfree(val);
+				}
+				break;
+			case jbvBool:
+				if (flags & jtiBool)
+				{
+					if (v.val.boolean)
+						action(state, "true", 4);
+					else
+						action(state, "false", 5);
+				}
+				break;
+			default:
+				/* do not call callback for composite JsonbValue */
+				break;
 		}
 	}
 }
 
 /*
- * Iterate over json string values or elements, and pass them together with an
- * iteration state to a specified JsonIterateStringValuesAction.
+ * Iterate over json values and elements, specified by flags, and pass them
+ * together with an iteration state to a specified JsonIterateStringValuesAction.
  */
 void
-iterate_json_string_values(text *json, void *action_state, JsonIterateStringValuesAction action)
+iterate_json_values(text *json, uint32 flags, void *action_state,
+					JsonIterateStringValuesAction action)
 {
 	JsonLexContext *lex = makeJsonLexContext(json, true);
 	JsonSemAction *sem = palloc0(sizeof(JsonSemAction));
@@ -5118,24 +5237,55 @@ iterate_json_string_values(text *json, void *action_state, JsonIterateStringValu
 	state->lex = lex;
 	state->action = action;
 	state->action_state = action_state;
+	state->flags = flags;
 
 	sem->semstate = (void *) state;
-	sem->scalar = iterate_string_values_scalar;
+	sem->scalar = iterate_values_scalar;
+	sem->object_field_start = iterate_values_object_field_start;
 
 	pg_parse_json(lex, sem);
 }
 
 /*
- * An auxiliary function for iterate_json_string_values to invoke a specified
- * JsonIterateStringValuesAction.
+ * An auxiliary function for iterate_json_values to invoke a specified
+ * JsonIterateStringValuesAction for specified values.
  */
 static void
-iterate_string_values_scalar(void *state, char *token, JsonTokenType tokentype)
+iterate_values_scalar(void *state, char *token, JsonTokenType tokentype)
 {
 	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
 
-	if (tokentype == JSON_TOKEN_STRING)
-		_state->action(_state->action_state, token, strlen(token));
+	switch(tokentype)
+	{
+		case JSON_TOKEN_STRING:
+			if (_state->flags & jtiString)
+				_state->action(_state->action_state, token, strlen(token));
+			break;
+		case JSON_TOKEN_NUMBER:
+			if (_state->flags & jtiNumeric)
+				_state->action(_state->action_state, token, strlen(token));
+			break;
+		case JSON_TOKEN_TRUE:
+		case JSON_TOKEN_FALSE:
+			if (_state->flags & jtiBool)
+				_state->action(_state->action_state, token, strlen(token));
+			break;
+		default:
+			/* do not call callback for any other token */
+			break;
+	}
+}
+
+static void
+iterate_values_object_field_start(void *state, char *fname, bool isnull)
+{
+	IterateJsonStringValuesState *_state = (IterateJsonStringValuesState *) state;
+
+	if (_state->flags & jtiKey)
+	{
+		char *val = pstrdup(fname);
+		_state->action(_state->action_state, val, strlen(val));
+	}
 }
 
 /*

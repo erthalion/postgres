@@ -18,7 +18,8 @@ top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 
 SUBDIRS = access bootstrap catalog parser commands executor foreign lib libpq \
-	main nodes optimizer port postmaster regex replication rewrite \
+	main nodes optimizer partitioning port postmaster \
+	regex replication rewrite \
 	statistics storage tcop tsearch utils $(top_builddir)/src/timezone \
 	jit
 
@@ -52,7 +53,7 @@ endif
 
 ##########################################################################
 
-all: submake-libpgport submake-schemapg postgres $(POSTGRES_IMP)
+all: submake-libpgport submake-catalog-headers postgres $(POSTGRES_IMP)
 
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)
@@ -110,14 +111,6 @@ endif
 
 endif # aix
 
-# Update the commonly used headers before building the subdirectories
-$(SUBDIRS:%=%-recursive): | generated-headers
-
-# src/port needs a convenient way to force just errcodes.h to get built
-submake-errcodes: $(top_builddir)/src/include/utils/errcodes.h
-
-.PHONY: submake-errcodes
-
 $(top_builddir)/src/port/libpgport_srv.a: | submake-libpgport
 
 
@@ -150,19 +143,17 @@ utils/errcodes.h: utils/generate-errcodes.pl utils/errcodes.txt
 utils/fmgrprotos.h: utils/fmgroids.h
 	touch $@
 
-utils/fmgroids.h: utils/Gen_fmgrtab.pl catalog/Catalog.pm $(top_srcdir)/src/include/catalog/pg_proc.h
+utils/fmgroids.h: utils/Gen_fmgrtab.pl catalog/Catalog.pm $(top_srcdir)/src/include/catalog/pg_proc.dat $(top_srcdir)/src/include/access/transam.h
 	$(MAKE) -C utils fmgroids.h fmgrprotos.h
 
 utils/probes.h: utils/probes.d
 	$(MAKE) -C utils probes.h
 
 # run this unconditionally to avoid needing to know its dependencies here:
-catalog/schemapg.h: | submake-schemapg
+submake-catalog-headers:
+	$(MAKE) -C catalog distprep generated-header-symlinks
 
-submake-schemapg:
-	$(MAKE) -C catalog schemapg.h
-
-.PHONY: submake-schemapg
+.PHONY: submake-catalog-headers
 
 # Make symlinks for these headers in the include directory. That way
 # we can cut down on the -I options. Also, a symlink is automatically
@@ -177,14 +168,9 @@ submake-schemapg:
 
 .PHONY: generated-headers
 
-generated-headers: $(top_builddir)/src/include/parser/gram.h $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/include/storage/lwlocknames.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/fmgroids.h $(top_builddir)/src/include/utils/fmgrprotos.h $(top_builddir)/src/include/utils/probes.h
+generated-headers: $(top_builddir)/src/include/parser/gram.h $(top_builddir)/src/include/storage/lwlocknames.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/fmgroids.h $(top_builddir)/src/include/utils/fmgrprotos.h $(top_builddir)/src/include/utils/probes.h submake-catalog-headers
 
 $(top_builddir)/src/include/parser/gram.h: parser/gram.h
-	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
-	  cd '$(dir $@)' && rm -f $(notdir $@) && \
-	  $(LN_S) "$$prereqdir/$(notdir $<)" .
-
-$(top_builddir)/src/include/catalog/schemapg.h: catalog/schemapg.h
 	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
 	  cd '$(dir $@)' && rm -f $(notdir $@) && \
 	  $(LN_S) "$$prereqdir/$(notdir $<)" .
@@ -224,7 +210,7 @@ utils/probes.o: utils/probes.d $(SUBDIROBJS)
 distprep:
 	$(MAKE) -C parser	gram.c gram.h scan.c
 	$(MAKE) -C bootstrap	bootparse.c bootscanner.c
-	$(MAKE) -C catalog	schemapg.h postgres.bki postgres.description postgres.shdescription
+	$(MAKE) -C catalog	distprep
 	$(MAKE) -C replication	repl_gram.c repl_scanner.c syncrep_gram.c syncrep_scanner.c
 	$(MAKE) -C storage/lmgr	lwlocknames.h lwlocknames.c
 	$(MAKE) -C utils	fmgrtab.c fmgroids.h fmgrprotos.h errcodes.h
@@ -247,6 +233,7 @@ endif
 endif
 	$(MAKE) -C catalog install-data
 	$(MAKE) -C tsearch install-data
+	$(MAKE) -C utils install-data
 	$(INSTALL_DATA) $(srcdir)/libpq/pg_hba.conf.sample '$(DESTDIR)$(datadir)/pg_hba.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/libpq/pg_ident.conf.sample '$(DESTDIR)$(datadir)/pg_ident.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/utils/misc/postgresql.conf.sample '$(DESTDIR)$(datadir)/postgresql.conf.sample'
@@ -312,6 +299,7 @@ endif
 endif
 	$(MAKE) -C catalog uninstall-data
 	$(MAKE) -C tsearch uninstall-data
+	$(MAKE) -C utils uninstall-data
 	rm -f '$(DESTDIR)$(datadir)/pg_hba.conf.sample' \
 	      '$(DESTDIR)$(datadir)/pg_ident.conf.sample' \
 	      '$(DESTDIR)$(datadir)/postgresql.conf.sample' \
@@ -324,13 +312,7 @@ endif
 ##########################################################################
 
 clean:
-	rm -f $(LOCALOBJS) postgres$(X) $(POSTGRES_IMP) \
-		$(top_builddir)/src/include/parser/gram.h \
-		$(top_builddir)/src/include/catalog/schemapg.h \
-		$(top_builddir)/src/include/storage/lwlocknames.h \
-		$(top_builddir)/src/include/utils/fmgroids.h \
-		$(top_builddir)/src/include/utils/fmgrprotos.h \
-		$(top_builddir)/src/include/utils/probes.h
+	rm -f $(LOCALOBJS) postgres$(X) $(POSTGRES_IMP)
 ifeq ($(PORTNAME), cygwin)
 	rm -f postgres.dll libpostgres.a
 endif
@@ -342,15 +324,12 @@ distclean: clean
 	rm -f port/tas.s port/dynloader.c port/pg_sema.c port/pg_shmem.c
 
 maintainer-clean: distclean
+	$(MAKE) -C catalog $@
 	rm -f bootstrap/bootparse.c \
 	      bootstrap/bootscanner.c \
 	      parser/gram.c \
 	      parser/gram.h \
 	      parser/scan.c \
-	      catalog/schemapg.h \
-	      catalog/postgres.bki \
-	      catalog/postgres.description \
-	      catalog/postgres.shdescription \
 	      replication/repl_gram.c \
 	      replication/repl_scanner.c \
 	      replication/syncrep_gram.c \

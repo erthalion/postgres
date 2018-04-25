@@ -30,7 +30,6 @@
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
-#include "catalog/pg_constraint_fn.h"
 #include "catalog/pg_conversion.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_extension.h"
@@ -2063,7 +2062,7 @@ pg_get_object_address(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * get_object_address is pretty sensitive to the length its input lists;
+	 * get_object_address is pretty sensitive to the length of its input lists;
 	 * check that they're what it wants.
 	 */
 	switch (type)

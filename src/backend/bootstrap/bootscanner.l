@@ -65,11 +65,8 @@ static int	yyline = 1;			/* line number for error reporting */
 %option prefix="boot_yy"
 
 
-D		[0-9]
-oct		\\{D}{D}{D}
-id		([A-Za-z0-9_]|{oct}|\-)+
+id		[-A-Za-z0-9_]+
 sid		\"([^\"])*\"
-arrayid [A-Za-z0-9_]+\[{D}*\]
 
 %%
 
@@ -112,10 +109,6 @@ insert			{ return INSERT_TUPLE; }
 "NOT"			{ return XNOT; }
 "NULL"			{ return XNULL; }
 
-{arrayid}		{
-					yylval.str = MapArrayTypeName(yytext);
-					return ID;
-				}
 {id}			{
 					yylval.str = scanstr(yytext);
 					return ID;

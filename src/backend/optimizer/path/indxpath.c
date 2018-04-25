@@ -40,9 +40,7 @@
 #include "utils/selfuncs.h"
 
 
-#define IsBooleanOpfamily(opfamily) \
-	((opfamily) == BOOL_BTREE_FAM_OID || (opfamily) == BOOL_HASH_FAM_OID)
-
+/* XXX see PartCollMatchesExprColl */
 #define IndexCollMatchesExprColl(idxcollation, exprcollation) \
 	((idxcollation) == InvalidOid || (idxcollation) == (exprcollation))
 
@@ -2164,7 +2162,7 @@ match_eclass_clauses_to_index(PlannerInfo *root, IndexOptInfo *index,
 	if (!index->rel->has_eclass_joins)
 		return;
 
-	for (indexcol = 0; indexcol < index->ncolumns; indexcol++)
+	for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++)
 	{
 		ec_member_matches_arg arg;
 		List	   *clauses;
@@ -2246,8 +2244,8 @@ match_clause_to_index(IndexOptInfo *index,
 	if (!restriction_is_securely_promotable(rinfo, index->rel))
 		return;
 
-	/* OK, check each index column for a match */
-	for (indexcol = 0; indexcol < index->ncolumns; indexcol++)
+	/* OK, check each index key column for a match */
+	for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++)
 	{
 		if (match_clause_to_indexcol(index,
 									 indexcol,
@@ -2331,8 +2329,8 @@ match_clause_to_indexcol(IndexOptInfo *index,
 {
 	Expr	   *clause = rinfo->clause;
 	Index		index_relid = index->rel->relid;
-	Oid			opfamily = index->opfamily[indexcol];
-	Oid			idxcollation = index->indexcollations[indexcol];
+	Oid			opfamily;
+	Oid			idxcollation;
 	Node	   *leftop,
 			   *rightop;
 	Relids		left_relids;
@@ -2340,6 +2338,11 @@ match_clause_to_indexcol(IndexOptInfo *index,
 	Oid			expr_op;
 	Oid			expr_coll;
 	bool		plain_op;
+
+	Assert(indexcol < index->nkeycolumns);
+
+	opfamily = index->opfamily[indexcol];
+	idxcollation = index->indexcollations[indexcol];
 
 	/* First check for boolean-index cases. */
 	if (IsBooleanOpfamily(opfamily))
@@ -2680,8 +2683,8 @@ match_clause_to_ordering_op(IndexOptInfo *index,
 							Expr *clause,
 							Oid pk_opfamily)
 {
-	Oid			opfamily = index->opfamily[indexcol];
-	Oid			idxcollation = index->indexcollations[indexcol];
+	Oid			opfamily;
+	Oid			idxcollation;
 	Node	   *leftop,
 			   *rightop;
 	Oid			expr_op;
@@ -2689,6 +2692,10 @@ match_clause_to_ordering_op(IndexOptInfo *index,
 	Oid			sortfamily;
 	bool		commuted;
 
+	Assert(indexcol < index->nkeycolumns);
+
+	opfamily = index->opfamily[indexcol];
+	idxcollation = index->indexcollations[indexcol];
 	/*
 	 * Clause must be a binary opclause.
 	 */
@@ -2923,8 +2930,13 @@ ec_member_matches_indexcol(PlannerInfo *root, RelOptInfo *rel,
 {
 	IndexOptInfo *index = ((ec_member_matches_arg *) arg)->index;
 	int			indexcol = ((ec_member_matches_arg *) arg)->indexcol;
-	Oid			curFamily = index->opfamily[indexcol];
-	Oid			curCollation = index->indexcollations[indexcol];
+	Oid			curFamily;
+	Oid			curCollation;
+
+	Assert(indexcol < index->nkeycolumns);
+
+	curFamily = index->opfamily[indexcol];
+	curCollation = index->indexcollations[indexcol];
 
 	/*
 	 * If it's a btree index, we can reject it if its opfamily isn't
@@ -3550,8 +3562,13 @@ expand_indexqual_conditions(IndexOptInfo *index,
 		RestrictInfo *rinfo = (RestrictInfo *) lfirst(lcc);
 		int			indexcol = lfirst_int(lci);
 		Expr	   *clause = rinfo->clause;
-		Oid			curFamily = index->opfamily[indexcol];
-		Oid			curCollation = index->indexcollations[indexcol];
+		Oid			curFamily;
+		Oid			curCollation;
+
+		Assert(indexcol < index->nkeycolumns);
+
+		curFamily = index->opfamily[indexcol];
+		curCollation = index->indexcollations[indexcol];
 
 		/* First check for boolean cases */
 		if (IsBooleanOpfamily(curFamily))
@@ -3920,14 +3937,15 @@ adjust_rowcompare_for_index(RowCompareExpr *clause,
 		/*
 		 * The Var side can match any column of the index.
 		 */
-		for (i = 0; i < index->ncolumns; i++)
+		for (i = 0; i < index->nkeycolumns; i++)
 		{
 			if (match_index_to_operand(varop, i, index) &&
 				get_op_opfamily_strategy(expr_op,
 										 index->opfamily[i]) == op_strategy &&
 				IndexCollMatchesExprColl(index->indexcollations[i],
 										 lfirst_oid(collids_cell)))
-				break;
+
+			break;
 		}
 		if (i >= index->ncolumns)
 			break;				/* no match found */

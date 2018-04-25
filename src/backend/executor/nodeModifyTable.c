@@ -456,7 +456,7 @@ ExecInsert(ModifyTableState *mtstate,
 											 &conflictTid, planSlot, slot,
 											 estate, canSetTag, &returning))
 					{
-						InstrCountFiltered2(&mtstate->ps, 1);
+						InstrCountTuples2(&mtstate->ps, 1);
 						return returning;
 					}
 					else
@@ -471,7 +471,7 @@ ExecInsert(ModifyTableState *mtstate,
 					 */
 					Assert(onconflict == ONCONFLICT_NOTHING);
 					ExecCheckTIDVisible(estate, resultRelInfo, &conflictTid);
-					InstrCountFiltered2(&mtstate->ps, 1);
+					InstrCountTuples2(&mtstate->ps, 1);
 					return NULL;
 				}
 			}
@@ -629,7 +629,8 @@ ExecDelete(ModifyTableState *mtstate,
 		   EState *estate,
 		   bool *tupleDeleted,
 		   bool processReturning,
-		   bool canSetTag)
+		   bool canSetTag,
+		   bool changingPart)
 {
 	ResultRelInfo *resultRelInfo;
 	Relation	resultRelationDesc;
@@ -720,7 +721,8 @@ ldelete:;
 							 estate->es_output_cid,
 							 estate->es_crosscheck_snapshot,
 							 true /* wait for commit */ ,
-							 &hufd);
+							 &hufd,
+							 changingPart);
 		switch (result)
 		{
 			case HeapTupleSelfUpdated:
@@ -766,6 +768,11 @@ ldelete:;
 					ereport(ERROR,
 							(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 							 errmsg("could not serialize access due to concurrent update")));
+				if (ItemPointerIndicatesMovedPartitions(&hufd.ctid))
+					ereport(ERROR,
+							(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+							 errmsg("tuple to be deleted was already moved to another partition due to concurrent update")));
+
 				if (!ItemPointerEquals(tupleid, &hufd.ctid))
 				{
 					TupleTableSlot *epqslot;
@@ -1079,8 +1086,9 @@ lreplace:;
 			 * Row movement, part 1.  Delete the tuple, but skip RETURNING
 			 * processing. We want to return rows from INSERT.
 			 */
-			ExecDelete(mtstate, tupleid, oldtuple, planSlot, epqstate, estate,
-					   &tuple_deleted, false, false);
+			ExecDelete(mtstate, tupleid, oldtuple, planSlot, epqstate,
+					   estate, &tuple_deleted, false,
+					   false /* canSetTag */, true /* changingPart */);
 
 			/*
 			 * For some reason if DELETE didn't happen (e.g. trigger prevented
@@ -1223,6 +1231,11 @@ lreplace:;
 					ereport(ERROR,
 							(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 							 errmsg("could not serialize access due to concurrent update")));
+				if (ItemPointerIndicatesMovedPartitions(&hufd.ctid))
+					ereport(ERROR,
+							(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+							 errmsg("tuple to be updated was already moved to another partition due to concurrent update")));
+
 				if (!ItemPointerEquals(tupleid, &hufd.ctid))
 				{
 					TupleTableSlot *epqslot;
@@ -1392,6 +1405,14 @@ ExecOnConflictUpdate(ModifyTableState *mtstate,
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("could not serialize access due to concurrent update")));
+
+			/*
+			 * As long as we don't support an UPDATE of INSERT ON CONFLICT for
+			 * a partitioned table we shouldn't reach to a case where tuple to
+			 * be lock is moved to another partition due to concurrent update
+			 * of the partition key.
+			 */
+			Assert(!ItemPointerIndicatesMovedPartitions(&hufd.ctid));
 
 			/*
 			 * Tell caller to try again from the very start.
@@ -1678,11 +1699,21 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
 										proute, estate,
 										partidx);
 
-	/* We do not yet have a way to insert into a foreign partition */
-	if (partrel->ri_FdwRoutine)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot route inserted tuples to a foreign table")));
+	/*
+	 * Set up information needed for routing tuples to the partition if we
+	 * didn't yet (ExecInitRoutingInfo would abort the operation if the
+	 * partition isn't routable).
+	 *
+	 * Note: an UPDATE of a partition key invokes an INSERT that moves the
+	 * tuple to a new partition.  This setup would be needed for a subplan
+	 * partition of such an UPDATE that is chosen as the partition to route
+	 * the tuple to.  The reason we do this setup here rather than in
+	 * ExecSetupPartitionTupleRouting is to avoid aborting such an UPDATE
+	 * unnecessarily due to non-routable subplan partitions that may not be
+	 * chosen for update tuple movement after all.
+	 */
+	if (!partrel->ri_PartitionReadyForRouting)
+		ExecInitRoutingInfo(mtstate, estate, proute, partrel, partidx);
 
 	/*
 	 * Make it look like we are inserting into the partition.
@@ -2108,7 +2139,8 @@ ExecModifyTable(PlanState *pstate)
 			case CMD_DELETE:
 				slot = ExecDelete(node, tupleid, oldtuple, planSlot,
 								  &node->mt_epqstate, estate,
-								  NULL, true, node->canSetTag);
+								  NULL, true, node->canSetTag,
+								  false /* changingPart */);
 				break;
 			default:
 				elog(ERROR, "unknown operation");
@@ -2355,6 +2387,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 		{
 			List	   *rlist = (List *) lfirst(l);
 
+			resultRelInfo->ri_returningList = rlist;
 			resultRelInfo->ri_projectReturning =
 				ExecBuildProjectionInfo(rlist, econtext, slot, &mtstate->ps,
 										resultRelInfo->ri_RelationDesc->rd_att);
@@ -2637,7 +2670,7 @@ ExecEndModifyTable(ModifyTableState *node)
 
 	/* Close all the partitioned tables, leaf partitions, and their indices */
 	if (node->mt_partition_tuple_routing)
-		ExecCleanupTupleRouting(node->mt_partition_tuple_routing);
+		ExecCleanupTupleRouting(node, node->mt_partition_tuple_routing);
 
 	/*
 	 * Free the exprcontext
