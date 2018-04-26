@@ -217,7 +217,7 @@ CATALOG(pg_type,1247,TypeRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelati
 	 * Type specific subscripting logic. If typsubshandler is none, it means
 	 * that this type doesn't support subscripting.
 	 */
-	regproc		typsubshandler BKI_DEFAULT(-);
+	regproc		typsubshandler BKI_DEFAULT(-) BKI_LOOKUP(pg_proc);
 
 #ifdef CATALOG_VARLEN			/* variable-length fields start here */
 

@@ -100,7 +100,7 @@
   typelem => 'oid', typarray => '_oidvector', typinput => 'oidvectorin',
   typoutput => 'oidvectorout', typreceive => 'oidvectorrecv',
   typsend => 'oidvectorsend', typalign => 'i',
-  typsubshandler => 'array_subscript_handler '},
+  typsubshandler => 'array_subscript_handler' },
 
 # hand-built rowtype entries for bootstrapped catalogs
 # NB: OIDs assigned here must match the BKI_ROWTYPE_OID declarations
