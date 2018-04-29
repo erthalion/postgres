@@ -1504,6 +1504,21 @@ pg_stat_get_db_blk_write_time(PG_FUNCTION_ARGS)
 }
 
 Datum
+pg_stat_get_db_fpw(PG_FUNCTION_ARGS)
+{
+	Oid			dbid = PG_GETARG_OID(0);
+	int64		result;
+	PgStat_StatDBEntry *dbentry;
+
+	if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
+		result = 0;
+	else
+		result = (int64) (dbentry->n_fpw);
+
+	PG_RETURN_INT64(result);
+}
+
+Datum
 pg_stat_get_bgwriter_timed_checkpoints(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_INT64(pgstat_fetch_global()->timed_checkpoints);

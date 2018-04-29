@@ -31,6 +31,7 @@
 #include "storage/proc.h"
 #include "utils/memutils.h"
 #include "pg_trace.h"
+#include "pgstat.h"
 
 /* Buffer size required to store a compressed version of backup block image */
 #define PGLZ_MAX_BLCKSZ PGLZ_MAX_OUTPUT(BLCKSZ)
@@ -585,6 +586,7 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 		{
 			Page		page = regbuf->page;
 			uint16		compressed_len = 0;
+			pgstat_report_fpw(regbuf->rnode.dbNode);
 
 			/*
 			 * The page needs to be backed up, so calculate its hole length

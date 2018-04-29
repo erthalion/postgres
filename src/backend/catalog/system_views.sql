@@ -822,7 +822,8 @@ CREATE VIEW pg_stat_database AS
             pg_stat_get_db_deadlocks(D.oid) AS deadlocks,
             pg_stat_get_db_blk_read_time(D.oid) AS blk_read_time,
             pg_stat_get_db_blk_write_time(D.oid) AS blk_write_time,
-            pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset
+            pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset,
+            pg_stat_get_db_fpw(D.oid) AS fpw
     FROM pg_database D;
 
 CREATE VIEW pg_stat_database_conflicts AS

@@ -64,7 +64,8 @@ typedef enum StatMsgType
 	PGSTAT_MTYPE_FUNCPURGE,
 	PGSTAT_MTYPE_RECOVERYCONFLICT,
 	PGSTAT_MTYPE_TEMPFILE,
-	PGSTAT_MTYPE_DEADLOCK
+	PGSTAT_MTYPE_DEADLOCK,
+	PGSTAT_MTYPE_FPW
 } StatMsgType;
 
 /* ----------
@@ -530,6 +531,16 @@ typedef struct PgStat_MsgDeadlock
 	Oid			m_databaseid;
 } PgStat_MsgDeadlock;
 
+/* ----------
+ * PgStat_MsgFpw			Sent by the backend to tell the collector
+ *								about a fpw that occurred.
+ * ----------
+ */
+typedef struct PgStat_MsgFpw
+{
+	PgStat_MsgHdr m_hdr;
+	Oid			m_databaseid;
+} PgStat_MsgFpw;
 
 /* ----------
  * PgStat_Msg					Union over all possible messages.
@@ -595,6 +606,7 @@ typedef struct PgStat_StatDBEntry
 	PgStat_Counter n_deadlocks;
 	PgStat_Counter n_block_read_time;	/* times in microseconds */
 	PgStat_Counter n_block_write_time;
+	PgStat_Counter n_fpw;
 
 	TimestampTz stat_reset_timestamp;
 	TimestampTz stats_timestamp;	/* time of db stats file update */
@@ -1196,6 +1208,7 @@ extern void pgstat_report_activity(BackendState state, const char *cmd_str);
 extern void pgstat_report_tempfile(size_t filesize);
 extern void pgstat_report_appname(const char *appname);
 extern void pgstat_report_xact_timestamp(TimestampTz tstamp);
+extern void pgstat_report_fpw(Oid dboid);
 extern const char *pgstat_get_wait_event(uint32 wait_event_info);
 extern const char *pgstat_get_wait_event_type(uint32 wait_event_info);
 extern const char *pgstat_get_backend_current_activity(int pid, bool checkUser);

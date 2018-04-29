@@ -336,6 +336,7 @@ static void pgstat_recv_funcpurge(PgStat_MsgFuncpurge *msg, int len);
 static void pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict *msg, int len);
 static void pgstat_recv_deadlock(PgStat_MsgDeadlock *msg, int len);
 static void pgstat_recv_tempfile(PgStat_MsgTempFile *msg, int len);
+static void pgstat_recv_fpw(PgStat_MsgFpw *msg, int len);
 
 /* ------------------------------------------------------------
  * Public functions called from postmaster follow
@@ -3210,6 +3211,25 @@ pgstat_report_xact_timestamp(TimestampTz tstamp)
 	pgstat_increment_changecount_after(beentry);
 }
 
+/* --------
+ * pgstat_report_deadlock() -
+ *
+ *	Tell the collector about a deadlock detected.
+ * --------
+ */
+void
+pgstat_report_fpw(Oid dboid)
+{
+	PgStat_MsgDeadlock msg;
+
+	if (pgStatSock == PGINVALID_SOCKET || !pgstat_track_counts)
+		return;
+
+	pgstat_setheader(&msg.m_hdr, PGSTAT_MTYPE_FPW);
+	msg.m_databaseid = dboid;
+	pgstat_send(&msg, sizeof(msg));
+}
+
 /* ----------
  * pgstat_read_current_status() -
  *
@@ -4453,6 +4473,10 @@ PgstatCollectorMain(int argc, char *argv[])
 
 				case PGSTAT_MTYPE_TEMPFILE:
 					pgstat_recv_tempfile((PgStat_MsgTempFile *) &msg, len);
+					break;
+
+				case PGSTAT_MTYPE_FPW:
+					pgstat_recv_fpw((PgStat_MsgFpw *) &msg, len);
 					break;
 
 				default:
@@ -6195,6 +6219,23 @@ pgstat_recv_deadlock(PgStat_MsgDeadlock *msg, int len)
 
 	dbentry->n_deadlocks++;
 }
+
+/* ----------
+ * pgstat_recv_fpw() -
+ *
+ *	Process a FPW message.
+ * ----------
+ */
+static void
+pgstat_recv_fpw(PgStat_MsgFpw *msg, int len)
+{
+	PgStat_StatDBEntry *dbentry;
+
+	dbentry = pgstat_get_db_entry(msg->m_databaseid, true);
+
+	dbentry->n_fpw++;
+}
+
 
 /* ----------
  * pgstat_recv_tempfile() -
