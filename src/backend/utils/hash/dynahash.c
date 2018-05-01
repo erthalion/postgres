@@ -517,6 +517,7 @@ hash_create(const char *tabname, long nelem, HASHCTL *info, int flags)
 	 * space if the caller correctly estimates a small table size.
 	 */
 	if ((flags & HASH_SHARED_MEM) ||
+		(flags & HASH_PREALLOC)   ||
 		nelem < hctl->nelem_alloc)
 	{
 		int			i,

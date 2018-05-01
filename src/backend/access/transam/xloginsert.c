@@ -104,6 +104,15 @@ static int	max_rdatas;			/* allocated size */
 
 static bool begininsert_called = false;
 
+#define FPW_COUNTER_HASH_SIZE 100
+
+typedef struct {
+	Oid				db;
+	PgStat_Counter	counter;
+} FpwCounterEntry;
+
+static HTAB *fpwCounterStatHash = NULL;
+
 /* Memory context to hold the registered buffer and data references. */
 static MemoryContext xloginsert_cxt;
 
@@ -204,6 +213,16 @@ XLogResetInsertion(void)
 	mainrdata_last = (XLogRecData *) &mainrdata_head;
 	curinsert_flags = 0;
 	begininsert_called = false;
+
+	HASH_SEQ_STATUS fstat;
+	FpwCounterEntry *fpwEntry;
+
+	hash_seq_init(&fstat, fpwCounterStatHash);
+	while ((fpwEntry = (FpwCounterEntry *) hash_seq_search(&fstat)) != NULL)
+	{
+		pgstat_report_fpw(fpwEntry->db, fpwEntry->counter);
+		fpwEntry->counter = 0;
+	}
 }
 
 /*
@@ -585,8 +604,20 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 		if (include_image)
 		{
 			Page		page = regbuf->page;
+			bool		found = false;
 			uint16		compressed_len = 0;
-			pgstat_report_fpw(regbuf->rnode.dbNode);
+			FpwCounterEntry *fpwEntry;
+			Oid			dbOid = regbuf->rnode.dbNode;
+
+			fpwEntry = (FpwCounterEntry *) hash_search(fpwCounterStatHash,
+													   &dbOid, HASH_ENTER, &found);
+			if (!found)
+			{
+				fpwEntry->counter = 0;
+				fpwEntry->db = dbOid;
+			}
+
+			fpwEntry->counter++;
 
 			/*
 			 * The page needs to be backed up, so calculate its hole length
@@ -1057,4 +1088,16 @@ InitXLogInsert(void)
 	if (hdr_scratch == NULL)
 		hdr_scratch = MemoryContextAllocZero(xloginsert_cxt,
 											 HEADER_SCRATCH_SIZE);
+
+	if (fpwCounterStatHash == NULL)
+	{
+		HASHCTL hash_ctl;
+		memset(&hash_ctl, 0, sizeof(hash_ctl));
+		hash_ctl.keysize = sizeof(Oid);
+		hash_ctl.entrysize = sizeof(FpwCounterEntry);
+
+		fpwCounterStatHash = hash_create("Full page write counter hask",
+										 FPW_COUNTER_HASH_SIZE, &hash_ctl,
+										 HASH_ELEM | HASH_BLOBS | HASH_PREALLOC | HASH_FIXED_SIZE);
+	}
 }

@@ -538,8 +538,9 @@ typedef struct PgStat_MsgDeadlock
  */
 typedef struct PgStat_MsgFpw
 {
-	PgStat_MsgHdr m_hdr;
-	Oid			m_databaseid;
+	PgStat_MsgHdr	m_hdr;
+	Oid				m_databaseid;
+	PgStat_Counter	m_fpw_counter;
 } PgStat_MsgFpw;
 
 /* ----------
@@ -1208,7 +1209,7 @@ extern void pgstat_report_activity(BackendState state, const char *cmd_str);
 extern void pgstat_report_tempfile(size_t filesize);
 extern void pgstat_report_appname(const char *appname);
 extern void pgstat_report_xact_timestamp(TimestampTz tstamp);
-extern void pgstat_report_fpw(Oid dboid);
+extern void pgstat_report_fpw(Oid dboid, PgStat_Counter fpwCounter);
 extern const char *pgstat_get_wait_event(uint32 wait_event_info);
 extern const char *pgstat_get_wait_event_type(uint32 wait_event_info);
 extern const char *pgstat_get_backend_current_activity(int pid, bool checkUser);
