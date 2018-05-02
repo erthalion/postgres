@@ -202,7 +202,9 @@ XLogEnsureRecordSpace(int max_block_id, int ndatas)
 void
 XLogResetInsertion(void)
 {
-	int			i;
+	int				i;
+	HASH_SEQ_STATUS fstat;
+	FpwCounterEntry *fpwEntry;
 
 	for (i = 0; i < max_registered_block_id; i++)
 		registered_buffers[i].in_use = false;
@@ -214,8 +216,6 @@ XLogResetInsertion(void)
 	curinsert_flags = 0;
 	begininsert_called = false;
 
-	HASH_SEQ_STATUS fstat;
-	FpwCounterEntry *fpwEntry;
 
 	hash_seq_init(&fstat, fpwCounterStatHash);
 	while ((fpwEntry = (FpwCounterEntry *) hash_seq_search(&fstat)) != NULL)
