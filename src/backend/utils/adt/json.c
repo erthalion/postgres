@@ -32,6 +32,7 @@
 #include "utils/jsonapi.h"
 #include "utils/typcache.h"
 #include "utils/syscache.h"
+#include <nmmintrin.h>
 
 /*
  * The context of the parser is maintained by the recursive descent
@@ -615,11 +616,18 @@ json_lex(JsonLexContext *lex)
 {
 	char	   *s;
 	int			len;
+	const char *next_aligned;
+    const char whitespace[16] = " \n\r\t";
+	__m128i w;
+	__m128i ss;
+	int r;
+
 
 	/* Skip leading whitespace. */
 	s = lex->token_terminator;
 	len = s - lex->input;
-	while (len < lex->input_length &&
+
+	if (len < lex->input_length &&
 		   (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
 	{
 		if (*s == '\n')
@@ -627,6 +635,33 @@ json_lex(JsonLexContext *lex)
 		++s;
 		++len;
 	}
+
+	next_aligned = (char *)(((size_t)s + 15) & ~0x0f);
+
+	while (s != next_aligned &&
+			len < lex->input_length &&
+	       (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+	{
+	    if (*s == '\n')
+	        ++lex->line_number;
+	    ++s;
+	    ++len;
+	}
+
+	w = _mm_loadu_si128((const __m128i*)(&whitespace[0]));
+    for (;; s += 16) {
+        ss = _mm_load_si128((const __m128i*)(s));
+        r = _mm_cmpistri(w, ss, _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_ANY | _SIDD_LEAST_SIGNIFICANT | _SIDD_NEGATIVE_POLARITY);
+        if (r != 16)    // some of characters is non-whitespace
+		{
+            s += r;
+			len += r;
+			break;
+		}
+
+		len += 16;
+    }
+
 	lex->token_start = s;
 
 	/* Determine token type. */
