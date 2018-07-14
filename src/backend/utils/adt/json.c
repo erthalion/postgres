@@ -751,6 +751,7 @@ json_lex(JsonLexContext *lex)
 /*
  * The next token in the input stream is known to be a string; lex it.
  */
+__attribute__((optimize("unroll-loops")))
 static inline void
 json_lex_string(JsonLexContext *lex)
 {
