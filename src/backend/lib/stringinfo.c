@@ -204,7 +204,7 @@ appendStringInfoSpaces(StringInfo str, int count)
  * Append arbitrary binary data to a StringInfo, allocating more space
  * if necessary. Ensures that a trailing null byte is present.
  */
-void
+__attribute__((always_inline)) void
 appendBinaryStringInfo(StringInfo str, const char *data, int datalen)
 {
 	Assert(str != NULL);

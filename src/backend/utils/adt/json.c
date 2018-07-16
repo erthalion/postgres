@@ -610,7 +610,7 @@ parse_array(JsonLexContext *lex, JsonSemAction *sem)
 /*
  * Lex one token from the input stream.
  */
-static inline void
+__attribute__((flatten)) static inline void
 json_lex(JsonLexContext *lex)
 {
 	char	   *s;
@@ -751,11 +751,10 @@ json_lex(JsonLexContext *lex)
 /*
  * The next token in the input stream is known to be a string; lex it.
  */
-__attribute__((optimize("unroll-loops")))
-static inline void
+__attribute__((always_inline)) static inline void
 json_lex_string(JsonLexContext *lex)
 {
-	char	   *s;
+	char	   *s, *s_quote;
 	int			len;
 	int			hi_surrogate = -1;
 
@@ -765,236 +764,52 @@ json_lex_string(JsonLexContext *lex)
 	Assert(lex->input_length > 0);
 	s = lex->token_start;
 	len = lex->token_start - lex->input;
-	for (;;)
-	{
-		s++;
-		len++;
-		/* Premature end of the string. */
-		if (len >= lex->input_length)
-		{
-			lex->token_terminator = s;
-			report_invalid_token(lex);
-		}
-		else if (*s == '"')
-			break;
-		else if ((unsigned char) *s < 32)
-		{
-			/* Per RFC4627, these characters MUST be escaped. */
-			/* Since *s isn't printable, exclude it from the context string */
-			lex->token_terminator = s;
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-					 errmsg("invalid input syntax for type %s", "json"),
-					 errdetail("Character with value 0x%02x must be escaped.",
-							   (unsigned char) *s),
-					 report_json_context(lex)));
-		}
-		else if (*s == '\\')
-		{
-			/* OK, we have an escape character. */
-			s++;
-			len++;
-			if (len >= lex->input_length)
-			{
-				lex->token_terminator = s;
-				report_invalid_token(lex);
-			}
-			else if (*s == 'u')
-			{
-				int			i;
-				int			ch = 0;
+	s++;
+	len++;
 
-				for (i = 1; i <= 4; i++)
-				{
-					s++;
-					len++;
-					if (len >= lex->input_length)
-					{
-						lex->token_terminator = s;
-						report_invalid_token(lex);
-					}
-					else if (*s >= '0' && *s <= '9')
-						ch = (ch * 16) + (*s - '0');
-					else if (*s >= 'a' && *s <= 'f')
-						ch = (ch * 16) + (*s - 'a') + 10;
-					else if (*s >= 'A' && *s <= 'F')
-						ch = (ch * 16) + (*s - 'A') + 10;
-					else
-					{
-						lex->token_terminator = s + pg_mblen(s);
-						ereport(ERROR,
-								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								 errmsg("invalid input syntax for type %s",
-										"json"),
-								 errdetail("\"\\u\" must be followed by four hexadecimal digits."),
-								 report_json_context(lex)));
-					}
-				}
-				if (lex->strval != NULL)
-				{
-					char		utf8str[5];
-					int			utf8len;
+	s_quote = rawmemchr(s, '"');
+	len = s_quote - s;
 
-					if (ch >= 0xd800 && ch <= 0xdbff)
-					{
-						if (hi_surrogate != -1)
-							ereport(ERROR,
-									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-									 errmsg("invalid input syntax for type %s",
-											"json"),
-									 errdetail("Unicode high surrogate must not follow a high surrogate."),
-									 report_json_context(lex)));
-						hi_surrogate = (ch & 0x3ff) << 10;
-						continue;
-					}
-					else if (ch >= 0xdc00 && ch <= 0xdfff)
-					{
-						if (hi_surrogate == -1)
-							ereport(ERROR,
-									(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-									 errmsg("invalid input syntax for type %s", "json"),
-									 errdetail("Unicode low surrogate must follow a high surrogate."),
-									 report_json_context(lex)));
-						ch = 0x10000 + hi_surrogate + (ch & 0x3ff);
-						hi_surrogate = -1;
-					}
+	/* an alternative without rawmemchr/memchr
+	 * would be the previous implementation:
+	 *
+	 * 	for (;;)
+	 *	{
+	 *		s++;
+	 *		len++;
+	 *		[> Premature end of the string. <]
+	 *		if (len >= lex->input_length)
+	 *		{
+	 *			lex->token_terminator = s;
+	 *			report_invalid_token(lex);
+	 *		}
+	 *		else if (*s == '"')
+	 *			break;
+	 *		else if ((unsigned char) *s < 32)
+	 *		{
+	 *			lex->token_terminator = s;
+	 *			ereport(ERROR,
+	 *					(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+	 *					 errmsg("invalid input syntax for type %s", "json"),
+	 *					 errdetail("Character with value 0x%02x must be escaped.",
+	 *							   (unsigned char) *s),
+	 *					 report_json_context(lex)));
+	 *		}
+	 *	}
+	 */
 
-					if (hi_surrogate != -1)
-						ereport(ERROR,
-								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								 errmsg("invalid input syntax for type %s", "json"),
-								 errdetail("Unicode low surrogate must follow a high surrogate."),
-								 report_json_context(lex)));
-
-					/*
-					 * For UTF8, replace the escape sequence by the actual
-					 * utf8 character in lex->strval. Do this also for other
-					 * encodings if the escape designates an ASCII character,
-					 * otherwise raise an error.
-					 */
-
-					if (ch == 0)
-					{
-						/* We can't allow this, since our TEXT type doesn't */
-						ereport(ERROR,
-								(errcode(ERRCODE_UNTRANSLATABLE_CHARACTER),
-								 errmsg("unsupported Unicode escape sequence"),
-								 errdetail("\\u0000 cannot be converted to text."),
-								 report_json_context(lex)));
-					}
-					else if (GetDatabaseEncoding() == PG_UTF8)
-					{
-						unicode_to_utf8(ch, (unsigned char *) utf8str);
-						utf8len = pg_utf_mblen((unsigned char *) utf8str);
-						appendBinaryStringInfo(lex->strval, utf8str, utf8len);
-					}
-					else if (ch <= 0x007f)
-					{
-						/*
-						 * This is the only way to designate things like a
-						 * form feed character in JSON, so it's useful in all
-						 * encodings.
-						 */
-						appendStringInfoChar(lex->strval, (char) ch);
-					}
-					else
-					{
-						ereport(ERROR,
-								(errcode(ERRCODE_UNTRANSLATABLE_CHARACTER),
-								 errmsg("unsupported Unicode escape sequence"),
-								 errdetail("Unicode escape values cannot be used for code point values above 007F when the server encoding is not UTF8."),
-								 report_json_context(lex)));
-					}
-
-				}
-			}
-			else if (lex->strval != NULL)
-			{
-				if (hi_surrogate != -1)
-					ereport(ERROR,
-							(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-							 errmsg("invalid input syntax for type %s",
-									"json"),
-							 errdetail("Unicode low surrogate must follow a high surrogate."),
-							 report_json_context(lex)));
-
-				switch (*s)
-				{
-					case '"':
-					case '\\':
-					case '/':
-						appendStringInfoChar(lex->strval, *s);
-						break;
-					case 'b':
-						appendStringInfoChar(lex->strval, '\b');
-						break;
-					case 'f':
-						appendStringInfoChar(lex->strval, '\f');
-						break;
-					case 'n':
-						appendStringInfoChar(lex->strval, '\n');
-						break;
-					case 'r':
-						appendStringInfoChar(lex->strval, '\r');
-						break;
-					case 't':
-						appendStringInfoChar(lex->strval, '\t');
-						break;
-					default:
-						/* Not a valid string escape, so error out. */
-						lex->token_terminator = s + pg_mblen(s);
-						ereport(ERROR,
-								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								 errmsg("invalid input syntax for type %s",
-										"json"),
-								 errdetail("Escape sequence \"\\%s\" is invalid.",
-										   extract_mb_char(s)),
-								 report_json_context(lex)));
-				}
-			}
-			else if (strchr("\"\\/bfnrt", *s) == NULL)
-			{
-				/*
-				 * Simpler processing if we're not bothered about de-escaping
-				 *
-				 * It's very tempting to remove the strchr() call here and
-				 * replace it with a switch statement, but testing so far has
-				 * shown it's not a performance win.
-				 */
-				lex->token_terminator = s + pg_mblen(s);
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-						 errmsg("invalid input syntax for type %s", "json"),
-						 errdetail("Escape sequence \"\\%s\" is invalid.",
-								   extract_mb_char(s)),
-						 report_json_context(lex)));
-			}
-
-		}
-		else if (lex->strval != NULL)
-		{
-			if (hi_surrogate != -1)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-						 errmsg("invalid input syntax for type %s", "json"),
-						 errdetail("Unicode low surrogate must follow a high surrogate."),
-						 report_json_context(lex)));
-
-			appendStringInfoChar(lex->strval, *s);
-		}
-
-	}
-
-	if (hi_surrogate != -1)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-				 errmsg("invalid input syntax for type %s", "json"),
-				 errdetail("Unicode low surrogate must follow a high surrogate."),
-				 report_json_context(lex)));
+	appendBinaryStringInfo(lex->strval,
+						   lex->token_start + 1,
+						   len);
+						   /*len - (lex->token_start - lex->input) - 1);*/
 
 	/* Hooray, we found the end of the string! */
 	lex->prev_token_terminator = lex->token_terminator;
-	lex->token_terminator = s + 1;
+	/*
+	 * If the previous implementation chosen, use
+	 * lex->token_terminator = s + 1;
+	 */
+	lex->token_terminator = s_quote + 1;
 }
 
 /*
