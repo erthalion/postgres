@@ -2123,7 +2123,7 @@ CommitTransaction(void)
 	AtEOXact_on_commit_actions(true);
 	AtEOXact_Namespace(true, is_parallel_worker);
 	AtEOXact_SMgr();
-	AtEOXact_Files();
+	AtEOXact_Files(true);
 	AtEOXact_ComboCid();
 	AtEOXact_HashTables(true);
 	AtEOXact_PgStat(true);
@@ -2401,7 +2401,7 @@ PrepareTransaction(void)
 	AtEOXact_on_commit_actions(true);
 	AtEOXact_Namespace(true, false);
 	AtEOXact_SMgr();
-	AtEOXact_Files();
+	AtEOXact_Files(true);
 	AtEOXact_ComboCid();
 	AtEOXact_HashTables(true);
 	/* don't call AtEOXact_PgStat here; we fixed pgstat state above */
@@ -2603,7 +2603,7 @@ AbortTransaction(void)
 		AtEOXact_on_commit_actions(false);
 		AtEOXact_Namespace(false, is_parallel_worker);
 		AtEOXact_SMgr();
-		AtEOXact_Files();
+		AtEOXact_Files(false);
 		AtEOXact_ComboCid();
 		AtEOXact_HashTables(false);
 		AtEOXact_PgStat(false);
@@ -3267,8 +3267,8 @@ bool
 IsInTransactionBlock(bool isTopLevel)
 {
 	/*
-	 * Return true on same conditions that would make PreventInTransactionBlock
-	 * error out
+	 * Return true on same conditions that would make
+	 * PreventInTransactionBlock error out
 	 */
 	if (IsTransactionBlock())
 		return true;
@@ -5365,7 +5365,7 @@ XactLogCommitRecord(TimestampTz commit_time,
 	{
 		XLogRegisterData((char *) (&xl_twophase), sizeof(xl_xact_twophase));
 		if (xl_xinfo.xinfo & XACT_XINFO_HAS_GID)
-			XLogRegisterData((char *) twophase_gid, strlen(twophase_gid));
+			XLogRegisterData((char *) twophase_gid, strlen(twophase_gid) + 1);
 	}
 
 	if (xl_xinfo.xinfo & XACT_XINFO_HAS_ORIGIN)
@@ -5448,9 +5448,9 @@ XactLogAbortRecord(TimestampTz abort_time,
 	}
 
 	/* dump transaction origin information only for abort prepared */
-	if ( (replorigin_session_origin != InvalidRepOriginId) &&
-			TransactionIdIsValid(twophase_xid) &&
-			XLogLogicalInfoActive())
+	if ((replorigin_session_origin != InvalidRepOriginId) &&
+		TransactionIdIsValid(twophase_xid) &&
+		XLogLogicalInfoActive())
 	{
 		xl_xinfo.xinfo |= XACT_XINFO_HAS_ORIGIN;
 
@@ -5516,7 +5516,6 @@ xact_redo_commit(xl_xact_parsed_commit *parsed,
 				 RepOriginId origin_id)
 {
 	TransactionId max_xid;
-	int			i;
 	TimestampTz commit_time;
 
 	Assert(TransactionIdIsValid(xid));
@@ -5602,12 +5601,10 @@ xact_redo_commit(xl_xact_parsed_commit *parsed,
 		/*
 		 * Release locks, if any. We do this for both two phase and normal one
 		 * phase transactions. In effect we are ignoring the prepare phase and
-		 * just going straight to lock release. At commit we release all locks
-		 * via their top-level xid only, so no need to provide subxact list,
-		 * which will save time when replaying commits.
+		 * just going straight to lock release.
 		 */
 		if (parsed->xinfo & XACT_XINFO_HAS_AE_LOCKS)
-			StandbyReleaseLockTree(xid, 0, NULL);
+			StandbyReleaseLockTree(xid, parsed->nsubxacts, parsed->subxacts);
 	}
 
 	if (parsed->xinfo & XACT_XINFO_HAS_ORIGIN)
@@ -5637,16 +5634,8 @@ xact_redo_commit(xl_xact_parsed_commit *parsed,
 		 */
 		XLogFlush(lsn);
 
-		for (i = 0; i < parsed->nrels; i++)
-		{
-			SMgrRelation srel = smgropen(parsed->xnodes[i], InvalidBackendId);
-			ForkNumber	fork;
-
-			for (fork = 0; fork <= MAX_FORKNUM; fork++)
-				XLogDropRelation(parsed->xnodes[i], fork);
-			smgrdounlink(srel, true);
-			smgrclose(srel);
-		}
+		/* Make sure files supposed to be dropped are dropped */
+		DropRelationFiles(parsed->xnodes, parsed->nrels, true);
 	}
 
 	/*
@@ -5685,7 +5674,6 @@ xact_redo_commit(xl_xact_parsed_commit *parsed,
 static void
 xact_redo_abort(xl_xact_parsed_abort *parsed, TransactionId xid)
 {
-	int			i;
 	TransactionId max_xid;
 
 	Assert(TransactionIdIsValid(xid));
@@ -5750,16 +5738,7 @@ xact_redo_abort(xl_xact_parsed_abort *parsed, TransactionId xid)
 	}
 
 	/* Make sure files supposed to be dropped are dropped */
-	for (i = 0; i < parsed->nrels; i++)
-	{
-		SMgrRelation srel = smgropen(parsed->xnodes[i], InvalidBackendId);
-		ForkNumber	fork;
-
-		for (fork = 0; fork <= MAX_FORKNUM; fork++)
-			XLogDropRelation(parsed->xnodes[i], fork);
-		smgrdounlink(srel, true);
-		smgrclose(srel);
-	}
+	DropRelationFiles(parsed->xnodes, parsed->nrels, true);
 }
 
 void

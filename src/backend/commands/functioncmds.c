@@ -305,7 +305,7 @@ interpret_function_parameter_list(ParseState *pstate,
 		{
 			if (objtype == OBJECT_PROCEDURE)
 				*requiredResultType = RECORDOID;
-			else if (outCount == 0)	/* save first output param's type */
+			else if (outCount == 0) /* save first output param's type */
 				*requiredResultType = toid;
 			outCount++;
 		}
@@ -934,7 +934,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				 errmsg("language \"%s\" does not exist", language),
 				 (PLTemplateExists(language) ?
-				  errhint("Use CREATE LANGUAGE to load the language into the database.") : 0)));
+				  errhint("Use CREATE EXTENSION to load the language into the database.") : 0)));
 
 	languageOid = HeapTupleGetOid(languageTuple);
 	languageStruct = (Form_pg_language) GETSTRUCT(languageTuple);
@@ -2136,7 +2136,7 @@ ExecuteDoStmt(DoStmt *stmt, bool atomic)
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				 errmsg("language \"%s\" does not exist", language),
 				 (PLTemplateExists(language) ?
-				  errhint("Use CREATE LANGUAGE to load the language into the database.") : 0)));
+				  errhint("Use CREATE EXTENSION to load the language into the database.") : 0)));
 
 	codeblock->langOid = HeapTupleGetOid(languageTuple);
 	languageStruct = (Form_pg_language) GETSTRUCT(languageTuple);
@@ -2264,6 +2264,7 @@ ExecuteCallStmt(CallStmt *stmt, ParamListInfo params, bool atomic, DestReceiver 
 	/* Initialize function call structure */
 	InvokeFunctionExecuteHook(fexpr->funcid);
 	fmgr_info(fexpr->funcid, &flinfo);
+	fmgr_info_set_expr((Node *) fexpr, &flinfo);
 	InitFunctionCallInfoData(fcinfo, &flinfo, nargs, fexpr->inputcollid, (Node *) callcontext, NULL);
 
 	/*

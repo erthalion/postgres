@@ -409,7 +409,7 @@ $$;
 INFO:  read committed
 INFO:  repeatable read
 INFO:  read committed
--- error case
+-- error cases
 DO LANGUAGE plpgsql $$
 BEGIN
     SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
@@ -418,6 +418,39 @@ $$;
 ERROR:  SET TRANSACTION ISOLATION LEVEL must be called before any query
 CONTEXT:  SQL statement "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
 PL/pgSQL function inline_code_block line 3 at SET
+DO LANGUAGE plpgsql $$
+BEGIN
+    SAVEPOINT foo;
+END;
+$$;
+ERROR:  unsupported transaction command in PL/pgSQL
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+DO LANGUAGE plpgsql $$
+BEGIN
+    EXECUTE 'COMMIT';
+END;
+$$;
+ERROR:  EXECUTE of transaction commands is not implemented
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at EXECUTE
+-- snapshot handling test
+TRUNCATE test2;
+CREATE PROCEDURE transaction_test9()
+LANGUAGE SQL
+AS $$
+INSERT INTO test2 VALUES (42);
+$$;
+DO LANGUAGE plpgsql $$
+BEGIN
+  ROLLBACK;
+  CALL transaction_test9();
+END
+$$;
+SELECT * FROM test2;
+ x  
+----
+ 42
+(1 row)
+
 DROP TABLE test1;
 DROP TABLE test2;
 DROP TABLE test3;

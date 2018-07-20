@@ -344,7 +344,7 @@ returns bool
   </itemizedlist>
   Before doing so, the function should check the sign
   of <replaceable>offset</replaceable>: if it is less than zero, raise
-  error <literal>ERRCODE_INVALID_PRECEDING_FOLLOWING_SIZE</literal> (22013)
+  error <literal>ERRCODE_INVALID_PRECEDING_OR_FOLLOWING_SIZE</literal> (22013)
   with error text like <quote>invalid preceding or following size in window
   function</quote>.  (This is required by the SQL standard, although
   nonstandard operator families might perhaps choose to ignore this
@@ -429,23 +429,6 @@ returns bool
  <para>
   <function>in_range</function> functions need not handle NULL inputs, and
   typically will be marked strict.
- </para>
-
-</sect1>
-
-<sect1 id="btree-included-attributes">
- <title>Included attributes in B-tree indexes</title>
-
- <para>
-  As of <productname>PostgreSQL</productname> 11.0 there is an optional
-  INCLUDE clause, which allows to add non-key (included) attributes to index.
-  Those included attributes allow more queries to benefit from index-only scans.
-  We never use included attributes in ScanKeys for search.  That allows us to
-  include into B-tree any datatypes, even those which don't have suitable
-  operator classes.  Included columns only stored in regular tuples on leaf
-  pages.  All pivot tuples on non-leaf pages and highkey tuples are truncated
-  to contain only key attributes.  That helps to slightly reduce the size of
-  index.
  </para>
 
 </sect1>

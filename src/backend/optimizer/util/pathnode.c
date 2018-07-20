@@ -770,6 +770,12 @@ add_partial_path(RelOptInfo *parent_rel, Path *new_path)
 	/* Check for query cancel. */
 	CHECK_FOR_INTERRUPTS();
 
+	/* Path to be added must be parallel safe. */
+	Assert(new_path->parallel_safe);
+
+	/* Relation should be OK for parallelism, too. */
+	Assert(parent_rel->consider_parallel);
+
 	/*
 	 * As in add_path, throw out any paths which are dominated by the new
 	 * path, but throw out the new path if some existing path dominates it.
@@ -1268,7 +1274,7 @@ create_append_path(PlannerInfo *root,
 	pathnode->first_partial_path = list_length(subpaths);
 	pathnode->subpaths = list_concat(subpaths, partial_subpaths);
 
-	foreach(l, subpaths)
+	foreach(l, pathnode->subpaths)
 	{
 		Path	   *subpath = (Path *) lfirst(l);
 

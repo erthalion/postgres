@@ -152,6 +152,20 @@ explain (costs off) select * from boolpart where a is not true and a is not fals
 explain (costs off) select * from boolpart where a is unknown;
 explain (costs off) select * from boolpart where a is not unknown;
 
+-- test scalar-to-array operators
+create table coercepart (a varchar) partition by list (a);
+create table coercepart_ab partition of coercepart for values in ('ab');
+create table coercepart_bc partition of coercepart for values in ('bc');
+create table coercepart_cd partition of coercepart for values in ('cd');
+
+explain (costs off) select * from coercepart where a in ('ab', to_char(125, '999'));
+explain (costs off) select * from coercepart where a ~ any ('{ab}');
+explain (costs off) select * from coercepart where a !~ all ('{ab}');
+explain (costs off) select * from coercepart where a ~ any ('{ab,bc}');
+explain (costs off) select * from coercepart where a !~ all ('{ab,bc}');
+
+drop table coercepart;
+
 --
 -- some more cases
 --
@@ -334,8 +348,8 @@ execute ab_q1 (1, 8);
 explain (analyze, costs off, summary off, timing off) execute ab_q1 (2, 2);
 explain (analyze, costs off, summary off, timing off) execute ab_q1 (2, 4);
 
--- Ensure a mix of external and exec params work together at different
--- levels of partitioning.
+-- Ensure a mix of PARAM_EXTERN and PARAM_EXEC Params work together at
+-- different levels of partitioning.
 prepare ab_q2 (int, int) as
 select a from ab where a between $1 and $2 and b < (select 3);
 
@@ -347,7 +361,7 @@ execute ab_q2 (1, 8);
 
 explain (analyze, costs off, summary off, timing off) execute ab_q2 (2, 2);
 
--- As above, but with swap the exec param to the first partition level
+-- As above, but swap the PARAM_EXEC Param to the first partition level
 prepare ab_q3 (int, int) as
 select a from ab where b between $1 and $2 and a < (select 3);
 
@@ -381,6 +395,22 @@ move 3 from cur;
 fetch backward all from cur;
 
 commit;
+
+begin;
+
+-- Test run-time pruning using stable functions
+create function list_part_fn(int) returns int as $$ begin return $1; end;$$ language plpgsql stable;
+
+-- Ensure pruning works using a stable function containing no Vars
+explain (analyze, costs off, summary off, timing off) select * from list_part where a = list_part_fn(1);
+
+-- Ensure pruning does not take place when the function has a Var parameter
+explain (analyze, costs off, summary off, timing off) select * from list_part where a = list_part_fn(a);
+
+-- Ensure pruning does not take place when the expression contains a Var.
+explain (analyze, costs off, summary off, timing off) select * from list_part where a = list_part_fn(1) + a;
+
+rollback;
 
 drop table list_part;
 
@@ -444,7 +474,7 @@ select explain_parallel_append('execute ab_q5 (2, 3, 3)');
 -- We'll still get a single subplan in this case, but it should not be scanned.
 select explain_parallel_append('execute ab_q5 (33, 44, 55)');
 
--- Test Parallel Append with exec params
+-- Test Parallel Append with PARAM_EXEC Params
 select explain_parallel_append('select count(*) from ab where (a = (select 1) or a = (select 3)) and b = 2');
 
 -- Test pruning during parallel nested loop query
@@ -471,6 +501,10 @@ set enable_hashjoin = 0;
 set enable_mergejoin = 0;
 
 select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a where a.a in(0, 0, 1)');
+
+-- Ensure the same partitions are pruned when we make the nested loop
+-- parameter an Expr rather than a plain Param.
+select explain_parallel_append('select avg(ab.a) from ab inner join lprt_a a on ab.a = a.a + 0 where a.a in(0, 0, 1)');
 
 insert into lprt_a values(3),(3);
 
@@ -651,6 +685,10 @@ explain (analyze, costs off, summary off, timing off)  execute q1 (1,2,2,0);
 -- One subplan will remain in this case, but it should not be executed.
 explain (analyze, costs off, summary off, timing off)  execute q1 (1,2,2,1);
 
+-- Ensure Params that evaluate to NULL properly prune away all partitions
+explain (analyze, costs off, summary off, timing off)
+select * from listp where a = (select null::int);
+
 drop table listp;
 
 -- Ensure runtime pruning works with initplans params with boolean types
@@ -775,3 +813,11 @@ drop table inh_lp cascade;
 
 reset enable_partition_pruning;
 reset constraint_exclusion;
+
+-- Check pruning for a partition tree containing only temporary relations
+create temp table pp_temp_parent (a int) partition by list (a);
+create temp table pp_temp_part_1 partition of pp_temp_parent for values in (1);
+create temp table pp_temp_part_def partition of pp_temp_parent default;
+explain (costs off) select * from pp_temp_parent where true;
+explain (costs off) select * from pp_temp_parent where a = 2;
+drop table pp_temp_parent;

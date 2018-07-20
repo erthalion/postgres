@@ -1,13 +1,14 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 #----------------------------------------------------------------------
 #
 # reformat_dat_file.pl
-#    Perl script that reads in a catalog data file and writes out
-#    a functionally equivalent file in a standard format.
+#    Perl script that reads in catalog data file(s) and writes out
+#    functionally equivalent file(s) in a standard format.
 #
-#    Metadata entries (if any) come first, with normal attributes
-#    starting on the following line, in the same order they would be in
-#    the corresponding table. Comments and blank lines are preserved.
+#    In each entry of a reformatted file, metadata fields (if any) come
+#    first, with normal attributes starting on the following line, in
+#    the same order as the columns of the corresponding catalog.
+#    Comments and blank lines are preserved.
 #
 # Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
@@ -16,10 +17,14 @@
 #
 #----------------------------------------------------------------------
 
-use Catalog;
-
 use strict;
 use warnings;
+
+# If you copy this script to somewhere other than src/include/catalog,
+# you'll need to modify this "use lib" or provide a suitable -I switch.
+use FindBin;
+use lib "$FindBin::RealBin/../../backend/catalog/";
+use Catalog;
 
 my @input_files;
 my $output_path = '';
@@ -73,7 +78,7 @@ foreach my $datfile (@input_files)
 
 	my $header = "$1.h";
 	die "There in no header file corresponding to $datfile"
-	  if ! -e $header;
+	  if !-e $header;
 
 	my $catalog = Catalog::ParseHeader($header);
 	my $catname = $catalog->{catname};
@@ -120,7 +125,6 @@ foreach my $catname (@catnames)
 	open my $dat, '>', $datfile
 	  or die "can't open $datfile: $!";
 
-	# Write the data.
 	foreach my $data (@{ $catalog_data{$catname} })
 	{
 
@@ -177,31 +181,33 @@ foreach my $catname (@catnames)
 	close $dat;
 }
 
-# Leave values out if there is a matching default.
+# Remove column values for which there is a matching default,
+# or if the value can be computed from other columns.
 sub strip_default_values
 {
 	my ($row, $schema, $catname) = @_;
 
+	# Delete values that match defaults.
 	foreach my $column (@$schema)
 	{
 		my $attname = $column->{name};
 		die "strip_default_values: $catname.$attname undefined\n"
-		  if ! defined $row->{$attname};
+		  if !defined $row->{$attname};
 
-		# Delete values that match defaults.
 		if (defined $column->{default}
 			and ($row->{$attname} eq $column->{default}))
 		{
 			delete $row->{$attname};
 		}
-
-		# Also delete pg_proc.pronargs, since that can be recomputed.
-		if ($catname eq 'pg_proc' && $attname eq 'pronargs' &&
-			defined($row->{proargtypes}))
-		{
-			delete $row->{$attname};
-		}
 	}
+
+	# Delete computed values.  See AddDefaultValues() in Catalog.pm.
+	# Note: This must be done after deleting values matching defaults.
+	if ($catname eq 'pg_proc')
+	{
+		delete $row->{pronargs} if defined $row->{proargtypes};
+	}
+	return;
 }
 
 # Format the individual elements of a Perl hash into a valid string
@@ -210,7 +216,7 @@ sub strip_default_values
 # data files.
 sub format_hash
 {
-	my $data = shift;
+	my $data          = shift;
 	my @orig_attnames = @_;
 
 	# Copy attname to new array if it has a value, so we can determine
@@ -228,7 +234,7 @@ sub format_hash
 	my $char_count = 1;
 
 	my $threshold;
-	my $hash_str = '';
+	my $hash_str      = '';
 	my $element_count = 0;
 
 	foreach my $attname (@attnames)
@@ -262,7 +268,7 @@ sub format_hash
 		# Include a leading space in the key-value pair, since this will
 		# always go after either a comma or an additional padding space on
 		# the next line.
-		my $element = " $attname => '$value'";
+		my $element        = " $attname => '$value'";
 		my $element_length = length($element);
 
 		# If adding the element to the current line would expand the line
@@ -292,13 +298,10 @@ sub usage
 Usage: reformat_dat_file.pl [options] datafile...
 
 Options:
-    -o               output path
+    -o PATH          write output files to PATH instead of current directory
     --full-tuples    write out full tuples, including default values
 
 Expects a list of .dat files as arguments.
-
-Make sure location of Catalog.pm is passed to the perl interpreter:
-perl -I /path/to/Catalog.pm/ ...
 
 EOM
 }

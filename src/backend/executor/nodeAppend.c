@@ -133,29 +133,29 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
 	{
 		PartitionPruneState *prunestate;
 
+		/* We may need an expression context to evaluate partition exprs */
 		ExecAssignExprContext(estate, &appendstate->ps);
 
-		prunestate = ExecSetupPartitionPruneState(&appendstate->ps,
-												  node->part_prune_infos);
+		/* Create the working data structure for pruning. */
+		prunestate = ExecCreatePartitionPruneState(&appendstate->ps,
+												   node->part_prune_infos);
+		appendstate->as_prune_state = prunestate;
 
-		/*
-		 * When there are external params matching the partition key we may be
-		 * able to prune away Append subplans now.
-		 */
-		if (!bms_is_empty(prunestate->extparams))
+		/* Perform an initial partition prune, if required. */
+		if (prunestate->do_initial_prune)
 		{
-			/* Determine which subplans match the external params */
+			/* Determine which subplans survive initial pruning */
 			validsubplans = ExecFindInitialMatchingSubPlans(prunestate,
 															list_length(node->appendplans));
 
 			/*
-			 * If no subplans match the given parameters then we must handle
-			 * this case in a special way.  The problem here is that code in
-			 * explain.c requires an Append to have at least one subplan in
-			 * order for it to properly determine the Vars in that subplan's
-			 * targetlist.  We sidestep this issue by just initializing the
-			 * first subplan and setting as_whichplan to NO_MATCHING_SUBPLANS
-			 * to indicate that we don't need to scan any subnodes.
+			 * The case where no subplans survive pruning must be handled
+			 * specially.  The problem here is that code in explain.c requires
+			 * an Append to have at least one subplan in order for it to
+			 * properly determine the Vars in that subplan's targetlist.  We
+			 * sidestep this issue by just initializing the first subplan and
+			 * setting as_whichplan to NO_MATCHING_SUBPLANS to indicate that
+			 * we don't really need to scan any subnodes.
 			 */
 			if (bms_is_empty(validsubplans))
 			{
@@ -175,14 +175,11 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
 		}
 
 		/*
-		 * If there's no exec params then no further pruning can be done, we
-		 * can just set the valid subplans to all remaining subplans.
+		 * If no runtime pruning is required, we can fill as_valid_subplans
+		 * immediately, preventing later calls to ExecFindMatchingSubPlans.
 		 */
-		if (bms_is_empty(prunestate->execparams))
+		if (!prunestate->do_exec_prune)
 			appendstate->as_valid_subplans = bms_add_range(NULL, 0, nplans - 1);
-
-		appendstate->as_prune_state = prunestate;
-
 	}
 	else
 	{
@@ -190,7 +187,7 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
 
 		/*
 		 * When run-time partition pruning is not enabled we can just mark all
-		 * subplans as valid, they must also all be initialized.
+		 * subplans as valid; they must also all be initialized.
 		 */
 		appendstate->as_valid_subplans = validsubplans =
 			bms_add_range(NULL, 0, nplans - 1);
@@ -333,6 +330,12 @@ ExecEndAppend(AppendState *node)
 	 */
 	for (i = 0; i < nplans; i++)
 		ExecEndNode(appendplans[i]);
+
+	/*
+	 * release any resources associated with run-time pruning
+	 */
+	if (node->as_prune_state)
+		ExecDestroyPartitionPruneState(node->as_prune_state);
 }
 
 void
@@ -341,13 +344,13 @@ ExecReScanAppend(AppendState *node)
 	int			i;
 
 	/*
-	 * If any of the parameters being used for partition pruning have changed,
-	 * then we'd better unset the valid subplans so that they are reselected
-	 * for the new parameter values.
+	 * If any PARAM_EXEC Params used in pruning expressions have changed, then
+	 * we'd better unset the valid subplans so that they are reselected for
+	 * the new parameter values.
 	 */
 	if (node->as_prune_state &&
 		bms_overlap(node->ps.chgParam,
-					node->as_prune_state->execparams))
+					node->as_prune_state->execparamids))
 	{
 		bms_free(node->as_valid_subplans);
 		node->as_valid_subplans = NULL;
@@ -531,9 +534,9 @@ choose_next_subplan_for_leader(AppendState *node)
 		node->as_whichplan = node->as_nplans - 1;
 
 		/*
-		 * If we've yet to determine the valid subplans for these parameters
-		 * then do so now.  If run-time pruning is disabled then the valid
-		 * subplans will always be set to all subplans.
+		 * If we've yet to determine the valid subplans then do so now.  If
+		 * run-time pruning is disabled then the valid subplans will always be
+		 * set to all subplans.
 		 */
 		if (node->as_valid_subplans == NULL)
 		{
@@ -606,9 +609,9 @@ choose_next_subplan_for_worker(AppendState *node)
 		node->as_pstate->pa_finished[node->as_whichplan] = true;
 
 	/*
-	 * If we've yet to determine the valid subplans for these parameters then
-	 * do so now.  If run-time pruning is disabled then the valid subplans
-	 * will always be set to all subplans.
+	 * If we've yet to determine the valid subplans then do so now.  If
+	 * run-time pruning is disabled then the valid subplans will always be set
+	 * to all subplans.
 	 */
 	else if (node->as_valid_subplans == NULL)
 	{

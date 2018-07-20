@@ -855,7 +855,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		 */
 		if (OidIsValid(defaultPartOid))
 		{
-			check_default_allows_bound(parent, defaultRel, bound);
+			check_default_partition_contents(parent, defaultRel, bound);
 			/* Keep the lock until commit. */
 			heap_close(defaultRel, NoLock);
 		}
@@ -1634,7 +1634,8 @@ ExecuteTruncateGuts(List *explicit_rels, List *relids, List *relids_logged,
 	}
 
 	/*
-	 * Write a WAL record to allow this set of actions to be logically decoded.
+	 * Write a WAL record to allow this set of actions to be logically
+	 * decoded.
 	 *
 	 * Assemble an array of relids so we can write a single WAL record for the
 	 * whole action.
@@ -1648,7 +1649,7 @@ ExecuteTruncateGuts(List *explicit_rels, List *relids, List *relids_logged,
 		Assert(XLogLogicalInfoActive());
 
 		logrelids = palloc(list_length(relids_logged) * sizeof(Oid));
-		foreach (cell, relids_logged)
+		foreach(cell, relids_logged)
 			logrelids[i++] = lfirst_oid(cell);
 
 		xlrec.dbId = MyDatabaseId;
@@ -1984,6 +1985,19 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("inherited relation \"%s\" is not a table or foreign table",
 							parent->relname)));
+
+		/*
+		 * If the parent is permanent, so must be all of its partitions.  Note
+		 * that inheritance allows that case.
+		 */
+		if (is_partition &&
+			relation->rd_rel->relpersistence != RELPERSISTENCE_TEMP &&
+			relpersistence == RELPERSISTENCE_TEMP)
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					 errmsg("cannot create a temporary relation as partition of permanent relation \"%s\"",
+							RelationGetRelationName(relation))));
+
 		/* Permanent rels cannot inherit from temporary ones */
 		if (relpersistence != RELPERSISTENCE_TEMP &&
 			relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
@@ -5560,8 +5574,8 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		CommandCounterIncrement();
 
 		/*
-		 * Did the request for a missing value work? If not we'll have to do
-		 * a rewrite
+		 * Did the request for a missing value work? If not we'll have to do a
+		 * rewrite
 		 */
 		if (!rawEnt->missingMode)
 			tab->rewrite |= AT_REWRITE_DEFAULT_VAL;
@@ -7664,9 +7678,9 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ObjectAddressSet(address, ConstraintRelationId, constrOid);
 
 	/*
-	 * Create the triggers that will enforce the constraint.  We only want
-	 * the action triggers to appear for the parent partitioned relation,
-	 * even though the constraints also exist below.
+	 * Create the triggers that will enforce the constraint.  We only want the
+	 * action triggers to appear for the parent partitioned relation, even
+	 * though the constraints also exist below.
 	 */
 	createForeignKeyTriggers(rel, RelationGetRelid(pkrel), fkconstraint,
 							 constrOid, indexOid, !recursing);
@@ -8793,8 +8807,8 @@ createForeignKeyTriggers(Relation rel, Oid refRelOid, Constraint *fkconstraint,
 									   indexOid);
 
 	/*
-	 * For the referencing side, create the check triggers.  We only need these
-	 * on the partitions.
+	 * For the referencing side, create the check triggers.  We only need
+	 * these on the partitions.
 	 */
 	if (rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
 		createForeignKeyCheckTriggers(RelationGetRelid(rel), refRelOid,
@@ -11921,11 +11935,11 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 	/* Off to RemoveInheritance() where most of the work happens */
 	RemoveInheritance(rel, parent_rel);
 
-	/* keep our lock on the parent relation until commit */
-	heap_close(parent_rel, NoLock);
-
 	ObjectAddressSet(address, RelationRelationId,
 					 RelationGetRelid(parent_rel));
+
+	/* keep our lock on the parent relation until commit */
+	heap_close(parent_rel, NoLock);
 
 	return address;
 }
@@ -13974,8 +13988,9 @@ QueuePartitionConstraintValidation(List **wqueue, Relation scanrel,
 	}
 
 	/*
-	 * Constraints proved insufficient. For plain relations, queue a validation
-	 * item now; for partitioned tables, recurse to process each partition.
+	 * Constraints proved insufficient. For plain relations, queue a
+	 * validation item now; for partitioned tables, recurse to process each
+	 * partition.
 	 */
 	if (scanrel->rd_rel->relkind == RELKIND_RELATION)
 	{
@@ -14132,6 +14147,14 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 				 errdetail("\"%s\" is already a child of \"%s\".",
 						   RelationGetRelationName(rel),
 						   RelationGetRelationName(attachrel))));
+
+	/* If the parent is permanent, so must be all of its partitions. */
+	if (rel->rd_rel->relpersistence != RELPERSISTENCE_TEMP &&
+		attachrel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("cannot attach a temporary relation as partition of permanent relation \"%s\"",
+						RelationGetRelationName(rel))));
 
 	/* Temp parent cannot have a partition that is itself not a temp */
 	if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP &&
@@ -14300,9 +14323,9 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
 	/*
 	 * If we're attaching a partition other than the default partition and a
 	 * default one exists, then that partition's partition constraint changes,
-	 * so add an entry to the work queue to validate it, too.  (We must not
-	 * do this when the partition being attached is the default one; we
-	 * already did it above!)
+	 * so add an entry to the work queue to validate it, too.  (We must not do
+	 * this when the partition being attached is the default one; we already
+	 * did it above!)
 	 */
 	if (OidIsValid(defaultPartOid))
 	{
@@ -14408,8 +14431,8 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 		 */
 		for (i = 0; i < list_length(attachRelIdxs); i++)
 		{
-			Oid		cldIdxId = RelationGetRelid(attachrelIdxRels[i]);
-			Oid		cldConstrOid = InvalidOid;
+			Oid			cldIdxId = RelationGetRelid(attachrelIdxRels[i]);
+			Oid			cldConstrOid = InvalidOid;
 
 			/* does this index have a parent?  if so, can't use it */
 			if (attachrelIdxRels[i]->rd_rel->relispartition)
@@ -14693,7 +14716,7 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 			continue;
 
 		Assert((IndexGetRelation(get_partition_parent(idxid), false) ==
-			   RelationGetRelid(rel)));
+				RelationGetRelid(rel)));
 
 		idx = index_open(idxid, AccessExclusiveLock);
 		IndexSetParentIndex(idx, InvalidOid);
@@ -14722,9 +14745,9 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
  */
 struct AttachIndexCallbackState
 {
-	Oid		partitionOid;
-	Oid		parentTblOid;
-	bool	lockedParentTbl;
+	Oid			partitionOid;
+	Oid			parentTblOid;
+	bool		lockedParentTbl;
 };
 
 static void
@@ -14836,7 +14859,8 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 					cldConstrId = InvalidOid;
 
 		/*
-		 * If this partition already has an index attached, refuse the operation.
+		 * If this partition already has an index attached, refuse the
+		 * operation.
 		 */
 		refuseDupeIndexAttach(parentIdx, partIdx, partTbl);
 
@@ -14890,8 +14914,8 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 					 errdetail("The index definitions do not match.")));
 
 		/*
-		 * If there is a constraint in the parent, make sure there is one
-		 * in the child too.
+		 * If there is a constraint in the parent, make sure there is one in
+		 * the child too.
 		 */
 		constraintOid = get_relation_idx_constraint_oid(RelationGetRelid(parentTbl),
 														RelationGetRelid(parentIdx));
@@ -14907,9 +14931,9 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 								RelationGetRelationName(partIdx),
 								RelationGetRelationName(parentIdx)),
 						 errdetail("The index \"%s\" belongs to a constraint in table \"%s\" but no constraint exists for index \"%s\".",
-								RelationGetRelationName(parentIdx),
-								RelationGetRelationName(parentTbl),
-								RelationGetRelationName(partIdx))));
+								   RelationGetRelationName(parentIdx),
+								   RelationGetRelationName(parentTbl),
+								   RelationGetRelationName(partIdx))));
 		}
 
 		/* All good -- do it */
@@ -14938,10 +14962,10 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 static void
 refuseDupeIndexAttach(Relation parentIdx, Relation partIdx, Relation partitionTbl)
 {
-	Relation		pg_inherits;
-	ScanKeyData		key;
-	HeapTuple		tuple;
-	SysScanDesc		scan;
+	Relation	pg_inherits;
+	ScanKeyData key;
+	HeapTuple	tuple;
+	SysScanDesc scan;
 
 	pg_inherits = heap_open(InheritsRelationId, AccessShareLock);
 	ScanKeyInit(&key, Anum_pg_inherits_inhparent,
@@ -14951,7 +14975,7 @@ refuseDupeIndexAttach(Relation parentIdx, Relation partIdx, Relation partitionTb
 							  NULL, 1, &key);
 	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
-		Form_pg_inherits	inhForm;
+		Form_pg_inherits inhForm;
 		Oid			tab;
 
 		inhForm = (Form_pg_inherits) GETSTRUCT(tuple);
@@ -14979,12 +15003,12 @@ refuseDupeIndexAttach(Relation parentIdx, Relation partIdx, Relation partitionTb
 static void
 validatePartitionedIndex(Relation partedIdx, Relation partedTbl)
 {
-	Relation		inheritsRel;
-	SysScanDesc		scan;
-	ScanKeyData		key;
-	int				tuples = 0;
-	HeapTuple		inhTup;
-	bool			updated = false;
+	Relation	inheritsRel;
+	SysScanDesc scan;
+	ScanKeyData key;
+	int			tuples = 0;
+	HeapTuple	inhTup;
+	bool		updated = false;
 
 	Assert(partedIdx->rd_rel->relkind == RELKIND_PARTITIONED_INDEX);
 
@@ -15002,11 +15026,11 @@ validatePartitionedIndex(Relation partedIdx, Relation partedTbl)
 	while ((inhTup = systable_getnext(scan)) != NULL)
 	{
 		Form_pg_inherits inhForm = (Form_pg_inherits) GETSTRUCT(inhTup);
-		HeapTuple		indTup;
-		Form_pg_index	indexForm;
+		HeapTuple	indTup;
+		Form_pg_index indexForm;
 
 		indTup = SearchSysCache1(INDEXRELID,
-								ObjectIdGetDatum(inhForm->inhrelid));
+								 ObjectIdGetDatum(inhForm->inhrelid));
 		if (!indTup)
 			elog(ERROR, "cache lookup failed for index %u",
 				 inhForm->inhrelid);

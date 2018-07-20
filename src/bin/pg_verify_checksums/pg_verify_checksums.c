@@ -13,6 +13,7 @@
 #include "postgres.h"
 #include "catalog/pg_control.h"
 #include "common/controldata_utils.h"
+#include "getopt_long.h"
 #include "storage/bufpage.h"
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
@@ -41,11 +42,11 @@ usage()
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION] [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
-	printf(_(" [-D] DATADIR    data directory\n"));
-	printf(_("  -r relfilenode check only relation with specified relfilenode\n"));
-	printf(_("  -d             debug output, listing all checked blocks\n"));
-	printf(_("  -V, --version  output version information, then exit\n"));
-	printf(_("  -?, --help     show this help, then exit\n"));
+	printf(_(" [-D, --pgdata=]DATADIR  data directory\n"));
+	printf(_("  -r relfilenode         check only relation with specified relfilenode\n"));
+	printf(_("  -d                     debug output, listing all checked blocks\n"));
+	printf(_("  -V, --version          output version information, then exit\n"));
+	printf(_("  -?, --help             show this help, then exit\n"));
 	printf(_("\nIf no data directory (DATADIR) is specified, "
 			 "the environment variable PGDATA\nis used.\n\n"));
 	printf(_("Report bugs to <pgsql-bugs@postgresql.org>.\n"));
@@ -85,7 +86,8 @@ scan_file(char *fn, int segmentno)
 	f = open(fn, 0);
 	if (f < 0)
 	{
-		fprintf(stderr, _("%s: could not open file \"%s\": %m\n"), progname, fn);
+		fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+				progname, fn, strerror(errno));
 		exit(1);
 	}
 
@@ -137,8 +139,8 @@ scan_directory(char *basedir, char *subdir)
 	dir = opendir(path);
 	if (!dir)
 	{
-		fprintf(stderr, _("%s: could not open directory \"%s\": %m\n"),
-				progname, path);
+		fprintf(stderr, _("%s: could not open directory \"%s\": %s\n"),
+				progname, path, strerror(errno));
 		exit(1);
 	}
 	while ((de = readdir(dir)) != NULL)
@@ -152,8 +154,8 @@ scan_directory(char *basedir, char *subdir)
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
 		if (lstat(fn, &st) < 0)
 		{
-			fprintf(stderr, _("%s: could not stat file \"%s\": %m\n"),
-					progname, fn);
+			fprintf(stderr, _("%s: could not stat file \"%s\": %s\n"),
+					progname, fn, strerror(errno));
 			exit(1);
 		}
 		if (S_ISREG(st.st_mode))
@@ -204,8 +206,14 @@ scan_directory(char *basedir, char *subdir)
 int
 main(int argc, char *argv[])
 {
+	static struct option long_options[] = {
+		{"pgdata", required_argument, NULL, 'D'},
+		{NULL, 0, NULL, 0}
+	};
+
 	char	   *DataDir = NULL;
 	int			c;
+	int			option_index;
 	bool		crc_ok;
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_verify_checksums"));
@@ -226,7 +234,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt(argc, argv, "D:r:d")) != -1)
+	while ((c = getopt_long(argc, argv, "D:r:d", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{

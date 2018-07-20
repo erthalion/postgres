@@ -251,7 +251,7 @@ static char *convertRegProcReference(Archive *fout,
 						const char *proc);
 static char *getFormattedOperatorName(Archive *fout, const char *oproid);
 static char *convertTSFunction(Archive *fout, Oid funcOid);
-static Oid	findLastBuiltinOid_V71(Archive *fout, const char *);
+static Oid	findLastBuiltinOid_V71(Archive *fout);
 static char *getFormattedTypeName(Archive *fout, Oid oid, OidOptions opts);
 static void getBlobs(Archive *fout);
 static void dumpBlob(Archive *fout, BlobInfo *binfo);
@@ -735,8 +735,7 @@ main(int argc, char **argv)
 	 * With 8.1 and above, we can just use FirstNormalObjectId - 1.
 	 */
 	if (fout->remoteVersion < 80100)
-		g_last_builtin_oid = findLastBuiltinOid_V71(fout,
-													PQdb(GetConnection(fout)));
+		g_last_builtin_oid = findLastBuiltinOid_V71(fout);
 	else
 		g_last_builtin_oid = FirstNormalObjectId - 1;
 
@@ -982,6 +981,7 @@ help(const char *progname)
 	printf(_("  --exclude-table-data=TABLE   do NOT dump data for the named table(s)\n"));
 	printf(_("  --if-exists                  use IF EXISTS when dropping objects\n"));
 	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
+	printf(_("  --load-via-partition-root    load partitions via the root table\n"));
 	printf(_("  --no-comments                do not dump comments\n"));
 	printf(_("  --no-publications            do not dump publications\n"));
 	printf(_("  --no-security-labels         do not dump security label assignments\n"));
@@ -990,7 +990,6 @@ help(const char *progname)
 	printf(_("  --no-tablespaces             do not dump tablespace assignments\n"));
 	printf(_("  --no-unlogged-table-data     do not dump unlogged table data\n"));
 	printf(_("  --quote-all-identifiers      quote all identifiers, even if not key words\n"));
-	printf(_("  --load-via-partition-root    load partitions via the root table\n"));
 	printf(_("  --section=SECTION            dump named section (pre-data, data, or post-data)\n"));
 	printf(_("  --serializable-deferrable    wait until the dump can run without anomalies\n"));
 	printf(_("  --snapshot=SNAPSHOT          use given snapshot for the dump\n"));
@@ -2538,6 +2537,7 @@ dumpDatabase(Archive *fout)
 	PGresult   *res;
 	int			i_tableoid,
 				i_oid,
+				i_datname,
 				i_dba,
 				i_encoding,
 				i_collate,
@@ -2565,16 +2565,13 @@ dumpDatabase(Archive *fout)
 				minmxid;
 	char	   *qdatname;
 
-	datname = PQdb(conn);
-	qdatname = pg_strdup(fmtId(datname));
-
 	if (g_verbose)
 		write_msg(NULL, "saving database definition\n");
 
 	/* Fetch the database-level properties for this database */
 	if (fout->remoteVersion >= 90600)
 	{
-		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, "
+		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, datname, "
 						  "(%s datdba) AS dba, "
 						  "pg_encoding_to_char(encoding) AS encoding, "
 						  "datcollate, datctype, datfrozenxid, datminmxid, "
@@ -2591,13 +2588,12 @@ dumpDatabase(Archive *fout)
 						  "shobj_description(oid, 'pg_database') AS description "
 
 						  "FROM pg_database "
-						  "WHERE datname = ",
+						  "WHERE datname = current_database()",
 						  username_subquery);
-		appendStringLiteralAH(dbQry, datname, fout);
 	}
 	else if (fout->remoteVersion >= 90300)
 	{
-		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, "
+		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, datname, "
 						  "(%s datdba) AS dba, "
 						  "pg_encoding_to_char(encoding) AS encoding, "
 						  "datcollate, datctype, datfrozenxid, datminmxid, "
@@ -2606,13 +2602,12 @@ dumpDatabase(Archive *fout)
 						  "shobj_description(oid, 'pg_database') AS description "
 
 						  "FROM pg_database "
-						  "WHERE datname = ",
+						  "WHERE datname = current_database()",
 						  username_subquery);
-		appendStringLiteralAH(dbQry, datname, fout);
 	}
 	else if (fout->remoteVersion >= 80400)
 	{
-		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, "
+		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, datname, "
 						  "(%s datdba) AS dba, "
 						  "pg_encoding_to_char(encoding) AS encoding, "
 						  "datcollate, datctype, datfrozenxid, 0 AS datminmxid, "
@@ -2621,13 +2616,12 @@ dumpDatabase(Archive *fout)
 						  "shobj_description(oid, 'pg_database') AS description "
 
 						  "FROM pg_database "
-						  "WHERE datname = ",
+						  "WHERE datname = current_database()",
 						  username_subquery);
-		appendStringLiteralAH(dbQry, datname, fout);
 	}
 	else if (fout->remoteVersion >= 80200)
 	{
-		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, "
+		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, datname, "
 						  "(%s datdba) AS dba, "
 						  "pg_encoding_to_char(encoding) AS encoding, "
 						  "NULL AS datcollate, NULL AS datctype, datfrozenxid, 0 AS datminmxid, "
@@ -2636,13 +2630,12 @@ dumpDatabase(Archive *fout)
 						  "shobj_description(oid, 'pg_database') AS description "
 
 						  "FROM pg_database "
-						  "WHERE datname = ",
+						  "WHERE datname = current_database()",
 						  username_subquery);
-		appendStringLiteralAH(dbQry, datname, fout);
 	}
 	else
 	{
-		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, "
+		appendPQExpBuffer(dbQry, "SELECT tableoid, oid, datname, "
 						  "(%s datdba) AS dba, "
 						  "pg_encoding_to_char(encoding) AS encoding, "
 						  "NULL AS datcollate, NULL AS datctype, datfrozenxid, 0 AS datminmxid, "
@@ -2650,15 +2643,15 @@ dumpDatabase(Archive *fout)
 						  "-1 as datconnlimit, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = dattablespace) AS tablespace "
 						  "FROM pg_database "
-						  "WHERE datname = ",
+						  "WHERE datname = current_database()",
 						  username_subquery);
-		appendStringLiteralAH(dbQry, datname, fout);
 	}
 
 	res = ExecuteSqlQueryForSingleRow(fout, dbQry->data);
 
 	i_tableoid = PQfnumber(res, "tableoid");
 	i_oid = PQfnumber(res, "oid");
+	i_datname = PQfnumber(res, "datname");
 	i_dba = PQfnumber(res, "dba");
 	i_encoding = PQfnumber(res, "encoding");
 	i_collate = PQfnumber(res, "datcollate");
@@ -2673,6 +2666,7 @@ dumpDatabase(Archive *fout)
 
 	dbCatId.tableoid = atooid(PQgetvalue(res, 0, i_tableoid));
 	dbCatId.oid = atooid(PQgetvalue(res, 0, i_oid));
+	datname = PQgetvalue(res, 0, i_datname);
 	dba = PQgetvalue(res, 0, i_dba);
 	encoding = PQgetvalue(res, 0, i_encoding);
 	collate = PQgetvalue(res, 0, i_collate);
@@ -2684,6 +2678,8 @@ dumpDatabase(Archive *fout)
 	datistemplate = PQgetvalue(res, 0, i_datistemplate);
 	datconnlimit = PQgetvalue(res, 0, i_datconnlimit);
 	tablespace = PQgetvalue(res, 0, i_tablespace);
+
+	qdatname = pg_strdup(fmtId(datname));
 
 	/*
 	 * Prepare the CREATE DATABASE command.  We must specify encoding, locale,
@@ -6786,7 +6782,6 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
 							  "i.indnkeyatts AS indnkeyatts, "
 							  "i.indnatts AS indnatts, "
-							  "t.relnatts AS indnkeys, "
 							  "i.indkey, i.indisclustered, "
 							  "i.indisreplident, t.relpages, "
 							  "c.contype, c.conname, "
@@ -6824,7 +6819,6 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
 							  "i.indnatts AS indnkeyatts, "
 							  "i.indnatts AS indnatts, "
-							  "t.relnatts AS indnkeys, "
 							  "i.indkey, i.indisclustered, "
 							  "i.indisreplident, t.relpages, "
 							  "c.contype, c.conname, "
@@ -6858,7 +6852,6 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
 							  "i.indnatts AS indnkeyatts, "
 							  "i.indnatts AS indnatts, "
-							  "t.relnatts AS indnkeys, "
 							  "i.indkey, i.indisclustered, "
 							  "false AS indisreplident, t.relpages, "
 							  "c.contype, c.conname, "
@@ -6888,7 +6881,6 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
 							  "i.indnatts AS indnkeyatts, "
 							  "i.indnatts AS indnatts, "
-							  "t.relnatts AS indnkeys, "
 							  "i.indkey, i.indisclustered, "
 							  "false AS indisreplident, t.relpages, "
 							  "c.contype, c.conname, "
@@ -6919,7 +6911,8 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "t.relname AS indexname, "
 							  "0 AS parentidx, "
 							  "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
-							  "t.relnatts AS indnkeys, "
+							  "t.relnatts AS indnkeyatts, "
+							  "t.relnatts AS indnatts, "
 							  "i.indkey, i.indisclustered, "
 							  "false AS indisreplident, t.relpages, "
 							  "c.contype, c.conname, "
@@ -8110,6 +8103,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	int			i_attoptions;
 	int			i_attcollation;
 	int			i_attfdwoptions;
+	int			i_attmissingval;
 	PGresult   *res;
 	int			ntups;
 	bool		hasdefaults;
@@ -8139,7 +8133,34 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 		resetPQExpBuffer(q);
 
-		if (fout->remoteVersion >= 100000)
+		if (fout->remoteVersion >= 110000)
+		{
+			/* atthasmissing and attmissingval are new in 11 */
+			appendPQExpBuffer(q, "SELECT a.attnum, a.attname, a.atttypmod, "
+							  "a.attstattarget, a.attstorage, t.typstorage, "
+							  "a.attnotnull, a.atthasdef, a.attisdropped, "
+							  "a.attlen, a.attalign, a.attislocal, "
+							  "pg_catalog.format_type(t.oid,a.atttypmod) AS atttypname, "
+							  "array_to_string(a.attoptions, ', ') AS attoptions, "
+							  "CASE WHEN a.attcollation <> t.typcollation "
+							  "THEN a.attcollation ELSE 0 END AS attcollation, "
+							  "a.attidentity, "
+							  "pg_catalog.array_to_string(ARRAY("
+							  "SELECT pg_catalog.quote_ident(option_name) || "
+							  "' ' || pg_catalog.quote_literal(option_value) "
+							  "FROM pg_catalog.pg_options_to_table(attfdwoptions) "
+							  "ORDER BY option_name"
+							  "), E',\n    ') AS attfdwoptions ,"
+							  "CASE WHEN a.atthasmissing AND NOT a.attisdropped "
+							  "THEN a.attmissingval ELSE null END AS attmissingval "
+							  "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
+							  "ON a.atttypid = t.oid "
+							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
+							  "AND a.attnum > 0::pg_catalog.int2 "
+							  "ORDER BY a.attnum",
+							  tbinfo->dobj.catId.oid);
+		}
+		else if (fout->remoteVersion >= 100000)
 		{
 			/*
 			 * attidentity is new in version 10.
@@ -8158,7 +8179,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							  "' ' || pg_catalog.quote_literal(option_value) "
 							  "FROM pg_catalog.pg_options_to_table(attfdwoptions) "
 							  "ORDER BY option_name"
-							  "), E',\n    ') AS attfdwoptions "
+							  "), E',\n    ') AS attfdwoptions ,"
+							  "NULL as attmissingval "
 							  "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
 							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
@@ -8184,7 +8206,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							  "' ' || pg_catalog.quote_literal(option_value) "
 							  "FROM pg_catalog.pg_options_to_table(attfdwoptions) "
 							  "ORDER BY option_name"
-							  "), E',\n    ') AS attfdwoptions "
+							  "), E',\n    ') AS attfdwoptions, "
+							  "NULL as attmissingval "
 							  "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
 							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
@@ -8208,7 +8231,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							  "array_to_string(a.attoptions, ', ') AS attoptions, "
 							  "CASE WHEN a.attcollation <> t.typcollation "
 							  "THEN a.attcollation ELSE 0 END AS attcollation, "
-							  "NULL AS attfdwoptions "
+							  "NULL AS attfdwoptions, "
+							  "NULL as attmissingval "
 							  "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
 							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
@@ -8226,7 +8250,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							  "pg_catalog.format_type(t.oid,a.atttypmod) AS atttypname, "
 							  "array_to_string(a.attoptions, ', ') AS attoptions, "
 							  "0 AS attcollation, "
-							  "NULL AS attfdwoptions "
+							  "NULL AS attfdwoptions, "
+							  "NULL as attmissingval "
 							  "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
 							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
@@ -8243,7 +8268,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							  "a.attlen, a.attalign, a.attislocal, "
 							  "pg_catalog.format_type(t.oid,a.atttypmod) AS atttypname, "
 							  "'' AS attoptions, 0 AS attcollation, "
-							  "NULL AS attfdwoptions "
+							  "NULL AS attfdwoptions, "
+							  "NULL as attmissingval "
 							  "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
 							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
@@ -8273,6 +8299,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		i_attoptions = PQfnumber(res, "attoptions");
 		i_attcollation = PQfnumber(res, "attcollation");
 		i_attfdwoptions = PQfnumber(res, "attfdwoptions");
+		i_attmissingval = PQfnumber(res, "attmissingval");
 
 		tbinfo->numatts = ntups;
 		tbinfo->attnames = (char **) pg_malloc(ntups * sizeof(char *));
@@ -8289,6 +8316,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		tbinfo->attoptions = (char **) pg_malloc(ntups * sizeof(char *));
 		tbinfo->attcollation = (Oid *) pg_malloc(ntups * sizeof(Oid));
 		tbinfo->attfdwoptions = (char **) pg_malloc(ntups * sizeof(char *));
+		tbinfo->attmissingval = (char **) pg_malloc(ntups * sizeof(char *));
 		tbinfo->notnull = (bool *) pg_malloc(ntups * sizeof(bool));
 		tbinfo->inhNotNull = (bool *) pg_malloc(ntups * sizeof(bool));
 		tbinfo->attrdefs = (AttrDefInfo **) pg_malloc(ntups * sizeof(AttrDefInfo *));
@@ -8316,6 +8344,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, j, i_attoptions));
 			tbinfo->attcollation[j] = atooid(PQgetvalue(res, j, i_attcollation));
 			tbinfo->attfdwoptions[j] = pg_strdup(PQgetvalue(res, j, i_attfdwoptions));
+			tbinfo->attmissingval[j] = pg_strdup(PQgetvalue(res, j, i_attmissingval));
 			tbinfo->attrdefs[j] = NULL; /* fix below */
 			if (PQgetvalue(res, j, i_atthasdef)[0] == 't')
 				hasdefaults = true;
@@ -13840,8 +13869,8 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 				case AGGMODIFY_READ_ONLY:
 					appendPQExpBufferStr(details, ",\n    FINALFUNC_MODIFY = READ_ONLY");
 					break;
-				case AGGMODIFY_SHARABLE:
-					appendPQExpBufferStr(details, ",\n    FINALFUNC_MODIFY = SHARABLE");
+				case AGGMODIFY_SHAREABLE:
+					appendPQExpBufferStr(details, ",\n    FINALFUNC_MODIFY = SHAREABLE");
 					break;
 				case AGGMODIFY_READ_WRITE:
 					appendPQExpBufferStr(details, ",\n    FINALFUNC_MODIFY = READ_WRITE");
@@ -13896,8 +13925,8 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 				case AGGMODIFY_READ_ONLY:
 					appendPQExpBufferStr(details, ",\n    MFINALFUNC_MODIFY = READ_ONLY");
 					break;
-				case AGGMODIFY_SHARABLE:
-					appendPQExpBufferStr(details, ",\n    MFINALFUNC_MODIFY = SHARABLE");
+				case AGGMODIFY_SHAREABLE:
+					appendPQExpBufferStr(details, ",\n    MFINALFUNC_MODIFY = SHAREABLE");
 					break;
 				case AGGMODIFY_READ_WRITE:
 					appendPQExpBufferStr(details, ",\n    MFINALFUNC_MODIFY = READ_WRITE");
@@ -15666,6 +15695,29 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 			appendPQExpBufferStr(q, ";\n");
 
 		/*
+		 * in binary upgrade mode, update the catalog with any missing values
+		 * that might be present.
+		 */
+		if (dopt->binary_upgrade)
+		{
+			for (j = 0; j < tbinfo->numatts; j++)
+			{
+				if (tbinfo->attmissingval[j][0] != '\0')
+				{
+					appendPQExpBufferStr(q, "\n-- set missing value.\n");
+					appendPQExpBufferStr(q,
+										 "SELECT pg_catalog.binary_upgrade_set_missing_value(");
+					appendStringLiteralAH(q, qualrelname, fout);
+					appendPQExpBufferStr(q, "::pg_catalog.regclass,");
+					appendStringLiteralAH(q, tbinfo->attnames[j], fout);
+					appendPQExpBufferStr(q, ",");
+					appendStringLiteralAH(q, tbinfo->attmissingval[j], fout);
+					appendPQExpBufferStr(q, ");\n\n");
+				}
+			}
+		}
+
+		/*
 		 * To create binary-compatible heap files, we have to ensure the same
 		 * physical column order, including dropped columns, as in the
 		 * original.  Therefore, we create dropped columns above and drop them
@@ -16433,13 +16485,13 @@ dumpConstraint(Archive *fout, ConstraintInfo *coninfo)
 	}
 	else if (coninfo->contype == 'f')
 	{
-		char *only;
+		char	   *only;
 
 		/*
-		 * Foreign keys on partitioned tables are always declared as inheriting
-		 * to partitions; for all other cases, emit them as applying ONLY
-		 * directly to the named table, because that's how they work for
-		 * regular inherited tables.
+		 * Foreign keys on partitioned tables are always declared as
+		 * inheriting to partitions; for all other cases, emit them as
+		 * applying ONLY directly to the named table, because that's how they
+		 * work for regular inherited tables.
 		 */
 		only = tbinfo->relkind == RELKIND_PARTITIONED_TABLE ? "" : "ONLY ";
 
@@ -16589,23 +16641,19 @@ dumpTableConstraintComment(Archive *fout, ConstraintInfo *coninfo)
  * find the last built in oid
  *
  * For 7.1 through 8.0, we do this by retrieving datlastsysoid from the
- * pg_database entry for the current database.
+ * pg_database entry for the current database.  (Note: current_database()
+ * requires 7.3; pg_dump requires 8.0 now.)
  */
 static Oid
-findLastBuiltinOid_V71(Archive *fout, const char *dbname)
+findLastBuiltinOid_V71(Archive *fout)
 {
 	PGresult   *res;
 	Oid			last_oid;
-	PQExpBuffer query = createPQExpBuffer();
 
-	resetPQExpBuffer(query);
-	appendPQExpBufferStr(query, "SELECT datlastsysoid from pg_database where datname = ");
-	appendStringLiteralAH(query, dbname, fout);
-
-	res = ExecuteSqlQueryForSingleRow(fout, query->data);
+	res = ExecuteSqlQueryForSingleRow(fout,
+									  "SELECT datlastsysoid FROM pg_database WHERE datname = current_database()");
 	last_oid = atooid(PQgetvalue(res, 0, PQfnumber(res, "datlastsysoid")));
 	PQclear(res);
-	destroyPQExpBuffer(query);
 
 	return last_oid;
 }

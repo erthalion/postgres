@@ -167,6 +167,12 @@ plan_set_operations(PlannerInfo *root)
 	setup_simple_rel_arrays(root);
 
 	/*
+	 * Populate append_rel_array with each AppendRelInfo to allow direct
+	 * lookups by child relid.
+	 */
+	setup_append_rel_array(root);
+
+	/*
 	 * Find the leftmost component Query.  We need to use its column names for
 	 * all generated tlists (else SELECT INTO won't work right).
 	 */
@@ -330,7 +336,8 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 		 * to build a partial path for this relation.  But there's no point in
 		 * considering any path but the cheapest.
 		 */
-		if (final_rel->partial_pathlist != NIL)
+		if (rel->consider_parallel && bms_is_empty(rel->lateral_relids) &&
+			final_rel->partial_pathlist != NIL)
 		{
 			Path	   *partial_subpath;
 			Path	   *partial_path;
@@ -1674,7 +1681,6 @@ expand_partitioned_rtentry(PlannerInfo *root, RangeTblEntry *parentrte,
 	int			i;
 	RangeTblEntry *childrte;
 	Index		childRTindex;
-	bool		has_child = false;
 	PartitionDesc partdesc = RelationGetPartitionDesc(parentrel);
 
 	check_stack_depth();
@@ -1687,9 +1693,9 @@ expand_partitioned_rtentry(PlannerInfo *root, RangeTblEntry *parentrte,
 	/*
 	 * Note down whether any partition key cols are being updated. Though it's
 	 * the root partitioned table's updatedCols we are interested in, we
-	 * instead use parentrte to get the updatedCols. This is convenient because
-	 * parentrte already has the root partrel's updatedCols translated to match
-	 * the attribute ordering of parentrel.
+	 * instead use parentrte to get the updatedCols. This is convenient
+	 * because parentrte already has the root partrel's updatedCols translated
+	 * to match the attribute ordering of parentrel.
 	 */
 	if (!root->partColsUpdated)
 		root->partColsUpdated =
@@ -1700,6 +1706,16 @@ expand_partitioned_rtentry(PlannerInfo *root, RangeTblEntry *parentrte,
 									top_parentrc, parentrel,
 									appinfos, &childrte, &childRTindex);
 
+	/*
+	 * If the partitioned table has no partitions, treat this as the
+	 * non-inheritance case.
+	 */
+	if (partdesc->nparts == 0)
+	{
+		parentrte->inh = false;
+		return;
+	}
+
 	for (i = 0; i < partdesc->nparts; i++)
 	{
 		Oid			childOID = partdesc->oids[i];
@@ -1708,15 +1724,13 @@ expand_partitioned_rtentry(PlannerInfo *root, RangeTblEntry *parentrte,
 		/* Open rel; we already have required locks */
 		childrel = heap_open(childOID, NoLock);
 
-		/* As in expand_inherited_rtentry, skip non-local temp tables */
+		/*
+		 * Temporary partitions belonging to other sessions should have been
+		 * disallowed at definition, but for paranoia's sake, let's double
+		 * check.
+		 */
 		if (RELATION_IS_OTHER_TEMP(childrel))
-		{
-			heap_close(childrel, lockmode);
-			continue;
-		}
-
-		/* We have a real partition. */
-		has_child = true;
+			elog(ERROR, "temporary relation from another session found as partition");
 
 		expand_single_inheritance_child(root, parentrte, parentRTindex,
 										parentrel, top_parentrc, childrel,
@@ -1731,14 +1745,6 @@ expand_partitioned_rtentry(PlannerInfo *root, RangeTblEntry *parentrte,
 		/* Close child relation, but keep locks */
 		heap_close(childrel, NoLock);
 	}
-
-	/*
-	 * If the partitioned table has no partitions or all the partitions are
-	 * temporary tables from other backends, treat this as non-inheritance
-	 * case.
-	 */
-	if (!has_child)
-		parentrte->inh = false;
 }
 
 /*
@@ -2616,29 +2622,22 @@ build_child_join_sjinfo(PlannerInfo *root, SpecialJoinInfo *parent_sjinfo,
 AppendRelInfo **
 find_appinfos_by_relids(PlannerInfo *root, Relids relids, int *nappinfos)
 {
-	ListCell   *lc;
 	AppendRelInfo **appinfos;
 	int			cnt = 0;
+	int			i;
 
 	*nappinfos = bms_num_members(relids);
 	appinfos = (AppendRelInfo **) palloc(sizeof(AppendRelInfo *) * *nappinfos);
 
-	foreach(lc, root->append_rel_list)
+	i = -1;
+	while ((i = bms_next_member(relids, i)) >= 0)
 	{
-		AppendRelInfo *appinfo = lfirst(lc);
+		AppendRelInfo *appinfo = root->append_rel_array[i];
 
-		if (bms_is_member(appinfo->child_relid, relids))
-		{
-			appinfos[cnt] = appinfo;
-			cnt++;
+		if (!appinfo)
+			elog(ERROR, "child rel %d not found in append_rel_array", i);
 
-			/* Stop when we have gathered all the AppendRelInfos. */
-			if (cnt == *nappinfos)
-				return appinfos;
-		}
+		appinfos[cnt++] = appinfo;
 	}
-
-	/* Should have found the entries ... */
-	elog(ERROR, "did not find all requested child rels in append_rel_list");
-	return NULL;				/* not reached */
+	return appinfos;
 }

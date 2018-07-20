@@ -963,10 +963,10 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 			/*
 			 * We need attr_needed data for building targetlist of a join
 			 * relation representing join between matching partitions for
-			 * partitionwise join. A given attribute of a child will be
-			 * needed in the same highest joinrel where the corresponding
-			 * attribute of parent is needed. Hence it suffices to use the
-			 * same Relids set for parent and child.
+			 * partitionwise join. A given attribute of a child will be needed
+			 * in the same highest joinrel where the corresponding attribute
+			 * of parent is needed. Hence it suffices to use the same Relids
+			 * set for parent and child.
 			 */
 			for (attno = rel->min_attr; attno <= rel->max_attr; attno++)
 			{
@@ -1383,13 +1383,16 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 	List	   *pa_partial_subpaths = NIL;
 	List	   *pa_nonpartial_subpaths = NIL;
 	bool		partial_subpaths_valid = true;
-	bool		pa_subpaths_valid = enable_parallel_append;
+	bool		pa_subpaths_valid;
 	List	   *all_child_pathkeys = NIL;
 	List	   *all_child_outers = NIL;
 	ListCell   *l;
 	List	   *partitioned_rels = NIL;
 	bool		build_partitioned_rels = false;
 	double		partial_rows = -1;
+
+	/* If appropriate, consider parallel append */
+	pa_subpaths_valid = enable_parallel_append && rel->consider_parallel;
 
 	/*
 	 * AppendPath generated for partitioned tables must record the RT indexes
@@ -1451,7 +1454,8 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 
 		/*
 		 * If we need to build partitioned_rels, accumulate the partitioned
-		 * rels for this child.
+		 * rels for this child.  We must ensure that parents are always listed
+		 * before their child partitioned tables.
 		 */
 		if (build_partitioned_rels)
 		{
@@ -2243,26 +2247,31 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 										  pathkeys, required_outer));
 	}
 
-	/* If consider_parallel is false, there should be no partial paths. */
-	Assert(sub_final_rel->consider_parallel ||
-		   sub_final_rel->partial_pathlist == NIL);
-
-	/* Same for partial paths. */
-	foreach(lc, sub_final_rel->partial_pathlist)
+	/* If outer rel allows parallelism, do same for partial paths. */
+	if (rel->consider_parallel && bms_is_empty(required_outer))
 	{
-		Path	   *subpath = (Path *) lfirst(lc);
-		List	   *pathkeys;
+		/* If consider_parallel is false, there should be no partial paths. */
+		Assert(sub_final_rel->consider_parallel ||
+			   sub_final_rel->partial_pathlist == NIL);
 
-		/* Convert subpath's pathkeys to outer representation */
-		pathkeys = convert_subquery_pathkeys(root,
-											 rel,
-											 subpath->pathkeys,
-											 make_tlist_from_pathtarget(subpath->pathtarget));
+		/* Same for partial paths. */
+		foreach(lc, sub_final_rel->partial_pathlist)
+		{
+			Path	   *subpath = (Path *) lfirst(lc);
+			List	   *pathkeys;
 
-		/* Generate outer path using this subpath */
-		add_partial_path(rel, (Path *)
-						 create_subqueryscan_path(root, rel, subpath,
-												  pathkeys, required_outer));
+			/* Convert subpath's pathkeys to outer representation */
+			pathkeys = convert_subquery_pathkeys(root,
+												 rel,
+												 subpath->pathkeys,
+												 make_tlist_from_pathtarget(subpath->pathtarget));
+
+			/* Generate outer path using this subpath */
+			add_partial_path(rel, (Path *)
+							 create_subqueryscan_path(root, rel, subpath,
+													  pathkeys,
+													  required_outer));
+		}
 	}
 }
 
@@ -2737,11 +2746,10 @@ standard_join_search(PlannerInfo *root, int levels_needed, List *initial_rels)
 		join_search_one_level(root, lev);
 
 		/*
-		 * Run generate_partitionwise_join_paths() and
-		 * generate_gather_paths() for each just-processed joinrel.  We could
-		 * not do this earlier because both regular and partial paths can get
-		 * added to a particular joinrel at multiple times within
-		 * join_search_one_level.
+		 * Run generate_partitionwise_join_paths() and generate_gather_paths()
+		 * for each just-processed joinrel.  We could not do this earlier
+		 * because both regular and partial paths can get added to a
+		 * particular joinrel at multiple times within join_search_one_level.
 		 *
 		 * After that, we're done creating paths for the joinrel, so run
 		 * set_cheapest().

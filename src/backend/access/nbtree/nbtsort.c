@@ -14,15 +14,6 @@
  * its parent level.  When we have only one page on a level, it must be
  * the root -- it can be attached to the btree metapage and we are done.
  *
- * This code is moderately slow (~10% slower) compared to the regular
- * btree (insertion) build code on sorted or well-clustered data.  On
- * random data, however, the insertion build code is unusable -- the
- * difference on a 60MB heap is a factor of 15 because the random
- * probes into the btree thrash the buffer pool.  (NOTE: the above
- * "10%" estimate is probably obsolete, since it refers to an old and
- * not very good external sort implementation that used to exist in
- * this module.  tuplesort.c is almost certainly faster.)
- *
  * It is not wise to pack the pages entirely full, since then *any*
  * insertion would cause a split (and not only of the leaf page; the need
  * for a split would cascade right up the tree).  The steady-state load
@@ -897,10 +888,10 @@ _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
 			/*
 			 * Truncate any non-key attributes from high key on leaf level
 			 * (i.e. truncate on leaf level if we're building an INCLUDE
-			 * index).  This is only done at the leaf level because
-			 * downlinks in internal pages are either negative infinity
-			 * items, or get their contents from copying from one level
-			 * down.  See also: _bt_split().
+			 * index).  This is only done at the leaf level because downlinks
+			 * in internal pages are either negative infinity items, or get
+			 * their contents from copying from one level down.  See also:
+			 * _bt_split().
 			 *
 			 * Since the truncated tuple is probably smaller than the
 			 * original, it cannot just be copied in place (besides, we want
@@ -908,11 +899,11 @@ _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
 			 * original high key, and add our own truncated high key at the
 			 * same offset.
 			 *
-			 * Note that the page layout won't be changed very much.  oitup
-			 * is already located at the physical beginning of tuple space,
-			 * so we only shift the line pointer array back and forth, and
-			 * overwrite the latter portion of the space occupied by the
-			 * original tuple.  This is fairly cheap.
+			 * Note that the page layout won't be changed very much.  oitup is
+			 * already located at the physical beginning of tuple space, so we
+			 * only shift the line pointer array back and forth, and overwrite
+			 * the latter portion of the space occupied by the original tuple.
+			 * This is fairly cheap.
 			 */
 			truncated = _bt_nonkey_truncate(wstate->index, oitup);
 			truncsz = IndexTupleSize(truncated);
@@ -934,7 +925,10 @@ _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
 			state->btps_next = _bt_pagestate(wstate, state->btps_level + 1);
 
 		Assert(BTreeTupleGetNAtts(state->btps_minkey, wstate->index) ==
-			   IndexRelationGetNumberOfKeyAttributes(wstate->index));
+			   IndexRelationGetNumberOfKeyAttributes(wstate->index) ||
+			   P_LEFTMOST(opageop));
+		Assert(BTreeTupleGetNAtts(state->btps_minkey, wstate->index) == 0 ||
+			   !P_LEFTMOST(opageop));
 		BTreeInnerTupleSetDownLink(state->btps_minkey, oblkno);
 		_bt_buildadd(wstate, state->btps_next, state->btps_minkey);
 		pfree(state->btps_minkey);
@@ -974,24 +968,16 @@ _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
 	 * If the new item is the first for its page, stash a copy for later. Note
 	 * this will only happen for the first item on a level; on later pages,
 	 * the first item for a page is copied from the prior page in the code
-	 * above.
+	 * above.  Since the minimum key for an entire level is only used as a
+	 * minus infinity downlink, and never as a high key, there is no need to
+	 * truncate away non-key attributes at this point.
 	 */
 	if (last_off == P_HIKEY)
 	{
-		BTPageOpaque	npageop;
-
 		Assert(state->btps_minkey == NULL);
-
-		npageop = (BTPageOpaque) PageGetSpecialPointer(npage);
-
-		/*
-		 * Truncate included attributes of the tuple that we're going to
-		 * insert into the parent page as a downlink
-		 */
-		if (indnkeyatts != indnatts && P_ISLEAF(npageop))
-			state->btps_minkey = _bt_nonkey_truncate(wstate->index, itup);
-		else
-			state->btps_minkey = CopyIndexTuple(itup);
+		state->btps_minkey = CopyIndexTuple(itup);
+		/* _bt_sortaddtup() will perform full truncation later */
+		BTreeTupleSetNAtts(state->btps_minkey, 0);
 	}
 
 	/*
@@ -1044,7 +1030,10 @@ _bt_uppershutdown(BTWriteState *wstate, BTPageState *state)
 		else
 		{
 			Assert(BTreeTupleGetNAtts(s->btps_minkey, wstate->index) ==
-				   IndexRelationGetNumberOfKeyAttributes(wstate->index));
+				   IndexRelationGetNumberOfKeyAttributes(wstate->index) ||
+				   P_LEFTMOST(opaque));
+			Assert(BTreeTupleGetNAtts(s->btps_minkey, wstate->index) == 0 ||
+				   !P_LEFTMOST(opaque));
 			BTreeInnerTupleSetDownLink(s->btps_minkey, blkno);
 			_bt_buildadd(wstate, s->btps_next, s->btps_minkey);
 			pfree(s->btps_minkey);

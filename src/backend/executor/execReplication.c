@@ -202,6 +202,7 @@ retry:
 				goto retry;
 			case HeapTupleInvisible:
 				elog(ERROR, "attempted to lock invisible tuple");
+				break;
 			default:
 				elog(ERROR, "unexpected heap_lock_tuple status: %u", res);
 				break;
@@ -365,6 +366,7 @@ retry:
 				goto retry;
 			case HeapTupleInvisible:
 				elog(ERROR, "attempted to lock invisible tuple");
+				break;
 			default:
 				elog(ERROR, "unexpected heap_lock_tuple status: %u", res);
 				break;
@@ -411,9 +413,11 @@ ExecSimpleRelationInsert(EState *estate, TupleTableSlot *slot)
 
 		/* Check the constraints of the tuple */
 		if (rel->rd_att->constr)
-			ExecConstraints(resultRelInfo, slot, estate, true);
+			ExecConstraints(resultRelInfo, slot, estate);
+		if (resultRelInfo->ri_PartitionCheck)
+			ExecPartitionCheck(resultRelInfo, slot, estate, true);
 
-		/* Store the slot into tuple that we can inspect. */
+		/* Materialize slot into a tuple that we can scribble upon. */
 		tuple = ExecMaterializeSlot(slot);
 
 		/* OK, store the tuple and create index entries for it */
@@ -476,9 +480,11 @@ ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate,
 
 		/* Check the constraints of the tuple */
 		if (rel->rd_att->constr)
-			ExecConstraints(resultRelInfo, slot, estate, true);
+			ExecConstraints(resultRelInfo, slot, estate);
+		if (resultRelInfo->ri_PartitionCheck)
+			ExecPartitionCheck(resultRelInfo, slot, estate, true);
 
-		/* Store the slot into tuple that we can write. */
+		/* Materialize slot into a tuple that we can scribble upon. */
 		tuple = ExecMaterializeSlot(slot);
 
 		/* OK, update the tuple and index entries for it */

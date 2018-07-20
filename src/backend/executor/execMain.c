@@ -869,7 +869,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 		/*
 		 * In the partitioned result relation case, lock the non-leaf result
 		 * relations too.  A subset of these are the roots of respective
-		 * partitioned tables, for which we also allocate ResulRelInfos.
+		 * partitioned tables, for which we also allocate ResultRelInfos.
 		 */
 		estate->es_root_result_relations = NULL;
 		estate->es_num_root_result_relations = 0;
@@ -1417,6 +1417,7 @@ ExecGetTriggerResultRel(EState *estate, Oid relid)
 		rInfo++;
 		nr--;
 	}
+
 	/*
 	 * Third, search through the result relations that were created during
 	 * tuple routing, if any.
@@ -1855,14 +1856,16 @@ ExecRelCheck(ResultRelInfo *resultRelInfo,
 /*
  * ExecPartitionCheck --- check that tuple meets the partition constraint.
  *
- * Exported in executor.h for outside use.
- * Returns true if it meets the partition constraint, else returns false.
+ * Returns true if it meets the partition constraint.  If the constraint
+ * fails and we're asked to emit to error, do so and don't return; otherwise
+ * return false.
  */
 bool
 ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
-				   EState *estate)
+				   EState *estate, bool emitError)
 {
 	ExprContext *econtext;
+	bool		success;
 
 	/*
 	 * If first time through, build expression state tree for the partition
@@ -1889,7 +1892,13 @@ ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 	 * As in case of the catalogued constraints, we treat a NULL result as
 	 * success here, not a failure.
 	 */
-	return ExecCheck(resultRelInfo->ri_PartitionCheckExpr, econtext);
+	success = ExecCheck(resultRelInfo->ri_PartitionCheckExpr, econtext);
+
+	/* if asked to emit error, don't actually return on failure */
+	if (!success && emitError)
+		ExecPartitionCheckEmitError(resultRelInfo, slot, estate);
+
+	return success;
 }
 
 /*
@@ -1950,17 +1959,17 @@ ExecPartitionCheckEmitError(ResultRelInfo *resultRelInfo,
 /*
  * ExecConstraints - check constraints of the tuple in 'slot'
  *
- * This checks the traditional NOT NULL and check constraints, and if
- * requested, checks the partition constraint.
+ * This checks the traditional NOT NULL and check constraints.
+ *
+ * The partition constraint is *NOT* checked.
  *
  * Note: 'slot' contains the tuple to check the constraints of, which may
  * have been converted from the original input tuple after tuple routing.
- * 'resultRelInfo' is the original result relation, before tuple routing.
+ * 'resultRelInfo' is the final result relation, after tuple routing.
  */
 void
 ExecConstraints(ResultRelInfo *resultRelInfo,
-				TupleTableSlot *slot, EState *estate,
-				bool check_partition_constraint)
+				TupleTableSlot *slot, EState *estate)
 {
 	Relation	rel = resultRelInfo->ri_RelationDesc;
 	TupleDesc	tupdesc = RelationGetDescr(rel);
@@ -2075,12 +2084,7 @@ ExecConstraints(ResultRelInfo *resultRelInfo,
 					 errtableconstraint(orig_rel, failed)));
 		}
 	}
-
-	if (check_partition_constraint && resultRelInfo->ri_PartitionCheck &&
-		!ExecPartitionCheck(resultRelInfo, slot, estate))
-		ExecPartitionCheckEmitError(resultRelInfo, slot, estate);
 }
-
 
 /*
  * ExecWithCheckOptions -- check that tuple satisfies any WITH CHECK OPTIONs
@@ -2740,6 +2744,7 @@ EvalPlanQualFetch(EState *estate, Relation relation, int lockmode,
 
 				case HeapTupleInvisible:
 					elog(ERROR, "attempted to lock invisible tuple");
+					break;
 
 				default:
 					ReleaseBuffer(buffer);

@@ -216,12 +216,12 @@ static const struct config_enum_entry bytea_output_options[] = {
  * they sort slightly different (see "log" level)
  */
 static const struct config_enum_entry client_message_level_options[] = {
-	{"debug", DEBUG2, true},
 	{"debug5", DEBUG5, false},
 	{"debug4", DEBUG4, false},
 	{"debug3", DEBUG3, false},
 	{"debug2", DEBUG2, false},
 	{"debug1", DEBUG1, false},
+	{"debug", DEBUG2, true},
 	{"log", LOG, false},
 	{"info", INFO, true},
 	{"notice", NOTICE, false},
@@ -233,12 +233,12 @@ static const struct config_enum_entry client_message_level_options[] = {
 };
 
 static const struct config_enum_entry server_message_level_options[] = {
-	{"debug", DEBUG2, true},
 	{"debug5", DEBUG5, false},
 	{"debug4", DEBUG4, false},
 	{"debug3", DEBUG3, false},
 	{"debug2", DEBUG2, false},
 	{"debug1", DEBUG1, false},
+	{"debug", DEBUG2, true},
 	{"info", INFO, false},
 	{"notice", NOTICE, false},
 	{"warning", WARNING, false},
@@ -705,7 +705,7 @@ typedef struct
 	char		unit[MAX_UNIT_LEN + 1]; /* unit, as a string, like "kB" or
 										 * "min" */
 	int			base_unit;		/* GUC_UNIT_XXX */
-	int			multiplier;		/* If positive, multiply the value with this
+	int64		multiplier;		/* If positive, multiply the value with this
 								 * for unit -> base_unit conversion.  If
 								 * negative, divide (with the absolute value) */
 } unit_conversion;
@@ -718,10 +718,16 @@ typedef struct
 #error XLOG_BLCKSZ must be between 1KB and 1MB
 #endif
 
-static const char *memory_units_hint = gettext_noop("Valid units for this parameter are \"kB\", \"MB\", \"GB\", and \"TB\".");
+static const char *memory_units_hint = gettext_noop("Valid units for this parameter are \"B\", \"kB\", \"MB\", \"GB\", and \"TB\".");
 
 static const unit_conversion memory_unit_conversion_table[] =
 {
+	/*
+	 * TB -> bytes conversion always overflows 32-bit integer, so this always
+	 * produces an error.  Include it nevertheless for completeness, and so
+	 * that you get an "out of range" error, rather than "invalid unit".
+	 */
+	{"TB", GUC_UNIT_BYTE, INT64CONST(1024) * 1024 * 1024 * 1024},
 	{"GB", GUC_UNIT_BYTE, 1024 * 1024 * 1024},
 	{"MB", GUC_UNIT_BYTE, 1024 * 1024},
 	{"kB", GUC_UNIT_BYTE, 1024},
@@ -731,21 +737,25 @@ static const unit_conversion memory_unit_conversion_table[] =
 	{"GB", GUC_UNIT_KB, 1024 * 1024},
 	{"MB", GUC_UNIT_KB, 1024},
 	{"kB", GUC_UNIT_KB, 1},
+	{"B", GUC_UNIT_KB, -1024},
 
 	{"TB", GUC_UNIT_MB, 1024 * 1024},
 	{"GB", GUC_UNIT_MB, 1024},
 	{"MB", GUC_UNIT_MB, 1},
 	{"kB", GUC_UNIT_MB, -1024},
+	{"B", GUC_UNIT_MB, -(1024 * 1024)},
 
 	{"TB", GUC_UNIT_BLOCKS, (1024 * 1024 * 1024) / (BLCKSZ / 1024)},
 	{"GB", GUC_UNIT_BLOCKS, (1024 * 1024) / (BLCKSZ / 1024)},
 	{"MB", GUC_UNIT_BLOCKS, 1024 / (BLCKSZ / 1024)},
 	{"kB", GUC_UNIT_BLOCKS, -(BLCKSZ / 1024)},
+	{"B", GUC_UNIT_BLOCKS, -BLCKSZ},
 
 	{"TB", GUC_UNIT_XBLOCKS, (1024 * 1024 * 1024) / (XLOG_BLCKSZ / 1024)},
 	{"GB", GUC_UNIT_XBLOCKS, (1024 * 1024) / (XLOG_BLCKSZ / 1024)},
 	{"MB", GUC_UNIT_XBLOCKS, 1024 / (XLOG_BLCKSZ / 1024)},
 	{"kB", GUC_UNIT_XBLOCKS, -(XLOG_BLCKSZ / 1024)},
+	{"B", GUC_UNIT_XBLOCKS, -XLOG_BLCKSZ},
 
 	{""}						/* end of table marker */
 };
@@ -1754,6 +1764,7 @@ static struct config_bool ConfigureNamesBool[] =
 		},
 		&jit_debugging_support,
 		false,
+
 		/*
 		 * This is not guaranteed to be available, but given it's a developer
 		 * oriented option, it doesn't seem worth adding code checking
@@ -1792,6 +1803,7 @@ static struct config_bool ConfigureNamesBool[] =
 		},
 		&jit_profiling_support,
 		false,
+
 		/*
 		 * This is not guaranteed to be available, but given it's a developer
 		 * oriented option, it doesn't seem worth adding code checking
@@ -3236,12 +3248,12 @@ static struct config_real ConfigureNamesReal[] =
 	},
 
 	{
-		{"vacuum_cleanup_index_scale_factor", PGC_SIGHUP, AUTOVACUUM,
+		{"vacuum_cleanup_index_scale_factor", PGC_USERSET, CLIENT_CONN_STATEMENT,
 			gettext_noop("Number of tuple inserts prior to index cleanup as a fraction of reltuples."),
 			NULL
 		},
 		&vacuum_cleanup_index_scale_factor,
-		0.1, 0.0, 100.0,
+		0.1, 0.0, 1e10,
 		NULL, NULL, NULL
 	},
 
@@ -5389,6 +5401,7 @@ AtEOXact_GUC(bool isCommit, int nestLevel)
 				{
 					case GUC_SAVE:
 						Assert(false);	/* can't get here */
+						break;
 
 					case GUC_SET:
 						/* next level always becomes SET */
@@ -6255,7 +6268,8 @@ set_config_option(const char *name, const char *value,
 								name)));
 				return 0;
 			}
-			/* FALL THRU to process the same as PGC_BACKEND */
+			/* fall through to process the same as PGC_BACKEND */
+			/* FALLTHROUGH */
 		case PGC_BACKEND:
 			if (context == PGC_SIGHUP)
 			{
@@ -6916,15 +6930,15 @@ SetConfigOption(const char *name, const char *value,
  * this cannot be distinguished from a string variable with a NULL value!),
  * otherwise throw an ereport and don't return.
  *
- * If restrict_superuser is true, we also enforce that only superusers can
- * see GUC_SUPERUSER_ONLY variables.  This should only be passed as true
- * in user-driven calls.
+ * If restrict_privileged is true, we also enforce that only superusers and
+ * members of the pg_read_all_settings role can see GUC_SUPERUSER_ONLY
+ * variables.  This should only be passed as true in user-driven calls.
  *
  * The string is *not* allocated for modification and is really only
  * valid until the next call to configuration related functions.
  */
 const char *
-GetConfigOption(const char *name, bool missing_ok, bool restrict_superuser)
+GetConfigOption(const char *name, bool missing_ok, bool restrict_privileged)
 {
 	struct config_generic *record;
 	static char buffer[256];
@@ -6939,7 +6953,7 @@ GetConfigOption(const char *name, bool missing_ok, bool restrict_superuser)
 				 errmsg("unrecognized configuration parameter \"%s\"",
 						name)));
 	}
-	if (restrict_superuser &&
+	if (restrict_privileged &&
 		(record->flags & GUC_SUPERUSER_ONLY) &&
 		!is_member_of_role(GetUserId(), DEFAULT_ROLE_READ_ALL_SETTINGS))
 		ereport(ERROR,
@@ -8228,7 +8242,6 @@ ShowGUCConfigOption(const char *name, DestReceiver *dest)
 static void
 ShowAllGUCConfig(DestReceiver *dest)
 {
-	bool		am_superuser = superuser();
 	int			i;
 	TupOutputState *tstate;
 	TupleDesc	tupdesc;
@@ -8253,7 +8266,8 @@ ShowAllGUCConfig(DestReceiver *dest)
 		char	   *setting;
 
 		if ((conf->flags & GUC_NO_SHOW_ALL) ||
-			((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser))
+			((conf->flags & GUC_SUPERUSER_ONLY) &&
+			 !is_member_of_role(GetUserId(), DEFAULT_ROLE_READ_ALL_SETTINGS)))
 			continue;
 
 		/* assign to the values array */
@@ -8579,9 +8593,10 @@ GetConfigOptionByNum(int varnum, const char **values, bool *noshow)
 	/*
 	 * If the setting came from a config file, set the source location. For
 	 * security reasons, we don't show source file/line number for
-	 * non-superusers.
+	 * insufficiently-privileged users.
 	 */
-	if (conf->source == PGC_S_FILE && superuser())
+	if (conf->source == PGC_S_FILE &&
+		is_member_of_role(GetUserId(), DEFAULT_ROLE_READ_ALL_SETTINGS))
 	{
 		values[14] = conf->sourcefile;
 		snprintf(buffer, sizeof(buffer), "%d", conf->sourceline);
@@ -9606,6 +9621,8 @@ RestoreGUCState(void *gucstate)
 		if (varsourcefile[0])
 			read_gucstate_binary(&srcptr, srcend,
 								 &varsourceline, sizeof(varsourceline));
+		else
+			varsourceline = 0;
 		read_gucstate_binary(&srcptr, srcend,
 							 &varsource, sizeof(varsource));
 		read_gucstate_binary(&srcptr, srcend,

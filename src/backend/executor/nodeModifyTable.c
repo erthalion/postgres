@@ -365,16 +365,6 @@ ExecInsert(ModifyTableState *mtstate,
 	else
 	{
 		WCOKind		wco_kind;
-		bool		check_partition_constr;
-
-		/*
-		 * We always check the partition constraint, including when the tuple
-		 * got here via tuple-routing.  However we don't need to in the latter
-		 * case if no BR trigger is defined on the partition.  Note that a BR
-		 * trigger might modify the tuple such that the partition constraint
-		 * is no longer satisfied, so we need to check in that case.
-		 */
-		check_partition_constr = (resultRelInfo->ri_PartitionCheck != NIL);
 
 		/*
 		 * Constraints might reference the tableoid column, so initialize
@@ -402,17 +392,21 @@ ExecInsert(ModifyTableState *mtstate,
 			ExecWithCheckOptions(wco_kind, resultRelInfo, slot, estate);
 
 		/*
-		 * No need though if the tuple has been routed, and a BR trigger
-		 * doesn't exist.
+		 * Check the constraints of the tuple.
 		 */
-		if (resultRelInfo->ri_PartitionRoot != NULL &&
-			!(resultRelInfo->ri_TrigDesc &&
-			  resultRelInfo->ri_TrigDesc->trig_insert_before_row))
-			check_partition_constr = false;
+		if (resultRelationDesc->rd_att->constr)
+			ExecConstraints(resultRelInfo, slot, estate);
 
-		/* Check the constraints of the tuple */
-		if (resultRelationDesc->rd_att->constr || check_partition_constr)
-			ExecConstraints(resultRelInfo, slot, estate, true);
+		/*
+		 * Also check the tuple against the partition constraint, if there is
+		 * one; except that if we got here via tuple-routing, we don't need to
+		 * if there's no BR trigger defined on the partition.
+		 */
+		if (resultRelInfo->ri_PartitionCheck &&
+			(resultRelInfo->ri_PartitionRoot == NULL ||
+			 (resultRelInfo->ri_TrigDesc &&
+			  resultRelInfo->ri_TrigDesc->trig_insert_before_row)))
+			ExecPartitionCheck(resultRelInfo, slot, estate, true);
 
 		if (onconflict != ONCONFLICT_NONE && resultRelInfo->ri_NumIndices > 0)
 		{
@@ -1037,7 +1031,7 @@ lreplace:;
 		 */
 		partition_constraint_failed =
 			resultRelInfo->ri_PartitionCheck &&
-			!ExecPartitionCheck(resultRelInfo, slot, estate);
+			!ExecPartitionCheck(resultRelInfo, slot, estate, false);
 
 		if (!partition_constraint_failed &&
 			resultRelInfo->ri_WithCheckOptions != NIL)
@@ -1088,7 +1082,7 @@ lreplace:;
 			 */
 			ExecDelete(mtstate, tupleid, oldtuple, planSlot, epqstate,
 					   estate, &tuple_deleted, false,
-					   false /* canSetTag */, true /* changingPart */);
+					   false /* canSetTag */ , true /* changingPart */ );
 
 			/*
 			 * For some reason if DELETE didn't happen (e.g. trigger prevented
@@ -1162,16 +1156,13 @@ lreplace:;
 		}
 
 		/*
-		 * Check the constraints of the tuple.  Note that we pass the same
-		 * slot for the orig_slot argument, because unlike ExecInsert(), no
-		 * tuple-routing is performed here, hence the slot remains unchanged.
-		 * We've already checked the partition constraint above; however, we
-		 * must still ensure the tuple passes all other constraints, so we
-		 * will call ExecConstraints() and have it validate all remaining
-		 * checks.
+		 * Check the constraints of the tuple.  We've already checked the
+		 * partition constraint above; however, we must still ensure the tuple
+		 * passes all other constraints, so we will call ExecConstraints() and
+		 * have it validate all remaining checks.
 		 */
 		if (resultRelationDesc->rd_att->constr)
-			ExecConstraints(resultRelInfo, slot, estate, false);
+			ExecConstraints(resultRelInfo, slot, estate);
 
 		/*
 		 * replace the heap tuple
@@ -1390,6 +1381,7 @@ ExecOnConflictUpdate(ModifyTableState *mtstate,
 
 			/* This shouldn't happen */
 			elog(ERROR, "attempted to lock invisible tuple");
+			break;
 
 		case HeapTupleSelfUpdated:
 
@@ -1399,6 +1391,7 @@ ExecOnConflictUpdate(ModifyTableState *mtstate,
 			 * seen this row to conflict with.
 			 */
 			elog(ERROR, "unexpected self-updated tuple");
+			break;
 
 		case HeapTupleUpdated:
 			if (IsolationUsesXactSnapshot())
@@ -1678,8 +1671,8 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
 	HeapTuple	tuple;
 
 	/*
-	 * Determine the target partition.  If ExecFindPartition does not find
-	 * a partition after all, it doesn't return here; otherwise, the returned
+	 * Determine the target partition.  If ExecFindPartition does not find a
+	 * partition after all, it doesn't return here; otherwise, the returned
 	 * value is to be used as an index into the arrays for the ResultRelInfo
 	 * and TupleConversionMap for the partition.
 	 */
@@ -1700,20 +1693,24 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
 										partidx);
 
 	/*
-	 * Set up information needed for routing tuples to the partition if we
-	 * didn't yet (ExecInitRoutingInfo would abort the operation if the
-	 * partition isn't routable).
+	 * Check whether the partition is routable if we didn't yet
 	 *
 	 * Note: an UPDATE of a partition key invokes an INSERT that moves the
-	 * tuple to a new partition.  This setup would be needed for a subplan
+	 * tuple to a new partition.  This check would be applied to a subplan
 	 * partition of such an UPDATE that is chosen as the partition to route
-	 * the tuple to.  The reason we do this setup here rather than in
+	 * the tuple to.  The reason we do this check here rather than in
 	 * ExecSetupPartitionTupleRouting is to avoid aborting such an UPDATE
 	 * unnecessarily due to non-routable subplan partitions that may not be
 	 * chosen for update tuple movement after all.
 	 */
 	if (!partrel->ri_PartitionReadyForRouting)
+	{
+		/* Verify the partition is a valid target for INSERT. */
+		CheckValidResultRel(partrel, CMD_INSERT);
+
+		/* Set up information needed for routing tuples to the partition. */
 		ExecInitRoutingInfo(mtstate, estate, proute, partrel, partidx);
+	}
 
 	/*
 	 * Make it look like we are inserting into the partition.
@@ -2140,7 +2137,7 @@ ExecModifyTable(PlanState *pstate)
 				slot = ExecDelete(node, tupleid, oldtuple, planSlot,
 								  &node->mt_epqstate, estate,
 								  NULL, true, node->canSetTag,
-								  false /* changingPart */);
+								  false /* changingPart */ );
 				break;
 			default:
 				elog(ERROR, "unknown operation");
@@ -2310,7 +2307,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
 		(operation == CMD_INSERT || update_tuple_routing_needed))
 		mtstate->mt_partition_tuple_routing =
-						ExecSetupPartitionTupleRouting(mtstate, rel);
+			ExecSetupPartitionTupleRouting(mtstate, rel);
 
 	/*
 	 * Build state for collecting transition tuples.  This requires having a

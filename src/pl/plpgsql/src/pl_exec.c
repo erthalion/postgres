@@ -20,6 +20,7 @@
 #include "access/htup_details.h"
 #include "access/transam.h"
 #include "access/tupconvert.h"
+#include "access/tuptoaster.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -258,7 +259,7 @@ static int exec_stmt_assign(PLpgSQL_execstate *estate,
 static int exec_stmt_perform(PLpgSQL_execstate *estate,
 				  PLpgSQL_stmt_perform *stmt);
 static int exec_stmt_call(PLpgSQL_execstate *estate,
-				  PLpgSQL_stmt_call *stmt);
+			   PLpgSQL_stmt_call *stmt);
 static int exec_stmt_getdiag(PLpgSQL_execstate *estate,
 				  PLpgSQL_stmt_getdiag *stmt);
 static int exec_stmt_if(PLpgSQL_execstate *estate,
@@ -306,7 +307,7 @@ static int exec_stmt_commit(PLpgSQL_execstate *estate,
 static int exec_stmt_rollback(PLpgSQL_execstate *estate,
 				   PLpgSQL_stmt_rollback *stmt);
 static int exec_stmt_set(PLpgSQL_execstate *estate,
-				   PLpgSQL_stmt_set *stmt);
+			  PLpgSQL_stmt_set *stmt);
 
 static void plpgsql_estate_setup(PLpgSQL_execstate *estate,
 					 PLpgSQL_function *func,
@@ -315,8 +316,8 @@ static void plpgsql_estate_setup(PLpgSQL_execstate *estate,
 static void exec_eval_cleanup(PLpgSQL_execstate *estate);
 
 static void exec_prepare_plan(PLpgSQL_execstate *estate,
-							  PLpgSQL_expr *expr, int cursorOptions,
-							  bool keepplan);
+				  PLpgSQL_expr *expr, int cursorOptions,
+				  bool keepplan);
 static void exec_simple_check_plan(PLpgSQL_execstate *estate, PLpgSQL_expr *expr);
 static void exec_save_simple_expr(PLpgSQL_expr *expr, CachedPlan *cplan);
 static void exec_check_rw_parameter(PLpgSQL_expr *expr, int target_dno);
@@ -912,16 +913,20 @@ plpgsql_exec_trigger(PLpgSQL_function *func,
 	}
 	else if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
 	{
-		expanded_record_set_tuple(rec_new->erh, trigdata->tg_trigtuple, false);
+		expanded_record_set_tuple(rec_new->erh, trigdata->tg_trigtuple,
+								  false, false);
 	}
 	else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
 	{
-		expanded_record_set_tuple(rec_new->erh, trigdata->tg_newtuple, false);
-		expanded_record_set_tuple(rec_old->erh, trigdata->tg_trigtuple, false);
+		expanded_record_set_tuple(rec_new->erh, trigdata->tg_newtuple,
+								  false, false);
+		expanded_record_set_tuple(rec_old->erh, trigdata->tg_trigtuple,
+								  false, false);
 	}
 	else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event))
 	{
-		expanded_record_set_tuple(rec_old->erh, trigdata->tg_trigtuple, false);
+		expanded_record_set_tuple(rec_old->erh, trigdata->tg_trigtuple,
+								  false, false);
 	}
 	else
 		elog(ERROR, "unrecognized trigger action: not INSERT, DELETE, or UPDATE");
@@ -2070,6 +2075,7 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 	ParamListInfo paramLI;
 	LocalTransactionId before_lxid;
 	LocalTransactionId after_lxid;
+	bool		pushed_active_snap = false;
 	int			rc;
 
 	if (expr->plan == NULL)
@@ -2085,6 +2091,7 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 		/*
 		 * The procedure call could end transactions, which would upset the
 		 * snapshot management in SPI_execute*, so don't let it do it.
+		 * Instead, we set the snapshots ourselves below.
 		 */
 		expr->plan->no_snapshots = true;
 	}
@@ -2092,6 +2099,16 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 	paramLI = setup_param_list(estate, expr);
 
 	before_lxid = MyProc->lxid;
+
+	/*
+	 * Set snapshot only for non-read-only procedures, similar to SPI
+	 * behavior.
+	 */
+	if (!estate->readonly_func)
+	{
+		PushActiveSnapshot(GetTransactionSnapshot());
+		pushed_active_snap = true;
+	}
 
 	PG_TRY();
 	{
@@ -2121,12 +2138,22 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 		elog(ERROR, "SPI_execute_plan_with_paramlist failed executing query \"%s\": %s",
 			 expr->query, SPI_result_code_string(rc));
 
-	/*
-	 * If we are in a new transaction after the call, we need to reset some
-	 * internal state.
-	 */
-	if (before_lxid != after_lxid)
+	if (before_lxid == after_lxid)
 	{
+		/*
+		 * If we are still in the same transaction after the call, pop the
+		 * snapshot that we might have pushed.  (If it's a new transaction,
+		 * then all the snapshots are gone already.)
+		 */
+		if (pushed_active_snap)
+			PopActiveSnapshot();
+	}
+	else
+	{
+		/*
+		 * If we are in a new transaction after the call, we need to reset
+		 * some internal state.
+		 */
 		estate->simple_eval_estate = NULL;
 		plpgsql_create_econtext(estate);
 	}
@@ -2183,9 +2210,9 @@ exec_stmt_call(PLpgSQL_execstate *estate, PLpgSQL_stmt_call *stmt)
 
 			nfields = 0;
 			i = 0;
-			foreach (lc, funcexpr->args)
+			foreach(lc, funcexpr->args)
 			{
-				Node *n = lfirst(lc);
+				Node	   *n = lfirst(lc);
 
 				if (argmodes && argmodes[i] == PROARGMODE_INOUT)
 				{
@@ -3960,24 +3987,8 @@ exec_prepare_plan(PLpgSQL_execstate *estate,
 							  (void *) expr,
 							  cursorOptions);
 	if (plan == NULL)
-	{
-		/* Some SPI errors deserve specific error messages */
-		switch (SPI_result)
-		{
-			case SPI_ERROR_COPY:
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("cannot COPY to/from client in PL/pgSQL")));
-			case SPI_ERROR_TRANSACTION:
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("cannot begin/end transactions in PL/pgSQL"),
-						 errhint("Use a BEGIN block with an EXCEPTION clause instead.")));
-			default:
-				elog(ERROR, "SPI_prepare_params failed for \"%s\": %s",
-					 expr->query, SPI_result_code_string(SPI_result));
-		}
-	}
+		elog(ERROR, "SPI_prepare_params failed for \"%s\": %s",
+			 expr->query, SPI_result_code_string(SPI_result));
 	if (keepplan)
 		SPI_keepplan(plan);
 	expr->plan = plan;
@@ -4023,19 +4034,20 @@ exec_stmt_execsql(PLpgSQL_execstate *estate,
 		foreach(l, SPI_plan_get_plan_sources(expr->plan))
 		{
 			CachedPlanSource *plansource = (CachedPlanSource *) lfirst(l);
-			ListCell   *l2;
 
-			foreach(l2, plansource->query_list)
+			/*
+			 * We could look at the raw_parse_tree, but it seems simpler to
+			 * check the command tag.  Note we should *not* look at the Query
+			 * tree(s), since those are the result of rewriting and could have
+			 * been transmogrified into something else entirely.
+			 */
+			if (plansource->commandTag &&
+				(strcmp(plansource->commandTag, "INSERT") == 0 ||
+				 strcmp(plansource->commandTag, "UPDATE") == 0 ||
+				 strcmp(plansource->commandTag, "DELETE") == 0))
 			{
-				Query	   *q = lfirst_node(Query, l2);
-
-				if (q->canSetTag)
-				{
-					if (q->commandType == CMD_INSERT ||
-						q->commandType == CMD_UPDATE ||
-						q->commandType == CMD_DELETE)
-						stmt->mod_stmt = true;
-				}
+				stmt->mod_stmt = true;
+				break;
 			}
 		}
 	}
@@ -4100,12 +4112,12 @@ exec_stmt_execsql(PLpgSQL_execstate *estate,
 			break;
 
 		case SPI_OK_REWRITTEN:
-			Assert(!stmt->mod_stmt);
 
 			/*
 			 * The command was rewritten into another kind of command. It's
 			 * not clear what FOUND would mean in that case (and SPI doesn't
-			 * return the row count either), so just set it to false.
+			 * return the row count either), so just set it to false.  Note
+			 * that we can't assert anything about mod_stmt here.
 			 */
 			exec_set_found(estate, false);
 			break;
@@ -4115,15 +4127,18 @@ exec_stmt_execsql(PLpgSQL_execstate *estate,
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot COPY to/from client in PL/pgSQL")));
+			break;
+
 		case SPI_ERROR_TRANSACTION:
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot begin/end transactions in PL/pgSQL"),
-					 errhint("Use a BEGIN block with an EXCEPTION clause instead.")));
+					 errmsg("unsupported transaction command in PL/pgSQL")));
+			break;
 
 		default:
 			elog(ERROR, "SPI_execute_plan_with_paramlist failed executing query \"%s\": %s",
 				 expr->query, SPI_result_code_string(rc));
+			break;
 	}
 
 	/* All variants should save result info for GET DIAGNOSTICS */
@@ -4299,11 +4314,13 @@ exec_stmt_dynexecute(PLpgSQL_execstate *estate,
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot COPY to/from client in PL/pgSQL")));
+			break;
+
 		case SPI_ERROR_TRANSACTION:
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot begin/end transactions in PL/pgSQL"),
-					 errhint("Use a BEGIN block with an EXCEPTION clause instead.")));
+					 errmsg("EXECUTE of transaction commands is not implemented")));
+			break;
 
 		default:
 			elog(ERROR, "SPI_execute failed executing query \"%s\": %s",
@@ -5051,7 +5068,7 @@ exec_assign_value(PLpgSQL_execstate *estate,
 
 				/* And assign it. */
 				expanded_record_set_field(erh, recfield->finfo.fnumber,
-										  value, isNull);
+										  value, isNull, !estate->atomic);
 				break;
 			}
 
@@ -5865,7 +5882,8 @@ exec_for_query(PLpgSQL_execstate *estate, PLpgSQL_stmt_forq *stmt,
 					tupdescs_match)
 				{
 					/* Only need to assign a new tuple value */
-					expanded_record_set_tuple(rec->erh, tuptab->vals[i], true);
+					expanded_record_set_tuple(rec->erh, tuptab->vals[i],
+											  true, !estate->atomic);
 				}
 				else
 				{
@@ -6637,7 +6655,7 @@ exec_move_row(PLpgSQL_execstate *estate,
 				 */
 				newerh = make_expanded_record_for_rec(estate, rec,
 													  NULL, rec->erh);
-				expanded_record_set_tuple(newerh, NULL, false);
+				expanded_record_set_tuple(newerh, NULL, false, false);
 				assign_record_var(estate, rec, newerh);
 			}
 			else
@@ -6679,7 +6697,7 @@ exec_move_row(PLpgSQL_execstate *estate,
 			else
 			{
 				/* No coercion is needed, so just assign the row value */
-				expanded_record_set_tuple(newerh, tup, true);
+				expanded_record_set_tuple(newerh, tup, true, !estate->atomic);
 			}
 
 			/* Complete the assignment */
@@ -6917,7 +6935,7 @@ exec_move_row_from_fields(PLpgSQL_execstate *estate,
 		}
 
 		/* Insert the coerced field values into the new expanded record */
-		expanded_record_set_fields(newerh, values, nulls);
+		expanded_record_set_fields(newerh, values, nulls, !estate->atomic);
 
 		/* Complete the assignment */
 		assign_record_var(estate, rec, newerh);
@@ -7184,7 +7202,8 @@ exec_move_row_from_datum(PLpgSQL_execstate *estate,
 				 (erh->er_typmod == rec->erh->er_typmod &&
 				  erh->er_typmod >= 0)))
 			{
-				expanded_record_set_tuple(rec->erh, erh->fvalue, true);
+				expanded_record_set_tuple(rec->erh, erh->fvalue,
+										  true, !estate->atomic);
 				return;
 			}
 
@@ -7206,7 +7225,8 @@ exec_move_row_from_datum(PLpgSQL_execstate *estate,
 				(rec->rectypeid == RECORDOID ||
 				 rec->rectypeid == erh->er_typeid))
 			{
-				expanded_record_set_tuple(newerh, erh->fvalue, true);
+				expanded_record_set_tuple(newerh, erh->fvalue,
+										  true, !estate->atomic);
 				assign_record_var(estate, rec, newerh);
 				return;
 			}
@@ -7296,7 +7316,8 @@ exec_move_row_from_datum(PLpgSQL_execstate *estate,
 				 (tupTypmod == rec->erh->er_typmod &&
 				  tupTypmod >= 0)))
 			{
-				expanded_record_set_tuple(rec->erh, &tmptup, true);
+				expanded_record_set_tuple(rec->erh, &tmptup,
+										  true, !estate->atomic);
 				return;
 			}
 
@@ -7313,7 +7334,8 @@ exec_move_row_from_datum(PLpgSQL_execstate *estate,
 
 				newerh = make_expanded_record_from_typeid(tupType, tupTypmod,
 														  mcontext);
-				expanded_record_set_tuple(newerh, &tmptup, true);
+				expanded_record_set_tuple(newerh, &tmptup,
+										  true, !estate->atomic);
 				assign_record_var(estate, rec, newerh);
 				return;
 			}
@@ -8040,7 +8062,8 @@ plpgsql_subxact_cb(SubXactEvent event, SubTransactionId mySubid,
  * assign_simple_var --- assign a new value to any VAR datum.
  *
  * This should be the only mechanism for assignment to simple variables,
- * lest we do the release of the old value incorrectly.
+ * lest we do the release of the old value incorrectly (not to mention
+ * the detoasting business).
  */
 static void
 assign_simple_var(PLpgSQL_execstate *estate, PLpgSQL_var *var,
@@ -8048,6 +8071,41 @@ assign_simple_var(PLpgSQL_execstate *estate, PLpgSQL_var *var,
 {
 	Assert(var->dtype == PLPGSQL_DTYPE_VAR ||
 		   var->dtype == PLPGSQL_DTYPE_PROMISE);
+
+	/*
+	 * In non-atomic contexts, we do not want to store TOAST pointers in
+	 * variables, because such pointers might become stale after a commit.
+	 * Forcibly detoast in such cases.  We don't want to detoast (flatten)
+	 * expanded objects, however; those should be OK across a transaction
+	 * boundary since they're just memory-resident objects.  (Elsewhere in
+	 * this module, operations on expanded records likewise need to request
+	 * detoasting of record fields when !estate->atomic.  Expanded arrays are
+	 * not a problem since all array entries are always detoasted.)
+	 */
+	if (!estate->atomic && !isnull && var->datatype->typlen == -1 &&
+		VARATT_IS_EXTERNAL_NON_EXPANDED(DatumGetPointer(newvalue)))
+	{
+		MemoryContext oldcxt;
+		Datum		detoasted;
+
+		/*
+		 * Do the detoasting in the eval_mcontext to avoid long-term leakage
+		 * of whatever memory toast fetching might leak.  Then we have to copy
+		 * the detoasted datum to the function's main context, which is a
+		 * pain, but there's little choice.
+		 */
+		oldcxt = MemoryContextSwitchTo(get_eval_mcontext(estate));
+		detoasted = PointerGetDatum(heap_tuple_fetch_attr((struct varlena *) DatumGetPointer(newvalue)));
+		MemoryContextSwitchTo(oldcxt);
+		/* Now's a good time to not leak the input value if it's freeable */
+		if (freeable)
+			pfree(DatumGetPointer(newvalue));
+		/* Once we copy the value, it's definitely freeable */
+		newvalue = datumCopy(detoasted, false, -1);
+		freeable = true;
+		/* Can't clean up eval_mcontext here, but it'll happen before long */
+	}
+
 	/* Free the old value if needed */
 	if (var->freeval)
 	{

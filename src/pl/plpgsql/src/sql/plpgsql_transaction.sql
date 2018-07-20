@@ -335,12 +335,44 @@ BEGIN
 END;
 $$;
 
--- error case
+-- error cases
 DO LANGUAGE plpgsql $$
 BEGIN
     SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 END;
 $$;
+
+DO LANGUAGE plpgsql $$
+BEGIN
+    SAVEPOINT foo;
+END;
+$$;
+
+DO LANGUAGE plpgsql $$
+BEGIN
+    EXECUTE 'COMMIT';
+END;
+$$;
+
+
+-- snapshot handling test
+TRUNCATE test2;
+
+CREATE PROCEDURE transaction_test9()
+LANGUAGE SQL
+AS $$
+INSERT INTO test2 VALUES (42);
+$$;
+
+DO LANGUAGE plpgsql $$
+BEGIN
+  ROLLBACK;
+  CALL transaction_test9();
+END
+$$;
+
+SELECT * FROM test2;
+
 
 DROP TABLE test1;
 DROP TABLE test2;

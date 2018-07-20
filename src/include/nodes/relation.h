@@ -162,6 +162,8 @@ typedef struct PlannerGlobal
  * the passed-in Query data structure; someday that should stop.
  *----------
  */
+struct AppendRelInfo;
+
 typedef struct PlannerInfo
 {
 	NodeTag		type;
@@ -200,6 +202,14 @@ typedef struct PlannerInfo
 	 * been expanded.
 	 */
 	RangeTblEntry **simple_rte_array;	/* rangetable as an array */
+
+	/*
+	 * append_rel_array is the same length as the above arrays, and holds
+	 * pointers to the corresponding AppendRelInfo entry indexed by
+	 * child_relid, or NULL if none.  The array itself is not allocated if
+	 * append_rel_list is empty.
+	 */
+	struct AppendRelInfo **append_rel_array;
 
 	/*
 	 * all_baserels is a Relids set of all base relids (but not "other"
@@ -309,9 +319,9 @@ typedef struct PlannerInfo
 	Index		qual_security_level;	/* minimum security_level for quals */
 	/* Note: qual_security_level is zero if there are no securityQuals */
 
-	InheritanceKind inhTargetKind; /* indicates if the target relation is an
-									* inheritance child or partition or a
-									* partitioned table */
+	InheritanceKind inhTargetKind;	/* indicates if the target relation is an
+									 * inheritance child or partition or a
+									 * partitioned table */
 	bool		hasJoinRTEs;	/* true if any RTEs are RTE_JOIN kind */
 	bool		hasLateralRTEs; /* true if any RTEs are marked LATERAL */
 	bool		hasDeletedRTEs; /* true if any RTE was deleted from jointree */
@@ -552,8 +562,8 @@ typedef struct PartitionSchemeData *PartitionScheme;
  *		part_rels - RelOptInfos for each partition
  *		partexprs, nullable_partexprs - Partition key expressions
  *		partitioned_child_rels - RT indexes of unpruned partitions of
- *								 relation that are partitioned tables
- *								 themselves
+ *								 this relation that are partitioned tables
+ *								 themselves, in hierarchical order
  *
  * Note: A base relation always has only one set of partition keys, but a join
  * relation may have as many sets of partition keys as the number of relations

@@ -125,6 +125,7 @@ be_tls_init(bool isServerStart)
 		if (ssl_passphrase_command[0] && ssl_passphrase_command_supports_reload)
 			SSL_CTX_set_default_passwd_cb(context, ssl_external_passwd_cb);
 		else
+
 			/*
 			 * If reloading and no external command is configured, override
 			 * OpenSSL's default handling of passphrase-protected files,
@@ -186,7 +187,7 @@ be_tls_init(bool isServerStart)
 	SSL_CTX_set_options(context, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
 	/* disallow SSL session tickets */
-#ifdef SSL_OP_NO_TICKET			/* added in openssl 0.9.8f */
+#ifdef SSL_OP_NO_TICKET			/* added in OpenSSL 0.9.8f */
 	SSL_CTX_set_options(context, SSL_OP_NO_TICKET);
 #endif
 
@@ -637,7 +638,7 @@ be_tls_write(Port *port, void *ptr, size_t len, int *waitfor)
  * Private substitute BIO: this does the sending and receiving using send() and
  * recv() instead. This is so that we can enable and disable interrupts
  * just while calling recv(). We cannot have interrupts occurring while
- * the bulk of openssl runs, because it uses malloc() and possibly other
+ * the bulk of OpenSSL runs, because it uses malloc() and possibly other
  * non-reentrant libc facilities. We also need to call send() and recv()
  * directly so it gets passed through the socket/signals layer on Win32.
  *
@@ -735,7 +736,7 @@ my_BIO_s_socket(void)
 	return my_bio_methods;
 }
 
-/* This should exactly match openssl's SSL_set_fd except for using my BIO */
+/* This should exactly match OpenSSL's SSL_set_fd except for using my BIO */
 static int
 my_SSL_set_fd(Port *port, int fd)
 {
@@ -1139,8 +1140,8 @@ be_tls_get_certificate_hash(Port *port, size_t *len)
 		return NULL;
 
 	/*
-	 * Get the signature algorithm of the certificate to determine the
-	 * hash algorithm to use for the result.
+	 * Get the signature algorithm of the certificate to determine the hash
+	 * algorithm to use for the result.
 	 */
 	if (!OBJ_find_sigid_algs(X509_get_signature_nid(server_cert),
 							 &algo_nid, NULL))
