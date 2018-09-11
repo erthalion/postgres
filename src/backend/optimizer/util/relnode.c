@@ -802,6 +802,19 @@ build_child_join_rel(PlannerInfo *root, RelOptInfo *outer_rel,
 
 	appinfos = find_appinfos_by_relids(root, joinrel->relids, &nappinfos);
 
+	/*
+	 * The first pair of joining relations for the parent joinrel may not
+	 * produce a partition-wise join because of the restrictions in
+	 * partition_bounds_merge(). Hence the first pair of joining relations,
+	 * which is used to build the child join and presented here, for the child
+	 * joinrel does not correspond to the first pair of joining relations for
+	 * the parent joinrel. The targetlist built using different pairs have the
+	 * targetlist nodes arranged in different order. An appendrel expects that
+	 * all its children have their targetlists ordered in the same fashion.
+	 * Hence translate the parent's targetlist so that parent and child
+	 * joinrels have their targetlists in sync.
+	 */
+	joinrel->reltarget = copy_pathtarget(parent_joinrel->reltarget);
 	/* Set up reltarget struct */
 	build_child_join_reltarget(root, parent_joinrel, joinrel,
 							   nappinfos, appinfos);
@@ -907,6 +920,12 @@ build_joinrel_tlist(PlannerInfo *root, RelOptInfo *joinrel,
 	Relids		relids = joinrel->relids;
 	ListCell   *vars;
 
+	/*
+	 * We only see parent joins. Targetlist of a child-join is computed by
+	 * translating corresponding parent join's targetlist.
+	 */
+	Assert(joinrel->reloptkind == RELOPT_JOINREL);
+
 	foreach(vars, input_rel->reltarget->exprs)
 	{
 		Var		   *var = (Var *) lfirst(vars);
@@ -934,6 +953,7 @@ build_joinrel_tlist(PlannerInfo *root, RelOptInfo *joinrel,
 
 		/* Is it still needed above this joinrel? */
 		ndx = var->varattno - baserel->min_attr;
+
 		if (bms_nonempty_difference(baserel->attr_needed[ndx], relids))
 		{
 			/* Yup, add it to the output */
