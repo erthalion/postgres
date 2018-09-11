@@ -52,6 +52,9 @@ static void get_range_key_properties(PartitionKey key, int keynum,
 						 Expr **keyCol,
 						 Const **lower_val, Const **upper_val);
 static List *get_range_nulltest(PartitionKey key);
+static bool partition_hbounds_equal(PartitionBoundInfo b1,
+									PartitionBoundInfo b2);
+
 
 /*
  * get_qual_from_partbound
@@ -93,6 +96,63 @@ get_qual_from_partbound(Relation rel, Relation parent,
 }
 
 /*
+ * Are two hash partition bound collections logically equal?
+ *
+ * Hash partition bounds store modulus and remainder in datums array which are
+ * always integers irrespective of the number of partition keys and their data
+ * types. Hence we can compare the hash bound collection without any partition
+ * key specific information. Separating this logic in a function which does not
+ * require partition key specific information allows it be called from places
+ * where the partition key specific information is not completely available.
+ */
+static bool
+partition_hbounds_equal(PartitionBoundInfo b1, PartitionBoundInfo b2)
+{
+	int			greatest_modulus = get_hash_partition_greatest_modulus(b1);
+	int			i;
+
+	Assert(b1->strategy == PARTITION_STRATEGY_HASH &&
+		   b2->strategy == PARTITION_STRATEGY_HASH);
+
+	/*
+	 * If two hash partitioned tables have different greatest moduli,
+	 * their partition schemes don't match.  For hash partitioned table,
+	 * the greatest modulus is given by the last datum and number of
+	 * partitions is given by ndatums.
+	 */
+	if (greatest_modulus != get_hash_partition_greatest_modulus(b2))
+		return false;
+
+	/*
+	 * We arrange the partitions in the ascending order of their modulus and
+	 * remainders.  Also every modulus is factor of next larger modulus.
+	 * Therefore we can safely store index of a given partition in indexes
+	 * array at remainder of that partition.  Also entries at (remainder + N *
+	 * modulus) positions in indexes array are all same for (modulus,
+	 * remainder) specification for any partition.  Thus datums array from both
+	 * the given bounds are same, if and only if their indexes array will be
+	 * same.  So, it suffices to compare indexes array.
+	 */
+	for (i = 0; i < greatest_modulus; i++)
+		if (b1->indexes[i] != b2->indexes[i])
+			return false;
+
+#ifdef USE_ASSERT_CHECKING
+
+	/*
+	 * Nonetheless make sure that the bounds are indeed same when the indexes
+	 * match.  Hash partition bound stores modulus and remainder at
+	 * b1->datums[i][0] and b1->datums[i][1] position respectively.
+	 */
+	for (i = 0; i < b1->ndatums; i++)
+		Assert((b1->datums[i][0] == b2->datums[i][0] &&
+				b1->datums[i][1] == b2->datums[i][1]));
+#endif
+
+	return true;
+}
+
+/*
  * Are two partition bound collections logically equal?
  *
  * Used in the keep logic of relcache.c (ie, in RelationClearRelation()).
@@ -120,41 +180,8 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
 
 	if (b1->strategy == PARTITION_STRATEGY_HASH)
 	{
-		int			greatest_modulus = get_hash_partition_greatest_modulus(b1);
-
-		/*
-		 * If two hash partitioned tables have different greatest moduli,
-		 * their partition schemes don't match.
-		 */
-		if (greatest_modulus != get_hash_partition_greatest_modulus(b2))
+		if (!partition_hbounds_equal(b1, b2))
 			return false;
-
-		/*
-		 * We arrange the partitions in the ascending order of their moduli
-		 * and remainders.  Also every modulus is factor of next larger
-		 * modulus.  Therefore we can safely store index of a given partition
-		 * in indexes array at remainder of that partition.  Also entries at
-		 * (remainder + N * modulus) positions in indexes array are all same
-		 * for (modulus, remainder) specification for any partition.  Thus
-		 * datums array from both the given bounds are same, if and only if
-		 * their indexes array will be same.  So, it suffices to compare
-		 * indexes array.
-		 */
-		for (i = 0; i < greatest_modulus; i++)
-			if (b1->indexes[i] != b2->indexes[i])
-				return false;
-
-#ifdef USE_ASSERT_CHECKING
-
-		/*
-		 * Nonetheless make sure that the bounds are indeed same when the
-		 * indexes match.  Hash partition bound stores modulus and remainder
-		 * at b1->datums[i][0] and b1->datums[i][1] position respectively.
-		 */
-		for (i = 0; i < b1->ndatums; i++)
-			Assert((b1->datums[i][0] == b2->datums[i][0] &&
-					b1->datums[i][1] == b2->datums[i][1]));
-#endif
 	}
 	else
 	{
