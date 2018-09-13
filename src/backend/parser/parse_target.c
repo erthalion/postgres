@@ -838,27 +838,22 @@ transformAssignmentIndirection(ParseState *pstate,
 											 location);
 	}
 
-	/* base case: just coerce RHS to match target type ID */
-
-	result = coerce_to_target_type(pstate,
-								   rhs, exprType(rhs),
-								   targetTypeId, targetTypMod,
-								   COERCION_ASSIGNMENT,
-								   COERCE_IMPLICIT_CAST,
-								   -1);
-	if (result == NULL)
+	/*
+	 * Base case: just coerce RHS to match target type ID.
+	 * It's necessary only for field selection, since for
+	 * subscripting it's custom code who should define types.
+	 */
+	if (!targetIsSubscripting)
 	{
-		if (targetIsArray)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("array assignment to \"%s\" requires type %s"
-							" but expression is of type %s",
-							targetName,
-							format_type_be(targetTypeId),
-							format_type_be(exprType(rhs))),
-					 errhint("You will need to rewrite or cast the expression."),
-					 parser_errposition(pstate, location)));
-		else
+		result = coerce_to_target_type(pstate,
+									   rhs, exprType(rhs),
+									   targetTypeId, targetTypMod,
+									   COERCION_ASSIGNMENT,
+									   COERCE_IMPLICIT_CAST,
+									   -1);
+
+		if (result == NULL)
+		{
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
 					 errmsg("subfield \"%s\" is of type %s"
@@ -892,58 +887,68 @@ transformAssignmentSubscripts(ParseState *pstate,
 							  Node *rhs,
 							  int location)
 {
-	Node	   *result;
-	Oid			arrayType;
-	int32		arrayTypMod;
-	Oid			elementTypeId;
-	Oid			typeNeeded;
-	Oid			collationNeeded;
+	Node			  *result;
+	Oid				  containerType;
+	int32			  containerTypMod;
+	Oid				  collationNeeded;
+	SubscriptingRef   *sbsref;
+	SubscriptRoutines *sbsroutines;
 
 	Assert(subscripts != NIL);
 
-	/* Identify the actual array type and element type involved */
-	arrayType = targetTypeId;
-	arrayTypMod = targetTypMod;
-	elementTypeId = transformArrayType(&arrayType, &arrayTypMod);
+	/* Identify the actual container type and element type involved */
+	containerType = targetTypeId;
+	containerTypMod = targetTypMod;
 
-	/* Identify type that RHS must provide */
-	typeNeeded = isSlice ? arrayType : elementTypeId;
+	/* process subscripts */
+	sbsref = transformContainerSubscripts(pstate,
+										  basenode,
+										  containerType,
+										  exprType(rhs),
+										  containerTypMod,
+										  subscripts,
+										  rhs);
+
+	sbsroutines = getSubscriptingRoutines(sbsref->refcontainertype);
+
+	/*
+	 * Let custom code provide necessary information about required types:
+	 * refelemtype and refassgntype
+	 */
+	sbsref = sbsroutines->prepare(rhs != NULL, sbsref);
 
 	/*
 	 * container normally has same collation as elements, but there's an
 	 * exception: we might be subscripting a domain over an container type. In
 	 * that case use collation of the base type.
 	 */
-	if (arrayType == targetTypeId)
+	if (sbsref->refcontainertype == containerType)
 		collationNeeded = targetCollation;
 	else
-		collationNeeded = get_typcollation(arrayType);
+		collationNeeded = get_typcollation(containerType);
 
 	/* recurse to create appropriate RHS for container assign */
 	rhs = transformAssignmentIndirection(pstate,
 										 NULL,
 										 targetName,
 										 true,
-										 typeNeeded,
-										 arrayTypMod,
+										 sbsref->refassgntype,
+										 sbsref->reftypmod,
 										 collationNeeded,
 										 next_indirection,
 										 rhs,
 										 location);
 
-	/* process subscripts */
-	result = (Node *) transformArraySubscripts(pstate,
-											   basenode,
-											   arrayType,
-											   elementTypeId,
-											   arrayTypMod,
-											   subscripts,
-											   rhs);
+	/* Provide fully prepared subscriptinng information for custom validation */
+	sbsref->refassgnexpr = (Expr *) rhs;
+	sbsroutines->validate(rhs != NULL, sbsref, pstate);
 
-	/* If target was a domain over array, need to coerce up to the domain */
-	if (arrayType != targetTypeId)
+	result = (Node *) sbsref;
+
+	/* If target was a domain over container, need to coerce up to the domain */
+	if (sbsref->refcontainertype != targetTypeId)
 	{
-		Oid			resulttype = exprType(result);
+		Oid	resulttype = exprType(result);
 
 		result = coerce_to_target_type(pstate,
 									   result, resulttype,

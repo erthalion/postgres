@@ -3051,7 +3051,7 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 		indexes = sbsrefstate->lowerindex;
 	off = op->d.sbsref_subscript.off;
 
-	indexes[off] = DatumGetInt32(arefstate->subscriptvalue);
+	indexes[off] = sbsrefstate->subscriptvalue;
 
 	return true;
 }
@@ -3064,37 +3064,14 @@ ExecEvalSubscriptingRef(ExprState *state, ExprEvalStep *op)
 void
 ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 {
-	ArrayRefState *arefstate = op->d.arrayref.state;
+	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/* Should not get here if source container (or any subscript) is null */
 	Assert(!(*op->resnull));
 
-	if (arefstate->numlower == 0)
-	{
-		/* Scalar case */
-		*op->resvalue = array_get_element(*op->resvalue,
-										  arefstate->numupper,
-										  arefstate->upperindex,
-										  arefstate->refattrlength,
-										  arefstate->refelemlength,
-										  arefstate->refelembyval,
-										  arefstate->refelemalign,
-										  op->resnull);
-	}
-	else
-	{
-		/* Slice case */
-		*op->resvalue = array_get_slice(*op->resvalue,
-										arefstate->numupper,
-										arefstate->upperindex,
-										arefstate->lowerindex,
-										arefstate->upperprovided,
-										arefstate->lowerprovided,
-										arefstate->refattrlength,
-										arefstate->refelemlength,
-										arefstate->refelembyval,
-										arefstate->refelemalign);
-	}
+	*op->resvalue = sbsroutines->fetch(*op->resvalue, sbsrefstate);
+	*op->resnull = sbsrefstate->resnull;
 }
 
 /*
@@ -3106,41 +3083,22 @@ ExecEvalSubscriptingRefFetch(ExprState *state, ExprEvalStep *op)
 void
 ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 {
-	ArrayRefState *arefstate = op->d.arrayref.state;
+	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	if (*op->resnull)
 	{
-		/* whole array is null, so any element or slice is too */
-		arefstate->prevvalue = (Datum) 0;
-		arefstate->prevnull = true;
-	}
-	else if (arefstate->numlower == 0)
-	{
-		/* Scalar case */
-		arefstate->prevvalue = array_get_element(*op->resvalue,
-												 arefstate->numupper,
-												 arefstate->upperindex,
-												 arefstate->refattrlength,
-												 arefstate->refelemlength,
-												 arefstate->refelembyval,
-												 arefstate->refelemalign,
-												 &arefstate->prevnull);
+		/* whole container is null, so any element or slice is too */
+		sbsrefstate->prevvalue = (Datum) 0;
+		sbsrefstate->prevnull = true;
 	}
 	else
 	{
-		/* Slice case */
-		/* this is currently unreachable */
-		arefstate->prevvalue = array_get_slice(*op->resvalue,
-											   arefstate->numupper,
-											   arefstate->upperindex,
-											   arefstate->lowerindex,
-											   arefstate->upperprovided,
-											   arefstate->lowerprovided,
-											   arefstate->refattrlength,
-											   arefstate->refelemlength,
-											   arefstate->refelembyval,
-											   arefstate->refelemalign);
-		arefstate->prevnull = false;
+		sbsrefstate->prevvalue = sbsroutines->fetch(*op->resvalue, sbsrefstate);
+
+		if (sbsrefstate->numlower != 0)
+			sbsrefstate->prevnull = false;
+
 	}
 }
 
@@ -3153,7 +3111,8 @@ ExecEvalSubscriptingRefOld(ExprState *state, ExprEvalStep *op)
 void
 ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 {
-	ArrayRefState *arefstate = op->d.arrayref.state;
+	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	SubscriptRoutines	 *sbsroutines = sbsrefstate->sbsroutines;
 
 	/*
 	 * For an assignment to a fixed-length container type, both the original
@@ -3166,47 +3125,9 @@ ExecEvalSubscriptingRefAssign(ExprState *state, ExprEvalStep *op)
 			return;
 	}
 
-	/*
-	 * For assignment to varlena arrays, we handle a NULL original array by
-	 * substituting an empty (zero-dimensional) array; insertion of the new
-	 * element will result in a singleton array value.  It does not matter
-	 * whether the new element is NULL.
-	 */
-	if (*op->resnull)
-	{
-		*op->resvalue = PointerGetDatum(construct_empty_array(arefstate->refelemtype));
-		*op->resnull = false;
-	}
-
-	if (arefstate->numlower == 0)
-	{
-		/* Scalar case */
-		*op->resvalue = array_set_element(*op->resvalue,
-										  arefstate->numupper,
-										  arefstate->upperindex,
-										  arefstate->replacevalue,
-										  arefstate->replacenull,
-										  arefstate->refattrlength,
-										  arefstate->refelemlength,
-										  arefstate->refelembyval,
-										  arefstate->refelemalign);
-	}
-	else
-	{
-		/* Slice case */
-		*op->resvalue = array_set_slice(*op->resvalue,
-										arefstate->numupper,
-										arefstate->upperindex,
-										arefstate->lowerindex,
-										arefstate->upperprovided,
-										arefstate->lowerprovided,
-										arefstate->replacevalue,
-										arefstate->replacenull,
-										arefstate->refattrlength,
-										arefstate->refelemlength,
-										arefstate->refelembyval,
-										arefstate->refelemalign);
-	}
+	sbsrefstate->resnull = *op->resnull;
+	*op->resvalue = sbsroutines->assign(*op->resvalue, sbsrefstate);
+	*op->resnull = sbsrefstate->resnull;
 }
 
 /*

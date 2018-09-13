@@ -2436,20 +2436,18 @@ static void
 ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 				 ExprState *state, Datum *resv, bool *resnull)
 {
-	bool		isAssignment = (aref->refassgnexpr != NULL);
-	ArrayRefState *arefstate = palloc0(sizeof(ArrayRefState));
-	List	   *adjust_jumps = NIL;
-	ListCell   *lc;
-	int			i;
+	bool				 isAssignment = (sbsref->refassgnexpr != NULL);
+	SubscriptingRefState *sbsrefstate = palloc0(sizeof(SubscriptingRefState));
+	List				 *adjust_jumps = NIL;
+	ListCell   			 *lc;
+	int		   			  i;
+	RegProcedure		  typsubshandler = get_typsubsprocs(sbsref->refcontainertype);
 
-	/* Fill constant fields of ArrayRefState */
-	arefstate->isassignment = isAssignment;
-	arefstate->refelemtype = aref->refelemtype;
-	arefstate->refattrlength = get_typlen(aref->refarraytype);
-	get_typlenbyvalalign(aref->refelemtype,
-						 &arefstate->refelemlength,
-						 &arefstate->refelembyval,
-						 &arefstate->refelemalign);
+	/* Fill constant fields of SubscriptingRefState */
+	sbsrefstate->isassignment = isAssignment;
+	sbsrefstate->refelemtype = sbsref->refelemtype;
+	sbsrefstate->refattrlength = get_typlen(sbsref->refcontainertype);
+	sbsrefstate->sbsroutines = (SubscriptRoutines *) OidFunctionCall0(typsubshandler);
 
 	/*
 	 * Evaluate array input.  It's safe to do so into resv/resnull, because we
@@ -2469,22 +2467,10 @@ ExecInitSubscriptingRef(ExprEvalStep *scratch, SubscriptingRef *sbsref,
 		scratch->opcode = EEOP_JUMP_IF_NULL;
 		scratch->d.jump.jumpdone = -1;	/* adjust later */
 		ExprEvalPushStep(state, scratch);
+
 		adjust_jumps = lappend_int(adjust_jumps,
 								   state->steps_len - 1);
 	}
-
-	/* Verify subscript list lengths are within limit */
-	if (list_length(aref->refupperindexpr) > MAXDIM)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(aref->refupperindexpr), MAXDIM)));
-
-	if (list_length(aref->reflowerindexpr) > MAXDIM)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(aref->reflowerindexpr), MAXDIM)));
 
 	/* Evaluate upper subscripts */
 	i = 0;

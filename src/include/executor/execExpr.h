@@ -19,7 +19,7 @@
 
 /* forward references to avoid circularity */
 struct ExprEvalStep;
-struct ArrayRefState;
+struct SubscriptRoutines;
 
 /* Bits in ExprState->flags (see also execnodes.h for public flag bits): */
 /* expression's interpreter has been initialized */
@@ -639,28 +639,27 @@ typedef struct ExprEvalStep
 	}			d;
 } ExprEvalStep;
 
-
-/* Non-inline data for array operations */
-typedef struct ArrayRefState
+/* Non-inline data for container operations */
+typedef struct SubscriptingRefState
 {
 	bool		isassignment;	/* is it assignment, or just fetch? */
 
-	Oid			refelemtype;	/* OID of the array element type */
-	int16		refattrlength;	/* typlen of array type */
-	int16		refelemlength;	/* typlen of the array element type */
+	Oid			refelemtype;	/* OID of the container element type */
+	int16		refattrlength;	/* typlen of container type */
+	int16		refelemlength;	/* typlen of the container element type */
 	bool		refelembyval;	/* is the element type pass-by-value? */
 	char		refelemalign;	/* typalign of the element type */
 
 	/* numupper and upperprovided[] are filled at compile time */
 	/* at runtime, extracted subscript datums get stored in upperindex[] */
 	int			numupper;
-	bool		upperprovided[MAXDIM];
-	int			upperindex[MAXDIM];
+	bool		upperprovided[MAX_SUBSCRIPT_DEPTH];
+	Datum		upperindex[MAX_SUBSCRIPT_DEPTH];
 
 	/* similarly for lower indexes, if any */
 	int			numlower;
-	bool		lowerprovided[MAXDIM];
-	int			lowerindex[MAXDIM];
+	bool		lowerprovided[MAX_SUBSCRIPT_DEPTH];
+	Datum		lowerindex[MAX_SUBSCRIPT_DEPTH];
 
 	/* subscript expressions get evaluated into here */
 	Datum		subscriptvalue;
@@ -670,11 +669,13 @@ typedef struct ArrayRefState
 	Datum		replacevalue;
 	bool		replacenull;
 
-	/* if we have a nested assignment, ARRAYREF_OLD puts old value here */
+	/* if we have a nested assignment, SBSREF_OLD puts old value here */
 	Datum		prevvalue;
 	bool		prevnull;
-} ArrayRefState;
 
+	bool		resnull;
+	struct SubscriptRoutines *sbsroutines;
+} SubscriptingRefState;
 
 /* functions in execExpr.c */
 extern void ExprEvalPushStep(ExprState *es, const ExprEvalStep *s);
