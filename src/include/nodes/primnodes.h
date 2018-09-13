@@ -755,7 +755,7 @@ typedef struct FieldSelect
  *
  * FieldStore represents the operation of modifying one field in a tuple
  * value, yielding a new tuple value (the input is not touched!).  Like
- * the assign case of ArrayRef, this is used to implement UPDATE of a
+ * the assign case of SubscriptingRef, this is used to implement UPDATE of a
  * portion of a column.
  *
  * resulttype is always a named composite type (not a domain).  To update

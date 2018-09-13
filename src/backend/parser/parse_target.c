@@ -654,7 +654,7 @@ updateTargetListEntry(ParseState *pstate,
  * needed.
  *
  * targetName is the name of the field or subfield we're assigning to, and
- * targetIsArray is true if we're subscripting it.  These are just for
+ * targetIsSubscripting is true if we're subscripting it.  These are just for
  * error reporting.
  *
  * targetTypeId, targetTypMod, targetCollation indicate the datatype and
@@ -676,7 +676,7 @@ static Node *
 transformAssignmentIndirection(ParseState *pstate,
 							   Node *basenode,
 							   const char *targetName,
-							   bool targetIsArray,
+							   bool targetIsSubscripting,
 							   Oid targetTypeId,
 							   int32 targetTypMod,
 							   Oid targetCollation,
@@ -868,13 +868,16 @@ transformAssignmentIndirection(ParseState *pstate,
 							format_type_be(exprType(rhs))),
 					 errhint("You will need to rewrite or cast the expression."),
 					 parser_errposition(pstate, location)));
+		}
 	}
+	else
+		result = rhs;
 
 	return result;
 }
 
 /*
- * helper for transformAssignmentIndirection: process array assignment
+ * helper for transformAssignmentIndirection: process container assignment
  */
 static Node *
 transformAssignmentSubscripts(ParseState *pstate,
@@ -907,8 +910,8 @@ transformAssignmentSubscripts(ParseState *pstate,
 	typeNeeded = isSlice ? arrayType : elementTypeId;
 
 	/*
-	 * Array normally has same collation as elements, but there's an
-	 * exception: we might be subscripting a domain over an array type. In
+	 * container normally has same collation as elements, but there's an
+	 * exception: we might be subscripting a domain over an container type. In
 	 * that case use collation of the base type.
 	 */
 	if (arrayType == targetTypeId)
@@ -916,7 +919,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	else
 		collationNeeded = get_typcollation(arrayType);
 
-	/* recurse to create appropriate RHS for array assign */
+	/* recurse to create appropriate RHS for container assign */
 	rhs = transformAssignmentIndirection(pstate,
 										 NULL,
 										 targetName,
