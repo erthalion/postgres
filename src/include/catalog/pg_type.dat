@@ -462,7 +462,8 @@
 { oid => '3802', array_type_oid => '3807', descr => 'Binary JSON',
   typname => 'jsonb', typlen => '-1', typbyval => 'f', typcategory => 'U',
   typinput => 'jsonb_in', typoutput => 'jsonb_out', typreceive => 'jsonb_recv',
-  typsend => 'jsonb_send', typalign => 'i', typstorage => 'x' },
+  typsend => 'jsonb_send', typalign => 'i', typstorage => 'x',
+  typsubshandler => 'jsonb_subscript_handler' },
 
 { oid => '2970', array_type_oid => '2949', descr => 'txid snapshot',
   typname => 'txid_snapshot', typlen => '-1', typbyval => 'f',
