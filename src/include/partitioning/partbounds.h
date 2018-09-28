@@ -104,6 +104,12 @@ typedef struct PartitionRangeBound
 	bool		lower;			/* this is the lower (vs upper) bound */
 } PartitionRangeBound;
 
+typedef struct PartitionMap
+{
+	int from;
+	int to;
+} PartitionMap;
+
 extern int	get_hash_partition_greatest_modulus(PartitionBoundInfo b);
 extern uint64 compute_partition_hash_value(int partnatts, FmgrInfo *partsupfunc,
 							 Datum *values, bool *isnull);
@@ -148,8 +154,7 @@ extern int partition_hash_bsearch(PartitionBoundInfo boundinfo,
 					   int modulus, int remainder);
 extern PartitionBoundInfo partition_bounds_merge(int partnatts,
 					   FmgrInfo *partsupfunc, Oid *partcollation,
-					   PartitionBoundInfo outer_bi, int outer_nparts,
-					   PartitionBoundInfo inner_bi, int inner_nparts,
+					   RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 					   JoinType jointype, List **outer_parts,
 					   List **inner_parts);
 

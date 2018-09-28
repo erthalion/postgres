@@ -1362,8 +1362,7 @@ try_partitionwise_join(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 	join_boundinfo = partition_bounds_merge(part_scheme->partnatts,
 											part_scheme->partsupfunc,
 											part_scheme->partcollation,
-											rel1->boundinfo, rel1->nparts,
-											rel2->boundinfo, rel2->nparts,
+											rel1, rel2,
 											parent_sjinfo->jointype,
 											&parts1, &parts2);
 

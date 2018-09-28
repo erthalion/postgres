@@ -54,22 +54,19 @@ static void get_range_key_properties(PartitionKey key, int keynum,
 static List *get_range_nulltest(PartitionKey key);
 static bool partition_hbounds_equal(PartitionBoundInfo b1,
 									PartitionBoundInfo b2);
-static PartitionBoundInfo partition_range_bounds_merge(int partnatts,
-							 FmgrInfo *supfuncs, Oid *collations,
-							 PartitionBoundInfo boundinfo1, int nparts1,
-							 PartitionBoundInfo boundinfo2, int nparts2,
-							 JoinType jointype, List **parts1, List **parts2);
-static PartitionBoundInfo partition_list_bounds_merge(int partnatts,
-							FmgrInfo *partsupfunc, Oid *collations,
-							PartitionBoundInfo boundinfo1, int nparts1,
-							PartitionBoundInfo boundinfo2, int nparts2,
-							JoinType jointype, List **parts1, List **parts2);
-static PartitionBoundInfo partition_hash_bounds_merge(int partnatts,
-							FmgrInfo *partsupfunc,
-							Oid *partcollation, PartitionBoundInfo left_bi,
-							int left_nparts, PartitionBoundInfo right_bi,
-							int right_nparts, JoinType jointype, List **left_parts,
-							List **right_parts);
+static PartitionBoundInfo partition_range_bounds_merge(
+							 RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+							 List **outer_parts, List **inner_parts,
+							 JoinType jointype, int partnatts,
+							 FmgrInfo *supfuncs, Oid *collations);
+static PartitionBoundInfo partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *collations,
+							RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+							List **outer_parts, List **inner_parts,
+							JoinType jointype);
+static PartitionBoundInfo partition_hash_bounds_merge(RelOptInfo *outer_rel,
+							RelOptInfo *inner_rel,
+							List **outer_parts, List **inner_parts,
+							JoinType jointype);
 static void generate_matching_part_pairs(int *mergemap1, int npart1,
 							 int *mergemap2, int nparts2, JoinType jointype,
 							 int nparts, List **parts1, List **parts2);
@@ -77,6 +74,9 @@ static PartitionBoundInfo build_merged_partition_bounds(char strategy,
 							  List *merged_datums, List *merged_indexes,
 							  List *merged_contents, int null_index,
 							  int default_index);
+static int map_and_merge_partitions_tmp(PartitionMap *outer_maps,
+										PartitionMap *inner_maps,
+										int index1, int index2, int *next_index);
 static int map_and_merge_partitions(int *partmap1, int *mergemap1, int index1,
 						 int *partmap2, int *mergemap2, int index2,
 						 int *next_index);
@@ -2415,16 +2415,17 @@ satisfies_hash_partition(PG_FUNCTION_ARGS)
 extern PartitionBoundInfo
 partition_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
 					   Oid *partcollation,
-					   PartitionBoundInfo outer_bi, int outer_nparts,
-					   PartitionBoundInfo inner_bi, int inner_nparts,
+					   RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 					   JoinType jointype, List **outer_parts,
 					   List **inner_parts)
 {
-	PartitionBoundInfo merged_bounds;
-	char		strategy;
+	PartitionBoundInfo 	merged_bounds;
+	PartitionBoundInfo 	outer_binfo = outer_rel->boundinfo,
+					   	inner_binfo = inner_rel->boundinfo;
+	char				strategy = outer_binfo->strategy;
 
 	/* Bail out if partitioning strategies are different. */
-	if (outer_bi->strategy != inner_bi->strategy)
+	if (outer_binfo->strategy != inner_binfo->strategy)
 		return NULL;
 
 	if (jointype != JOIN_LEFT && jointype != JOIN_INNER &&
@@ -2434,39 +2435,28 @@ partition_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
 
 	*outer_parts = NIL;
 	*inner_parts = NIL;
-	strategy = outer_bi->strategy;
 	switch (strategy)
 	{
 		case PARTITION_STRATEGY_LIST:
-			merged_bounds = partition_list_bounds_merge(partnatts, partsupfunc,
+			merged_bounds = partition_list_bounds_merge(partsupfunc,
 														partcollation,
-														outer_bi, outer_nparts,
-														inner_bi, inner_nparts,
-														jointype, outer_parts,
-														inner_parts);
+														outer_rel, inner_rel,
+														outer_parts, inner_parts,
+														jointype);
 			break;
 
 		case PARTITION_STRATEGY_RANGE:
-			merged_bounds = partition_range_bounds_merge(partnatts,
+			merged_bounds = partition_range_bounds_merge(outer_rel, inner_rel,
+														 outer_parts, inner_parts,
+														 jointype, partnatts,
 														 partsupfunc,
-														 partcollation,
-														 outer_bi,
-														 outer_nparts,
-														 inner_bi,
-														 inner_nparts,
-														 jointype,
-														 outer_parts,
-														 inner_parts);
+														 partcollation);
 			break;
 
 		case PARTITION_STRATEGY_HASH:
-			merged_bounds = partition_hash_bounds_merge(partnatts,
-														partsupfunc,
-														partcollation,
-														outer_bi, outer_nparts,
-														inner_bi, inner_nparts,
-														jointype, outer_parts,
-														inner_parts);
+			merged_bounds = partition_hash_bounds_merge(outer_rel, inner_rel,
+														outer_parts, inner_parts,
+														jointype);
 			break;
 
 		default:
@@ -2845,26 +2835,100 @@ handle_missing_partition(int *missing_side_pmap, int *missing_side_mmap,
 	return true;
 }
 
+static PartitionMap*
+init_partition_map(RelOptInfo *rel)
+{
+	int i, nparts = rel->nparts;
+	PartitionMap *map;
+
+	map = (PartitionMap *) palloc(sizeof(PartitionMap) * nparts);
+
+	for (i = 0; i < nparts; i++)
+	{
+		map[i].from = -1;
+		map[i].to = -1;
+	}
+
+	return map;
+}
+
+/*
+ * Allocate and initialize partition maps. We maintain four maps, two maps
+ * for each joining relation. pmap[i] gives the partition from the other
+ * relation which would join with ith partition of the given relation.
+ * Partition i from the given relation will join with partition pmap[i]
+ * from the other relation to produce partition mmap[i] of the join (merged
+ * partition).
+ *
+ * pmap[i] = -1 indicates that ith partition of a given relation does not
+ * have a matching partition from the other relation.
+ *
+ * mmap[i] = -1 indicates that ith partition of a given relation does not
+ * contribute to the join result. That can happen only when the given
+ * relation is the inner relation and it doesn't have a matching partition
+ * from the outer relation, hence pmap[i] should be -1.
+ *
+ * In case of an outer join, every partition of the outer join will appear
+ * in the join result, and thus has mmap[i] set for all i. But it's not
+ * necessary that every partition on the outer side will have a matching
+ * partition on the inner side. In such a case, we end up with pmap[i] = -1
+ * and mmap[i] != -1.
+ */
+static void init_partition_maps(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+								int **outer_pmap, int **outer_mmap,
+								int **inner_pmap, int **inner_mmap)
+{
+	int *outer_p = NULL;
+	int *outer_m = NULL;
+	int *inner_p = NULL;
+	int	*inner_m = NULL;
+
+	int outer_nparts = outer_rel->nparts,
+		inner_nparts = inner_rel->nparts;
+	int i;
+
+	outer_p = (int *) palloc(sizeof(int) * outer_nparts);
+	outer_m = (int *) palloc(sizeof(int) * outer_nparts);
+	inner_p = (int *) palloc(sizeof(int) * inner_nparts);
+	inner_m = (int *) palloc(sizeof(int) * inner_nparts);
+
+	for (i = 0; i < outer_nparts; i++)
+	{
+		outer_p[i] = -1;
+		outer_m[i] = -1;
+	}
+	for (i = 0; i < inner_nparts; i++)
+	{
+		inner_p[i] = -1;
+		inner_m[i] = -1;
+	}
+
+	*outer_pmap = outer_p;
+	*outer_mmap = outer_m;
+	*inner_pmap = inner_p;
+	*inner_mmap = inner_m;
+}
+
 /*
  * partition_range_bounds_merge
  *
  * partition_bounds_merge()'s arm for range partitioned tables.
  */
 static PartitionBoundInfo
-partition_range_bounds_merge(int partnatts, FmgrInfo *partsupfuncs,
-							 Oid *partcollations, PartitionBoundInfo outer_bi,
-							 int outer_nparts, PartitionBoundInfo inner_bi,
-							 int inner_nparts, JoinType jointype,
-							 List **outer_parts, List **inner_parts)
+partition_range_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+							 List **outer_parts, List **inner_parts,
+							 JoinType jointype, int partnatts,
+							 FmgrInfo *partsupfuncs, Oid *partcollations)
+
 {
-	int		   *outer_pmap;
-	int		   *outer_mmap;
-	int		   *inner_pmap;
-	int		   *inner_mmap;
-	int			cnt1;
-	int			cnt2;
-	int			outer_part;
-	int			inner_part;
+	PartitionMap *outer_maps = NULL;
+	PartitionMap *inner_maps = NULL;
+	int		   *outer_pmap = NULL;
+	int		   *outer_mmap = NULL;
+	int		   *inner_pmap = NULL;
+	int		   *inner_mmap = NULL;
+	int			outer_part = 0;
+	int			inner_part = 0;
 	PartitionBoundInfo merged_bounds = NULL;
 	bool		merged = true;
 	int			outer_lb_index;
@@ -2874,54 +2938,26 @@ partition_range_bounds_merge(int partnatts, FmgrInfo *partsupfuncs,
 	List	   *merged_datums = NIL;
 	List	   *merged_indexes = NIL;
 	List	   *merged_kinds = NIL;
+	PartitionBoundInfo outer_bi = outer_rel->boundinfo,
+					   inner_bi = inner_rel->boundinfo;
 	int			inner_default = inner_bi->default_index;
 	int			outer_default = outer_bi->default_index;
 	bool		inner_has_default = partition_bound_has_default(inner_bi);
 	bool		outer_has_default = partition_bound_has_default(outer_bi);
+	int 			   outer_nparts = outer_rel->nparts,
+					   inner_nparts = inner_rel->nparts;
 
 	Assert(outer_bi->strategy == inner_bi->strategy &&
 		   outer_bi->strategy == PARTITION_STRATEGY_RANGE);
 
-	*outer_parts = NIL;
-	*inner_parts = NIL;
+	Assert(*outer_parts == NIL);
+	Assert(*inner_parts == NIL);
 
-	/*
-	 * Allocate and initialize partition maps. We maintain four maps, two maps
-	 * for each joining relation. pmap[i] gives the partition from the other
-	 * relation which would join with ith partition of the given relation.
-	 * Partition i from the given relation will join with partition pmap[i]
-	 * from the other relation to produce partition mmap[i] of the join (merged
-	 * partition).
-	 *
-	 * pmap[i] = -1 indicates that ith partition of a given relation does not
-	 * have a matching partition from the other relation.
-	 *
-	 * mmap[i] = -1 indicates that ith partition of a given relation does not
-	 * contribute to the join result. That can happen only when the given
-	 * relation is the inner relation and it doesn't have a matching partition
-	 * from the outer relation, hence pmap[i] should be -1.
-	 *
-	 * In case of an outer join, every partition of the outer join will appear
-	 * in the join result, and thus has mmap[i] set for all i. But it's not
-	 * necessary that every partition on the outer side will have a matching
-	 * partition on the inner side. In such a case, we end up with pmap[i] = -1
-	 * and mmap[i] != -1.
-	 */
-	outer_pmap = (int *) palloc(sizeof(int) * outer_nparts);
-	outer_mmap = (int *) palloc(sizeof(int) * outer_nparts);
-	inner_pmap = (int *) palloc(sizeof(int) * inner_nparts);
-	inner_mmap = (int *) palloc(sizeof(int) * inner_nparts);
-
-	for (cnt1 = 0; cnt1 < outer_nparts; cnt1++)
-	{
-		outer_pmap[cnt1] = -1;
-		outer_mmap[cnt1] = -1;
-	}
-	for (cnt2 = 0; cnt2 < inner_nparts; cnt2++)
-	{
-		inner_pmap[cnt2] = -1;
-		inner_mmap[cnt2] = -1;
-	}
+	outer_maps = init_partition_map(outer_rel);
+	inner_maps = init_partition_map(inner_rel);
+	init_partition_maps(outer_rel, inner_rel,
+						&outer_pmap, &outer_mmap,
+						&inner_pmap, &inner_mmap);
 
 	/*
 	 * Merge the ranges (partitions) from both sides. Every iteration compares
@@ -3007,6 +3043,11 @@ partition_range_bounds_merge(int partnatts, FmgrInfo *partsupfuncs,
 			partition_range_merge(partnatts, partsupfuncs, partcollations,
 								  jointype, &outer_lb, &outer_ub, &inner_lb,
 								  &inner_ub, &merged_lb, &merged_ub);
+
+			merged_index = map_and_merge_partitions_tmp(outer_maps, inner_maps,
+													outer_part, inner_part,
+													&next_index);
+
 			merged_index = map_and_merge_partitions(outer_pmap, outer_mmap,
 													outer_part, inner_pmap,
 													inner_mmap, inner_part,
@@ -3225,16 +3266,15 @@ partition_range_bounds_merge(int partnatts, FmgrInfo *partsupfuncs,
  *
  */
 static PartitionBoundInfo
-partition_list_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
-							Oid *partcollation, PartitionBoundInfo outer_bi,
-							int outer_nparts, PartitionBoundInfo inner_bi,
-							int inner_nparts, JoinType jointype,
-							List **outer_parts, List **inner_parts)
+partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *partcollation,
+							RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+							List **outer_parts, List **inner_parts,
+							JoinType jointype)
 {
-	int		   *outer_pmap;	/* outer to inner partition map */
-	int		   *outer_mmap;	/* outer to merged partition map */
-	int		   *inner_pmap;	/* inner to outer partition map */
-	int		   *inner_mmap;	/* inner to merged partition map */
+	int		   *outer_pmap = NULL;	/* outer to inner partition map */
+	int		   *outer_mmap = NULL;	/* outer to merged partition map */
+	int		   *inner_pmap = NULL;	/* inner to outer partition map */
+	int		   *inner_mmap = NULL;	/* inner to merged partition map */
 	int			cnto;
 	int			cnti;
 	bool		merged = true;
@@ -3244,10 +3284,17 @@ partition_list_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
 	int			null_index;
 	int			default_index = -1;
 	PartitionBoundInfo merged_bounds = NULL;
-	int		   *outer_indexes = outer_bi->indexes;
-	int		   *inner_indexes = inner_bi->indexes;
-	int			outer_default = outer_bi->default_index;
-	int			inner_default = inner_bi->default_index;
+	PartitionBoundInfo outer_bi = outer_rel->boundinfo,
+					   inner_bi = inner_rel->boundinfo;
+	int			      *outer_indexes = outer_bi->indexes;
+	int			      *inner_indexes = inner_bi->indexes;
+	int				   outer_default = outer_bi->default_index;
+	int				   inner_default = inner_bi->default_index;
+	int 			   outer_nparts = outer_rel->nparts,
+					   inner_nparts = inner_rel->nparts;
+
+	Assert(*outer_parts == NIL);
+	Assert(*inner_parts == NIL);
 
 	Assert(outer_bi->strategy == inner_bi->strategy &&
 		   outer_bi->strategy == PARTITION_STRATEGY_LIST);
@@ -3255,43 +3302,9 @@ partition_list_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
 	/* List partitions do not require unbounded ranges. */
 	Assert(!outer_bi->kind && !inner_bi->kind);
 
-	/*
-	 * Allocate and initialize partition maps. We maintain four maps, two maps
-	 * for each joining relation. pmap[i] gives the partition from the other
-	 * relation which would join with ith partition of the given relation.
-	 * Partition i from the given relation will join with partition pmap[i]
-	 * from the other relation to produce partition mmap[i] of the join (merged
-	 * partition).
-	 *
-	 * pmap[i] = -1 indicates that ith partition of a given relation does not
-	 * have a matching partition from the other relation.
-	 *
-	 * mmap[i] = -1 indicates that ith partition of a given relation does not
-	 * contribute to the join result. That can happen only when the given
-	 * relation is the inner relation and it doesn't have a matching partition
-	 * from the outer relation, hence pmap[i] should be -1.
-	 *
-	 * In case of an outer join, every partition of the outer join will appear
-	 * in the join result, and thus has mmap[i] set for all i. But it's not
-	 * necessary that every partition on the outer side will have a matching
-	 * partition on the inner side. In such a case, we end up with pmap[i] = -1
-	 * and mmap[i] != -1.
-	 */
-	outer_pmap = (int *) palloc(sizeof(int) * outer_nparts);
-	outer_mmap = (int *) palloc(sizeof(int) * outer_nparts);
-	inner_pmap = (int *) palloc(sizeof(int) * inner_nparts);
-	inner_mmap = (int *) palloc(sizeof(int) * inner_nparts);
-
-	for (cnto = 0; cnto < outer_nparts; cnto++)
-	{
-		outer_pmap[cnto] = -1;
-		outer_mmap[cnto] = -1;
-	}
-	for (cnti = 0; cnti < inner_nparts; cnti++)
-	{
-		inner_pmap[cnti] = -1;
-		inner_mmap[cnti] = -1;
-	}
+	init_partition_maps(outer_rel, inner_rel,
+						&outer_pmap, &outer_mmap,
+						&inner_pmap, &inner_mmap);
 
 	/*
 	 * Merge the list value datums from both sides. Every iteration compares a
@@ -3530,14 +3543,19 @@ partition_list_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
  * modulii. But there seems to be hardly any requirement for the same.
  */
 static PartitionBoundInfo
-partition_hash_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
-							Oid *partcollation, PartitionBoundInfo outer_bi,
-							int outer_nparts, PartitionBoundInfo inner_bi,
-							int inner_nparts, JoinType jointype,
-							List **outer_parts, List **inner_parts)
+partition_hash_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+							List **outer_parts, List **inner_parts,
+							JoinType jointype)
 {
 	int			nparts;
 	int			cnt;
+	PartitionBoundInfo outer_bi = outer_rel->boundinfo,
+					   inner_bi = inner_rel->boundinfo;
+	int 			   outer_nparts = outer_rel->nparts,
+					   inner_nparts = inner_rel->nparts;
+
+	Assert(*outer_parts == NIL);
+	Assert(*inner_parts == NIL);
 
 	Assert(outer_bi->strategy == inner_bi->strategy &&
 		   outer_bi->strategy == PARTITION_STRATEGY_HASH);
@@ -3573,6 +3591,118 @@ partition_hash_bounds_merge(int partnatts, FmgrInfo *partsupfunc,
 	}
 
 	return outer_bi;
+}
+
+/*
+ * map_and_merge_partitions
+ *
+ * If the two given partitions (given by index1 and index2 resp.) are already
+ * mapped to each other return the index of corresponding partition in the
+ * merged set of partitions.  If they do not have a merged partition associated
+ * with them, assign a new merged partition index.  If the partitions are
+ * already mapped and their mapped partitions are different from each other,
+ * they can not be merged, so return -1.
+ *
+ * partmap1[i] gives the partition of relation 2 which matches ith partition of
+ * relation 1. Similarly for partmap2.
+ *
+ * mergemap1[i] gives the partition in the merged set to which ith partition of
+ * relation 1 maps to. Similarly for mergemap2.
+ *
+ * index1 and index2 are the indexes of matching partition from respective
+ * relations.
+ *
+ * *next_index is used and incremented when the given partitions require a new
+ * merged partition.
+ */
+static int
+map_and_merge_partitions_tmp(PartitionMap *outer_maps, PartitionMap *inner_maps,
+							 int index1, int index2, int *next_index)
+{
+	PartitionMap outer = outer_maps[index1];
+	PartitionMap inner = inner_maps[index2];
+	int			merged_index;
+
+	/*
+	 * If both the partitions are not mapped to each other, update the
+	 * maps.
+	 */
+	if (outer.from < 0 && inner.from < 0)
+	{
+		outer.from = index2;
+		inner.from = index1;
+	}
+
+	/*
+	 * If the given to partitions map to each other, find the corresponding
+	 * merged partition index .
+	 */
+	if (outer.from == index2 && inner.from == index1)
+	{
+		/*
+		 * If both the partitions are mapped to the same merged partition, get
+		 * the index of merged partition.
+		 */
+		if (outer.to == inner.to)
+		{
+			merged_index = outer.to;
+
+			/*
+			 * If the given two partitions do not have a merged partition
+			 * associated with them, allocate a new merged partition.
+			 */
+			if (merged_index < 0)
+			{
+				merged_index = *next_index;
+				*next_index = *next_index + 1;
+				outer.to = merged_index;
+				inner.to = merged_index;
+			}
+		}
+
+		/*
+		 * If partition from one relation was mapped to a merged partition but
+		 * not the partition from the other relation, map the same merged
+		 * partition to the partition from other relation, since matching
+		 * partitions map to the same merged partition.
+		 */
+		else if (outer.to >= 0 && inner.to < 0)
+		{
+			inner.to = outer.to;
+			merged_index = outer.to;
+		}
+		else if (outer.to < 0 && inner.to >= 0)
+		{
+			outer.to = inner.to;
+			merged_index = inner.to;
+		}
+		else
+		{
+			Assert(outer.to != inner.to &&
+				   outer.to >= 0 && inner.to >= 0);
+
+			/*
+			 * Both the partitions map to different merged partitions. This
+			 * means that multiple partitions from one relation matches to one
+			 * partition from the other relation. Partition-wise join does not
+			 * handle this case right now, since it requires ganging multiple
+			 * partitions together (into one RelOptInfo).
+			 */
+			merged_index = -1;
+		}
+	}
+	else
+	{
+		/*
+		 * Multiple partitions from one relation map to one partition from the
+		 * other relation. Partition-wise join does not handle this case right
+		 * now, since it requires ganging multiple partitions together (into
+		 * one RelOptInfo).
+		 */
+		merged_index = -1;
+	}
+
+	return merged_index;
 }
 
 /*
