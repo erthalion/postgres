@@ -68,10 +68,10 @@ static PartitionBoundInfo partition_hash_bounds_merge(RelOptInfo *outer_rel,
 							List **outer_parts, List **inner_parts,
 							JoinType jointype);
 static void generate_matching_part_pairs(PartitionMap *outer_maps,
-											 PartitionMap *inner_maps,
-											 int nparts1, int nparts2,
-											 JoinType jointype, int nparts,
-											 List **parts1, List **parts2);
+										 PartitionMap *inner_maps,
+										 int nparts1, int nparts2,
+										 JoinType jointype, int nparts,
+										 List **parts1, List **parts2);
 static PartitionBoundInfo build_merged_partition_bounds(char strategy,
 							  List *merged_datums, List *merged_indexes,
 							  List *merged_contents, int null_index,
@@ -94,16 +94,18 @@ static bool partition_range_merge_next_lb(int partnatts, FmgrInfo *supfuncs,
 							  List **merged_datums, List **merged_kinds,
 							  List **merged_indexes);
 static bool merge_default_partitions(PartitionBoundInfo outer_bi,
-							 PartitionMap *outer_maps,
-						 	 PartitionBoundInfo inner_bi,
-							 PartitionMap *inner_maps,
-						 	 JoinType jointype, int *next_index, int *default_index);
+						 			 PartitionBoundInfo inner_bi,
+						 			 PartitionMap *outer_maps,
+						 			 PartitionMap *inner_maps,
+						 			 JoinType jointype,
+									 int *next_index, int *default_index);
 static bool merge_null_partitions(PartitionBoundInfo outer_bi,
-					  PartitionMap *outer_maps,
-					  PartitionBoundInfo inner_bi,
-					  PartitionMap *inner_maps,
-					  JoinType jointype,
-					  int *next_index, int *null_index, int *default_index);
+								  PartitionMap *outer_maps,
+								  PartitionBoundInfo inner_bi,
+								  PartitionMap *inner_maps,
+								  JoinType jointype,
+								  int *next_index, int *null_index,
+								  int *default_index);
 
 /*
  * get_qual_from_partbound
@@ -2763,7 +2765,8 @@ partition_range_merge_next_lb(int partnatts, FmgrInfo *partsupfuncs,
  */
 static bool
 handle_missing_partition(PartitionMap *missing_side_maps,
-						 int missing_side_default, PartitionMap *other_maps,
+						 PartitionMap *other_maps,
+						 int missing_side_default,
 						 int other_part,
 						 bool missing_side_outer,
 						 bool missing_side_inner,
@@ -3071,8 +3074,8 @@ partition_range_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 									  jointype == JOIN_ANTI);
 				missing_side_outer = (jointype == JOIN_FULL);
 				merged = handle_missing_partition(inner_maps,
-												  inner_default,
 												  outer_maps,
+												  inner_default,
 												  outer_part,
 												  missing_side_outer,
 												  missing_side_inner,
@@ -3119,7 +3122,8 @@ partition_range_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 				missing_side_inner = (jointype == JOIN_FULL);
 
 				merged = handle_missing_partition(outer_maps,
-												  outer_default, inner_maps,
+												  inner_maps,
+												  outer_default,
 												  inner_part,
 												  missing_side_outer,
 												  missing_side_inner,
@@ -3170,8 +3174,8 @@ partition_range_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 
 	if (merged)
 	{
-		merged = merge_default_partitions(outer_bi, outer_maps,
-										  inner_bi, inner_maps,
+		merged = merge_default_partitions(outer_bi, inner_bi,
+										  outer_maps, inner_maps,
 										  jointype, &next_index,
 										  &default_index);
 	}
@@ -3369,7 +3373,8 @@ partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *partcollation,
 			missing_side_outer = (jointype == JOIN_FULL);
 
 			merged = handle_missing_partition(inner_maps,
-											  inner_default, outer_maps,
+											  outer_maps,
+											  inner_default,
 											  o_index,
 											  missing_side_outer,
 											  missing_side_inner,
@@ -3407,7 +3412,8 @@ partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *partcollation,
 			missing_side_inner = (jointype == JOIN_FULL);
 
 			merged = handle_missing_partition(outer_maps,
-											  outer_default, inner_maps,
+											  inner_maps,
+											  outer_default,
 											  i_index,
 											  missing_side_outer,
 											  missing_side_inner,
@@ -3441,8 +3447,8 @@ partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *partcollation,
 									   &default_index);
 
 	if (merged)
-		merged = merge_default_partitions(outer_bi, outer_maps,
-										  inner_bi, inner_maps,
+		merged = merge_default_partitions(outer_bi, inner_bi,
+										  outer_maps, inner_maps,
 										  jointype, &next_index,
 										  &default_index);
 
@@ -3452,9 +3458,9 @@ partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *partcollation,
 
 		/* Use maps to match partition from the joining relations. */
 		generate_matching_part_pairs(outer_maps, inner_maps,
-										 outer_nparts, inner_nparts,
-										 jointype, next_index,
-										 outer_parts, inner_parts);
+									 outer_nparts, inner_nparts,
+									 jointype, next_index,
+									 outer_parts, inner_parts);
 
 		/* Craft a PartitionBoundInfo to return. */
 		if (*outer_parts && *inner_parts)
@@ -3561,7 +3567,7 @@ partition_hash_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 
 static int
 map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
-							 int index1, int index2, int *next_index)
+						 int index1, int index2, int *next_index)
 {
 	PartitionMap *outer = &outer_maps[index1];
 	PartitionMap *inner = &inner_maps[index2];
@@ -3673,10 +3679,10 @@ map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
  */
 static void
 generate_matching_part_pairs(PartitionMap *outer_maps,
-								 PartitionMap *inner_maps,
-								 int nparts1, int nparts2,
-								 JoinType jointype, int nparts,
-								 List **parts1, List **parts2)
+							 PartitionMap *inner_maps,
+							 int nparts1, int nparts2,
+							 JoinType jointype, int nparts,
+							 List **parts1, List **parts2)
 {
 	bool		merged = true;
 	int		  **matching_parts;
@@ -3846,10 +3852,10 @@ build_merged_partition_bounds(char strategy, List *merged_datums,
  */
 static bool
 merge_default_partitions(PartitionBoundInfo outer_bi,
-							 PartitionMap *outer_maps,
-						 	 PartitionBoundInfo inner_bi,
-							 PartitionMap *inner_maps,
-						 	 JoinType jointype, int *next_index, int *default_index)
+						 PartitionBoundInfo inner_bi,
+						 PartitionMap *outer_maps,
+						 PartitionMap *inner_maps,
+						 JoinType jointype, int *next_index, int *default_index)
 {
 	int			outer_default = outer_bi->default_index;
 	int			inner_default = inner_bi->default_index;
@@ -3968,8 +3974,8 @@ merge_null_partitions(PartitionBoundInfo outer_bi,
 		missing_side_outer = (jointype == JOIN_FULL);
 
 		merged = handle_missing_partition(inner_maps,
-										  inner_default,
 										  outer_maps,
+										  inner_default,
 										  outer_ni,
 										  missing_side_outer,
 										  missing_side_inner, next_index,
@@ -4002,8 +4008,8 @@ merge_null_partitions(PartitionBoundInfo outer_bi,
 							  jointype == JOIN_ANTI);
 		missing_side_inner = (jointype == JOIN_FULL);
 		merged = handle_missing_partition(outer_maps,
-										  outer_default,
 										  inner_maps,
+										  outer_default,
 										  inner_ni,
 										  missing_side_outer,
 										  missing_side_inner,
