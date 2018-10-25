@@ -100,8 +100,8 @@ static bool merge_default_partitions(PartitionBoundInfo outer_bi,
 						 			 JoinType jointype,
 									 int *next_index, int *default_index);
 static bool merge_null_partitions(PartitionBoundInfo outer_bi,
-								  PartitionMap *outer_maps,
 								  PartitionBoundInfo inner_bi,
+								  PartitionMap *outer_maps,
 								  PartitionMap *inner_maps,
 								  JoinType jointype,
 								  int *next_index, int *null_index,
@@ -2752,35 +2752,34 @@ partition_range_merge_next_lb(int partnatts, FmgrInfo *partsupfuncs,
  *
  * This function handles all these cases.
  *
- * missing_side_pmap, missing_side_mmap and missing_side_default are the
- * partition map, merge map (See partition_range/list_bounds_merge() for
- * details) and the index of default partition respectively corresponding the
- * side with missing partition.
+ * maps_with_missing and missing_side_default are the partition maps (See
+ * partition_range/list_bounds_merge() for details) and the index of default
+ * partition respectively corresponding the side with missing partition.
  *
- * other_pmap, other_mmap and other_part are the partition map, merge map (See
+ * maps_with_extra and extra_part are the partition maps (See
  * partition_range/list_bounds_merge() for details) and the index of extra
  * partition respectively corresponding to the side with the extra partition.
  *
  * It returns true if the matching succeeds, otherwise returns false.
  */
 static bool
-handle_missing_partition(PartitionMap *missing_side_maps,
-						 PartitionMap *other_maps,
+handle_missing_partition(PartitionMap *maps_with_missing,
+						 PartitionMap *maps_with_extra,
 						 int missing_side_default,
-						 int other_part,
+						 int extra_part,
 						 bool missing_side_outer,
 						 bool missing_side_inner,
 						 int *next_index, int *default_index,
 						 int *merged_index)
 {
-	bool		missing_has_default = (missing_side_default != -1);
+	bool missing_has_default = (missing_side_default != -1);
 
 	if (missing_has_default)
 	{
-		*merged_index = map_and_merge_partitions(missing_side_maps,
-												 other_maps,
+		*merged_index = map_and_merge_partitions(maps_with_missing,
+												 maps_with_extra,
 												 missing_side_default,
-												 other_part,
+												 extra_part,
 												 next_index);
 		if (*merged_index < 0)
 			return false;
@@ -2818,12 +2817,12 @@ handle_missing_partition(PartitionMap *missing_side_maps,
 		 * fit in the join result. Nothing to do in that case. Else
 		 * create a new merged partition.
 		 */
-		PartitionMap *other_map = &other_maps[other_part];
-		if (other_map->to < 0)
+		PartitionMap *extra_map = &maps_with_extra[extra_part];
+		if (extra_map->to < 0)
 		{
-			other_map->to = *next_index;
+			extra_map->to = *next_index;
 			*next_index = *next_index + 1;
-			*merged_index = other_map->to;
+			*merged_index = extra_map->to;
 		}
 	}
 
@@ -2928,12 +2927,11 @@ partition_range_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 	while (outer_lb_index < outer_bi->ndatums ||
 		   inner_lb_index < inner_bi->ndatums)
 	{
-		PartitionRangeBound outer_lb;
-		PartitionRangeBound outer_ub;
-		PartitionRangeBound inner_lb;
-		PartitionRangeBound inner_ub;
-		PartitionRangeBound *merged_lb = NULL;
-		PartitionRangeBound *merged_ub = NULL;
+		PartitionRangeBound outer_lb, outer_ub,
+							inner_lb, inner_ub,
+							*merged_lb = NULL,
+							*merged_ub = NULL;
+
 		int			merged_index = -1;
 		bool		overlap;
 		bool		finished_outer = false;
@@ -3441,8 +3439,8 @@ partition_list_bounds_merge(FmgrInfo *partsupfunc, Oid *partcollation,
 	}
 
 	if (merged)
-		merged = merge_null_partitions(outer_bi, outer_maps,
-									   inner_bi, inner_maps,
+		merged = merge_null_partitions(outer_bi, inner_bi,
+									   outer_maps, inner_maps,
 									   jointype, &next_index, &null_index,
 									   &default_index);
 
@@ -3545,18 +3543,17 @@ partition_hash_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
 /*
  * map_and_merge_partitions
  *
- * If the two given partitions (given by index1 and index2 resp.) are already
- * mapped to each other return the index of corresponding partition in the
- * merged set of partitions.  If they do not have a merged partition associated
- * with them, assign a new merged partition index.  If the partitions are
- * already mapped and their mapped partitions are different from each other,
- * they can not be merged, so return -1.
+ * If the two given partitions (given by index1 and index2 resp.) are
+ * already mapped to each other return the index of corresponding partition in
+ * the merged set of partitions.  If they do not have a merged partition
+ * associated with them, assign a new merged partition index.  If the
+ * partitions are already mapped and their mapped partitions are different from
+ * each other, they can not be merged, so return -1.
  *
- * partmap1[i] gives the partition of relation 2 which matches ith partition of
- * relation 1. Similarly for partmap2.
- *
- * mergemap1[i] gives the partition in the merged set to which ith partition of
- * relation 1 maps to. Similarly for mergemap2.
+ * partmaps1[i] gives the mapping of partitions for both relations. It
+ * describes which partition of relation 2 matches ith partition of relation 1,
+ * and which partition in the merged set matches ith partition of relation 1
+ * maps to. Similarly for partmap2.
  *
  * index1 and index2 are the indexes of matching partition from respective
  * relations.
@@ -3566,36 +3563,36 @@ partition_hash_bounds_merge(RelOptInfo *outer_rel, RelOptInfo *inner_rel,
  */
 
 static int
-map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
+map_and_merge_partitions(PartitionMap *partmaps1, PartitionMap *partmaps2,
 						 int index1, int index2, int *next_index)
 {
-	PartitionMap *outer = &outer_maps[index1];
-	PartitionMap *inner = &inner_maps[index2];
-	int			merged_index;
+	PartitionMap 	*partmap1 = &partmaps1[index1];
+	PartitionMap 	*partmap2 = &partmaps2[index2];
+	int				merged_index;
 
 	/*
 	 * If both the partitions are not mapped to each other, update the
 	 * maps.
 	 */
-	if (outer->from < 0 && inner->from < 0)
+	if (partmap1->from < 0 && partmap2->from < 0)
 	{
-		outer->from = index2;
-		inner->from = index1;
+		partmap1->from = index2;
+		partmap2->from = index1;
 	}
 
 	/*
 	 * If the given to partitions map to each other, find the corresponding
 	 * merged partition index .
 	 */
-	if (outer->from == index2 && inner->from == index1)
+	if (partmap1->from == index2 && partmap2->from == index1)
 	{
 		/*
 		 * If both the partitions are mapped to the same merged partition, get
 		 * the index of merged partition.
 		 */
-		if (outer->to == inner->to)
+		if (partmap1->to == partmap2->to)
 		{
-			merged_index = outer->to;
+			merged_index = partmap1->to;
 
 			/*
 			 * If the given two partitions do not have a merged partition
@@ -3605,8 +3602,8 @@ map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
 			{
 				merged_index = *next_index;
 				*next_index = *next_index + 1;
-				outer->to = merged_index;
-				inner->to = merged_index;
+				partmap1->to = merged_index;
+				partmap2->to = merged_index;
 			}
 		}
 
@@ -3616,20 +3613,20 @@ map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
 		 * partition to the partition from other relation, since matching
 		 * partitions map to the same merged partition.
 		 */
-		else if (outer->to >= 0 && inner->to < 0)
+		else if (partmap1->to >= 0 && partmap2->to < 0)
 		{
-			inner->to = outer->to;
-			merged_index = outer->to;
+			partmap2->to = partmap1->to;
+			merged_index = partmap1->to;
 		}
-		else if (outer->to < 0 && inner->to >= 0)
+		else if (partmap1->to < 0 && partmap2->to >= 0)
 		{
-			outer->to = inner->to;
-			merged_index = inner->to;
+			partmap1->to = partmap2->to;
+			merged_index = partmap2->to;
 		}
 		else
 		{
-			Assert(outer->to != inner->to &&
-				   outer->to >= 0 && inner->to >= 0);
+			Assert(partmap1->to != partmap2->to &&
+				   partmap1->to >= 0 && partmap2->to >= 0);
 
 			/*
 			 * Both the partitions map to different merged partitions. This
@@ -3658,11 +3655,11 @@ map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
 /*
  * generate_matching_part_pairs
  *
- * mergemap1 and mergemap2 map each partition from either side of the join to a
- * merged partition resp. E.g. mergemap1[i] gives the merged partition to which
- * ith partition of first relation maps and mergemap2[j] gives the merged
- * partition to which jth partition of second relation maps. If mergemap1[i] =
- * mergemap2[j], i and j form the matching pair of partitions.
+ * partmaps1 map each partition from either side of the join to a merged
+ * partition resp. E.g. partmaps1[i].to gives the merged partition to which ith
+ * partition of first relation maps. Similarly for partmap2. If
+ * partmaps1[i].to == partmaps2[j].to, i and j form the matching pair of
+ * partitions.
  *
  * Given these maps this function produces the list pairs of partitions which
  * when joined produce the merged partitions in the order of merged partition
@@ -3678,45 +3675,46 @@ map_and_merge_partitions(PartitionMap *outer_maps, PartitionMap *inner_maps,
  * set to NIL.
  */
 static void
-generate_matching_part_pairs(PartitionMap *outer_maps,
-							 PartitionMap *inner_maps,
+generate_matching_part_pairs(PartitionMap *partmaps1, PartitionMap *partmaps2,
 							 int nparts1, int nparts2,
 							 JoinType jointype, int nparts,
-							 List **parts1, List **parts2)
+							 List **matched_parts1, List **matched_parts2)
 {
-	bool		merged = true;
-	int		  **matching_parts;
-	int			cnt1;
-	int			cnt2;
+	bool	merged = true;
+	int		*matching1 = (int *) palloc(sizeof(int) * nparts),
+			*matching2 = (int *) palloc(sizeof(int) * nparts);
+	int 	i;
 
-	matching_parts = (int **) palloc(sizeof(int *) * 2);
-	matching_parts[0] = (int *) palloc(sizeof(int) * nparts);
-	matching_parts[1] = (int *) palloc(sizeof(int) * nparts);
-
-	*parts1 = NIL;
-	*parts2 = NIL;
-
-	for (cnt1 = 0; cnt1 < nparts; cnt1++)
-	{
-		matching_parts[0][cnt1] = -1;
-		matching_parts[1][cnt1] = -1;
-	}
+	*matched_parts1 = NIL;
+	*matched_parts2 = NIL;
 
 	/* Set pairs of matching partitions. */
-	for (cnt1 = 0; cnt1 < nparts1; cnt1++)
+	for (i = 0; i < nparts; i++)
 	{
-		if (outer_maps[cnt1].to >= 0)
+		if (i >= nparts1)
+			matching1[i] = -1;
+		else
 		{
-			Assert(outer_maps[cnt1].to < nparts);
-			matching_parts[0][outer_maps[cnt1].to] = cnt1;
+			PartitionMap outer_map = partmaps1[i];
+
+			if (outer_map.to >= 0)
+			{
+				Assert(outer_map.to < nparts);
+				matching1[outer_map.to] = i;
+			}
 		}
-	}
-	for (cnt2 = 0; cnt2 < nparts2; cnt2++)
-	{
-		if (inner_maps[cnt2].to >= 0)
+
+		if (i >= nparts2)
+			matching2[i] = -1;
+		else
 		{
-			Assert(inner_maps[cnt2].to < nparts);
-			matching_parts[1][inner_maps[cnt2].to] = cnt2;
+			PartitionMap inner_map = partmaps2[i];
+
+			if (inner_map.to >= 0)
+			{
+				Assert(inner_map.to < nparts);
+				matching2[inner_map.to] = i;
+			}
 		}
 	}
 
@@ -3730,10 +3728,10 @@ generate_matching_part_pairs(PartitionMap *outer_maps,
 	 * changes to that. So, right now, we do not implement partition-wise join
 	 * in such cases.
 	 */
-	for (cnt1 = 0; cnt1 < nparts; cnt1++)
+	for (i = 0; i < nparts; i++)
 	{
-		int			part1 = matching_parts[0][cnt1];
-		int			part2 = matching_parts[1][cnt1];
+		int			part1 = matching1[i];
+		int			part2 = matching2[i];
 
 		/* At least one of the partitions should exist. */
 		Assert(part1 >= 0 || part2 >= 0);
@@ -3770,20 +3768,19 @@ generate_matching_part_pairs(PartitionMap *outer_maps,
 		if (!merged)
 			break;
 
-		*parts1 = lappend_int(*parts1, part1);
-		*parts2 = lappend_int(*parts2, part2);
+		*matched_parts1 = lappend_int(*matched_parts1, part1);
+		*matched_parts2 = lappend_int(*matched_parts2, part2);
 	}
 
-	pfree(matching_parts[0]);
-	pfree(matching_parts[1]);
-	pfree(matching_parts);
+	pfree(matching1);
+	pfree(matching2);
 
 	if (!merged)
 	{
-		list_free(*parts1);
-		list_free(*parts2);
-		*parts1 = NIL;
-		*parts2 = NIL;
+		list_free(*matched_parts1);
+		list_free(*matched_parts2);
+		*matched_parts1 = NIL;
+		*matched_parts2 = NIL;
 	}
 }
 
@@ -3851,19 +3848,17 @@ build_merged_partition_bounds(char strategy, List *merged_datums,
  * appear in the join result, so create a default merged partition.
  */
 static bool
-merge_default_partitions(PartitionBoundInfo outer_bi,
-						 PartitionBoundInfo inner_bi,
-						 PartitionMap *outer_maps,
-						 PartitionMap *inner_maps,
+merge_default_partitions(PartitionBoundInfo outer_bi, PartitionBoundInfo inner_bi,
+						 PartitionMap *outer_maps, PartitionMap *inner_maps,
 						 JoinType jointype, int *next_index, int *default_index)
 {
-	int			outer_default = outer_bi->default_index;
-	int			inner_default = inner_bi->default_index;
-	bool		outer_has_default = partition_bound_has_default(outer_bi);
-	bool		inner_has_default = partition_bound_has_default(inner_bi);
-	bool		merged = true;
-	PartitionMap *outer_default_map = NULL;
-	PartitionMap *inner_default_map = NULL;
+	int				outer_default = outer_bi->default_index;
+	int				inner_default = inner_bi->default_index;
+	bool			outer_has_default = partition_bound_has_default(outer_bi);
+	bool			inner_has_default = partition_bound_has_default(inner_bi);
+	bool			merged = true;
+	PartitionMap 	*outer_default_map = NULL;
+	PartitionMap 	*inner_default_map = NULL;
 
 	if (outer_has_default)
 		outer_default_map = &outer_maps[outer_default];
@@ -3939,12 +3934,10 @@ merge_default_partitions(PartitionBoundInfo outer_bi,
  * inner join. But we don't check the strictness operator here.
  */
 static bool
-merge_null_partitions(PartitionBoundInfo outer_bi,
-					  PartitionMap *outer_maps,
-					  PartitionBoundInfo inner_bi,
-					  PartitionMap *inner_maps,
-					  JoinType jointype,
-					  int *next_index, int *null_index, int *default_index)
+merge_null_partitions(PartitionBoundInfo outer_bi, PartitionBoundInfo inner_bi,
+					  PartitionMap *outer_maps, PartitionMap *inner_maps,
+					  JoinType jointype, int *next_index,
+					  int *null_index, int *default_index)
 {
 	bool		outer_has_null = partition_bound_accepts_nulls(outer_bi);
 	bool		inner_has_null = partition_bound_accepts_nulls(inner_bi);

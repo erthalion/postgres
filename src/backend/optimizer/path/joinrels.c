@@ -1394,9 +1394,6 @@ try_partitionwise_join(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 		Assert(joinrel->part_rels);
 	}
 
-	elog(DEBUG3, "join between relations %s and %s is considered for partition-wise join.",
-		 bmsToString(rel1->relids), bmsToString(rel2->relids));
-
 	/*
 	 * Create child-join relations for this partitioned join, if those don't
 	 * exist. Add paths to child-joins for a pair of child relations
