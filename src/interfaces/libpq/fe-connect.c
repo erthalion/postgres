@@ -713,7 +713,7 @@ PQconnectStartParams(const char *const *keywords,
 	if (conn == NULL)
 		return NULL;
 
-	conn->Pfdebug = stdout;
+	/*conn->Pfdebug = stdout;*/
 
 	/*
 	 * Parse the conninfo arrays

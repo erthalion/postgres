@@ -382,10 +382,13 @@ zlib_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
 {
 	ZlibStream* zs = (ZlibStream*)zstream;
     int rc;
+	int i = 0;
 	zs->tx.next_in = (Bytef *)buf;
 	zs->tx.avail_in = size;
 	do
 	{
+		fprintf(stdout, "zpq_write_tmp> avail_out = %d\n", zs->tx.avail_out);
+		fprintf(stdout, "zpq_write_tmp> avail_in = %d\n", zs->tx.avail_in);
 		if (zs->tx.avail_out == ZLIB_BUFFER_SIZE) /* Compress buffer is empty */
 		{
 			zs->tx.next_out = zs->tx_buf; /* Reset pointer to the  beginning of buffer */
@@ -393,6 +396,16 @@ zlib_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
 			if (zs->tx.avail_in != 0) /* Has something in input buffer */
 			{
 				rc = deflate(&zs->tx, Z_SYNC_FLUSH);
+				fprintf(stdout, "zpq_write_tmp post deflate> avail_out = %d\n", zs->tx.avail_out);
+				fprintf(stdout, "zpq_write_tmp post deflate> avail_in = %d\n", zs->tx.avail_in);
+				fprintf(stdout, "zpq_write_tmp post deflate> rc = %d\n", rc);
+
+				/*fprintf(stdout, "zpq_write_tmp post deflate> buffer ");*/
+				/*for (i = 0; i < 8192; i++)*/
+					/*fprintf(stdout, "%c", zs->tx.next_out[i]);*/
+
+				/*fprintf(stdout, "\n");*/
+
 				Assert(rc == Z_OK);
 				zs->tx.next_out = zs->tx_buf; /* Reset pointer to the  beginning of buffer */
 			}
@@ -413,6 +426,10 @@ zlib_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
 
 	zs->tx_buffered = ZLIB_BUFFER_SIZE - zs->tx.avail_out;
 
+	fprintf(stdout, "zpq_write_tmp post deflate> buffered %ld\n",
+					zs->tx_buffered);
+	fprintf(stdout, "zpq_write_tmp post deflate> return size - avail_in %ld\n",
+					size - zs->rx.avail_in);
 	return size - zs->tx.avail_in;
 }
 
@@ -423,6 +440,7 @@ zpq_write_tmp(ZpqStream *zstream,
 {
 	ZlibStream* zs = (ZlibStream*)zstream;
     int rc;
+	int i = 0;
 	zs->tx.next_in = (Bytef *)buf;
 	zs->tx.avail_in = size;
 	zs->tx.next_out = target;
@@ -443,6 +461,11 @@ zpq_write_tmp(ZpqStream *zstream,
 				fprintf(stdout, "zpq_write_tmp post deflate> avail_in = %d\n", zs->tx.avail_in);
 				fprintf(stdout, "zpq_write_tmp post deflate> rc = %d\n", rc);
 
+				/*fprintf(stdout, "zpq_write_tmp post deflate> buffer ");*/
+				/*for (i = 0; i < 8192; i++)*/
+					/*fprintf(stdout, "%c", zs->tx.next_out[i]);*/
+
+				/*fprintf(stdout, "\n");*/
 
 				Assert(rc == Z_OK);
 				/*zs->tx.next_out = zs->tx_buf; [> Reset pointer to the  beginning of buffer <]*/
@@ -469,7 +492,10 @@ zpq_write_tmp(ZpqStream *zstream,
 					zs->tx_buffered);
 	fprintf(stdout, "zpq_write_tmp post deflate> return size - avail_in %ld\n",
 					size - zs->rx.avail_in);
-	return size - zs->tx.avail_in;
+	fprintf(stdout, "zpq_write_tmp post deflate> return %ld\n",
+					size - zs->rx.avail_in);
+	/*return size - zs->tx.avail_in;*/
+	return ZLIB_BUFFER_SIZE - zs->tx.avail_out;
 }
 
 static void
