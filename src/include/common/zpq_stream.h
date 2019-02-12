@@ -21,12 +21,38 @@ typedef ssize_t(*zpq_rx_func)(void* arg, void* data, size_t size);
 
 ZpqStream* zpq_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void* arg);
 ssize_t zpq_read(ZpqStream* zs, void* buf, size_t size, size_t* processed);
+ssize_t zpq_read_tmp(ZpqStream *zstream, void *buf, size_t size,
+								  void *source, size_t source_size, size_t *processed);
 ssize_t zpq_write(ZpqStream* zs, void const* buf, size_t size, size_t* processed);
+ssize_t zpq_write_tmp(ZpqStream* zs,
+					  void const* buf, size_t size,
+					  void *target, size_t target_size, size_t* processed);
 char const* zpq_error(ZpqStream* zs);
 size_t zpq_buffered(ZpqStream* zs);
 void zpq_free(ZpqStream* zs);
 
 void zpq_get_supported_algorithms(char algorithms[ZPQ_MAX_ALGORITHMS]);
 bool zpq_set_algorithm(char name);
+
+#if HAVE_LIBZ
+#include <zlib.h>
+#define ZLIB_BUFFER_SIZE 8192
+
+typedef struct ZlibStream
+{
+	z_stream tx;
+	z_stream rx;
+
+	zpq_tx_func    tx_func;
+	zpq_rx_func    rx_func;
+	void*          arg;
+
+	size_t         tx_buffered;
+
+	Bytef          tx_buf[ZLIB_BUFFER_SIZE];
+	Bytef          rx_buf[ZLIB_BUFFER_SIZE];
+} ZlibStream;
+
+#endif
 
 #endif

@@ -197,23 +197,23 @@ zstd_name(void)
 #include <malloc.h>
 #include <zlib.h>
 
-#define ZLIB_BUFFER_SIZE 8192
+/*#define ZLIB_BUFFER_SIZE 8192*/
 #define ZLIB_COMPRESSION_LEVEL 1
 
-typedef struct ZlibStream
-{
-	z_stream tx;
-	z_stream rx;
+/*typedef struct ZlibStream*/
+/*{*/
+	/*z_stream tx;*/
+	/*z_stream rx;*/
 
-	zpq_tx_func    tx_func;
-	zpq_rx_func    rx_func;
-	void*          arg;
+	/*zpq_tx_func    tx_func;*/
+	/*zpq_rx_func    rx_func;*/
+	/*void*          arg;*/
 
-	size_t         tx_buffered;
+	/*size_t         tx_buffered;*/
 
-	Bytef          tx_buf[ZLIB_BUFFER_SIZE];
-	Bytef          rx_buf[ZLIB_BUFFER_SIZE];
-} ZlibStream;
+	/*Bytef          tx_buf[ZLIB_BUFFER_SIZE];*/
+	/*Bytef          rx_buf[ZLIB_BUFFER_SIZE];*/
+/*} ZlibStream;*/
 
 static ZpqStream*
 zlib_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void *arg)
@@ -261,15 +261,26 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 
 	while (1)
 	{
+		fprintf(stdout, "zpq_read> avail_out = %d\n", zs->rx.avail_out);
+		fprintf(stdout, "zpq_read> avail_in = %d\n", zs->rx.avail_in);
+		fprintf(stdout, "zpq_read> size = %ld\n", size);
+
 		if (zs->rx.avail_in != 0) /* If there is some data in receiver buffer, then decompress it */
 		{
 			rc = inflate(&zs->rx, Z_SYNC_FLUSH);
+
+			fprintf(stdout, "zpq_read post inflate> avail_out = %d\n", zs->rx.avail_out);
+			fprintf(stdout, "zpq_read post inflate> avail_in = %d\n", zs->rx.avail_in);
+			fprintf(stdout, "zpq_read post inflate> rc = %d\n", rc);
+
 			if (rc != Z_OK)
 			{
 				return ZPQ_DECOMPRESS_ERROR;
 			}
 			if (zs->rx.avail_out != size)
 			{
+				fprintf(stdout, "zpq_read post inflate> return size - avail_out %ld\n",
+								size - zs->rx.avail_out);
 				return size - zs->rx.avail_out;
 			}
 			if (zs->rx.avail_in == 0)
@@ -282,6 +293,7 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 			zs->rx.next_in = zs->rx_buf;
 		}
 		rc = zs->rx_func(zs->arg, zs->rx.next_in + zs->rx.avail_in, zs->rx_buf + ZLIB_BUFFER_SIZE - zs->rx.next_in - zs->rx.avail_in);
+		fprintf(stdout, "zpq_read> rc read %ld\n", rc);
 		if (rc > 0)
 		{
 			zs->rx.avail_in += rc;
@@ -291,6 +303,77 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 			*processed = size - zs->rx.avail_out;
 			return rc;
 		}
+	}
+}
+
+ssize_t
+zpq_read_tmp(ZpqStream *zstream, void *buf, size_t size,
+								 void *source, size_t source_size, size_t *processed)
+{
+	ZlibStream* zs = (ZlibStream*)zstream;
+	int rc = 0;
+	int i = 0;
+	Bytef *tmp;
+	zs->rx.next_out = buf;
+	zs->rx.avail_out = size;
+
+	if (source_size > 0)
+	{
+		zs->rx.next_in = zs->rx_buf;
+		zs->rx.avail_in = source_size;
+	}
+
+	while (1)
+	{
+		fprintf(stdout, "zpq_read_tmp> avail_out = %d\n", zs->rx.avail_out);
+		fprintf(stdout, "zpq_read_tmp> avail_in = %d\n", zs->rx.avail_in);
+
+		if (zs->rx.avail_in > 0) /* If there is some data in receiver buffer, then decompress it */
+		{
+			rc = inflate(&zs->rx, Z_SYNC_FLUSH);
+			// Z_BUF_ERROR
+
+			/*fprintf(stdout, "tmp buf> ");*/
+			/*for (i = 0; i < size; i++)*/
+				/*fprintf(stdout, "%c", zs->rx.next_out[i]);*/
+
+			/*fprintf(stdout, "\n");*/
+
+			fprintf(stdout, "zpq_read_tmp post inflate> avail_out = %d\n", zs->rx.avail_out);
+			fprintf(stdout, "zpq_read_tmp post inflate> avail_in = %d\n", zs->rx.avail_in);
+			fprintf(stdout, "zpq_read_tmp post inflate> rc = %d\n", rc);
+
+			if (rc != Z_OK)
+			{
+				return ZPQ_DECOMPRESS_ERROR;
+			}
+			if (zs->rx.avail_out != size)
+			{
+				fprintf(stdout, "zpq_read_tmp post inflate> return size - avail_out %ld\n",
+								size - zs->rx.avail_out);
+				return size - zs->rx.avail_out;
+			}
+			/*if (zs->rx.avail_in == 0)*/
+			/*{*/
+				/*zs->rx.next_in = zs->rx_buf;*/
+			/*}*/
+		}
+		/*else*/
+		/*{*/
+			/*zs->rx.next_in = zs->rx_buf;*/
+		/*}*/
+
+		fprintf(stdout, "zpq_read_tmp post inflate> GET MORE DATA\n");
+		/*rc = zs->rx_func(zs->arg, zs->rx.next_in + zs->rx.avail_in, zs->rx_buf + size - zs->rx.next_in - zs->rx.avail_in);*/
+		/*if (rc > 0)*/
+		/*{*/
+			/*zs->rx.avail_in += rc;*/
+		/*}*/
+		/*else*/
+		/*{*/
+			/**processed = size - zs->rx.avail_out;*/
+			/*return rc;*/
+		/*}*/
 	}
 }
 
@@ -330,6 +413,62 @@ zlib_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
 
 	zs->tx_buffered = ZLIB_BUFFER_SIZE - zs->tx.avail_out;
 
+	return size - zs->tx.avail_in;
+}
+
+ssize_t
+zpq_write_tmp(ZpqStream *zstream,
+			  void const *buf, size_t size,
+			  void *target, size_t target_size, size_t *processed)
+{
+	ZlibStream* zs = (ZlibStream*)zstream;
+    int rc;
+	zs->tx.next_in = (Bytef *)buf;
+	zs->tx.avail_in = size;
+	zs->tx.next_out = target;
+	zs->tx.avail_out = target_size;
+
+	do
+	{
+		fprintf(stdout, "zpq_write_tmp> avail_out = %d\n", zs->tx.avail_out);
+		fprintf(stdout, "zpq_write_tmp> avail_in = %d\n", zs->tx.avail_in);
+		if (zs->tx.avail_out == ZLIB_BUFFER_SIZE) /* Compress buffer is empty */
+		{
+			/*zs->tx.next_out = zs->tx_buf; [> Reset pointer to the  beginning of buffer <]*/
+
+			if (zs->tx.avail_in != 0) /* Has something in input buffer */
+			{
+				rc = deflate(&zs->tx, Z_SYNC_FLUSH);
+				fprintf(stdout, "zpq_write_tmp post deflate> avail_out = %d\n", zs->tx.avail_out);
+				fprintf(stdout, "zpq_write_tmp post deflate> avail_in = %d\n", zs->tx.avail_in);
+				fprintf(stdout, "zpq_write_tmp post deflate> rc = %d\n", rc);
+
+
+				Assert(rc == Z_OK);
+				/*zs->tx.next_out = zs->tx_buf; [> Reset pointer to the  beginning of buffer <]*/
+			}
+		}
+		/*rc = zs->tx_func(zs->arg, zs->tx.next_out, ZLIB_BUFFER_SIZE - zs->tx.avail_out);*/
+		/*if (rc > 0)*/
+		/*{*/
+			/*zs->tx.next_out += rc;*/
+			/*zs->tx.avail_out += rc;*/
+		/*}*/
+		/*else*/
+		/*{*/
+			/**processed = size - zs->tx.avail_in;*/
+			/*zs->tx_buffered = ZLIB_BUFFER_SIZE - zs->tx.avail_out;*/
+			/*return rc;*/
+		/*}*/
+	} while (zs->tx.avail_out == ZLIB_BUFFER_SIZE && zs->tx.avail_in != 0); /* repeat sending data until first partial write */
+
+	/*zs->tx_buffered = ZLIB_BUFFER_SIZE - zs->tx.avail_out;*/
+	zs->tx_buffered = 0;
+
+	fprintf(stdout, "zpq_write_tmp post deflate> buffered %ld\n",
+					zs->tx_buffered);
+	fprintf(stdout, "zpq_write_tmp post deflate> return size - avail_in %ld\n",
+					size - zs->rx.avail_in);
 	return size - zs->tx.avail_in;
 }
 

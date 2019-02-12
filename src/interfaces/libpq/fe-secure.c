@@ -229,6 +229,59 @@ pqsecure_read(PGconn *conn, void *ptr, size_t len)
 }
 
 ssize_t
+pqsecure_read_tmp(PGconn *conn, void *ptr, size_t len)
+{
+	ssize_t		n = 0;
+	void *buf;
+	ssize_t buf_len;
+
+	fprintf(stdout, "pqsecure_read_tmp\n");
+	if (conn->zstream)
+	{
+		ZlibStream *stream = (ZlibStream*)conn->zstream;
+
+		if (stream->rx.avail_in != 0)
+		{
+			size_t processed = 0;
+			buf = stream->rx.next_in;
+			buf_len = stream->rx.avail_in;
+
+			n = zpq_read_tmp(conn->zstream, ptr, len, buf, n, &processed);
+			return n;
+		}
+		else
+		{
+			buf = &(stream->rx_buf);
+			buf_len = ZLIB_BUFFER_SIZE;
+		}
+	}
+	else
+	{
+		buf = ptr;
+		buf_len = len;
+	}
+
+#ifdef USE_SSL
+	if (conn->ssl_in_use)
+	{
+		n = pgtls_read(conn, buf, buf_len);
+	}
+	else
+#endif
+	{
+		n = pqsecure_raw_read(conn, buf, buf_len);
+	}
+
+	if (conn->zstream && n > 0)
+	{
+		size_t processed = 0;
+		n = zpq_read_tmp(conn->zstream, ptr, len, buf, n, &processed);
+	}
+
+	return n;
+}
+
+ssize_t
 pqsecure_raw_read(PGconn *conn, void *ptr, size_t len)
 {
 	ssize_t		n;
@@ -304,6 +357,45 @@ pqsecure_write(PGconn *conn, const void *ptr, size_t len)
 
 	return n;
 }
+
+ssize_t
+pqsecure_write_tmp(PGconn *conn, const void *ptr, size_t len)
+{
+	ssize_t		n;
+	void *buf;
+	ssize_t buf_len;
+
+	fprintf(stdout, "pqsecure_write_tmp\n");
+	if (conn->zstream)
+	{
+		size_t processed = 0;
+		ZlibStream *stream = (ZlibStream*)conn->zstream;
+
+		buf = &(stream->tx_buf);
+		buf_len = ZLIB_BUFFER_SIZE;
+
+		buf_len = zpq_write_tmp(conn->zstream, ptr, len, buf, buf_len, &processed);
+	}
+	else
+	{
+		buf = ptr;
+		buf_len = len;
+	}
+
+#ifdef USE_SSL
+	if (conn->ssl_in_use)
+	{
+		n = pgtls_write(conn, buf, buf_len);
+	}
+	else
+#endif
+	{
+		n = pqsecure_raw_write(conn, buf, buf_len);
+	}
+
+	return n;
+}
+
 
 ssize_t
 pqsecure_raw_write(PGconn *conn, const void *ptr, size_t len)
