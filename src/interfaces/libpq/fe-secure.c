@@ -399,7 +399,7 @@ pqsecure_write_tmp(PGconn *conn, const void *ptr, size_t len)
 		n = pqsecure_raw_write(conn, buf, buf_len);
 	}
 
-	return n;
+	return (n == buf_len) ? len : n;
 }
 
 
