@@ -216,6 +216,7 @@ pqsecure_read(PGconn *conn, void *ptr, size_t len)
 	void *buf;
 	ssize_t buf_len;
 
+#ifdef USE_COMPRESSION
 	if (conn->zstream)
 	{
 		n = zpq_read_drain(conn->zstream, ptr, len);
@@ -233,6 +234,10 @@ pqsecure_read(PGconn *conn, void *ptr, size_t len)
 		buf = ptr;
 		buf_len = len;
 	}
+#else
+	buf = ptr;
+	buf_len = len;
+#endif
 
 #ifdef USE_SSL
 	if (conn->ssl_in_use)
@@ -245,10 +250,12 @@ pqsecure_read(PGconn *conn, void *ptr, size_t len)
 		n = pqsecure_raw_read(conn, buf, buf_len);
 	}
 
+#ifdef USE_COMPRESSION
 	if (conn->zstream && n > 0)
 	{
 		n = zpq_read(conn->zstream, ptr, len, buf, n);
 	}
+#endif
 
 	return n;
 }
@@ -318,6 +325,7 @@ pqsecure_write(PGconn *conn, const void *ptr, size_t len)
 	ssize_t 	buf_len;
 	void 		*buf;
 
+#ifdef USE_COMPRESSION
 	if (conn->zstream)
 	{
 		buf = zpq_buffer(conn->zstream, ZPQ_WRITE_BUFFER);
@@ -330,6 +338,10 @@ pqsecure_write(PGconn *conn, const void *ptr, size_t len)
 		buf = ptr;
 		buf_len = len;
 	}
+#else
+	buf = ptr;
+	buf_len = len;
+#endif
 
 #ifdef USE_SSL
 	if (conn->ssl_in_use)
@@ -342,6 +354,11 @@ pqsecure_write(PGconn *conn, const void *ptr, size_t len)
 		n = pqsecure_raw_write(conn, buf, buf_len);
 	}
 
+	/*
+	 * compressed could be bigger, maybe because this from zlib:
+	 * destLen is the total size of the destination buffer,
+	 * which must be at least 0.1% larger than sourceLen plus 12 bytes.
+	 */
 	return (n == buf_len) ? len : n;
 }
 

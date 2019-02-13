@@ -16,6 +16,10 @@
 #define ZPQ_READ_BUFFER 0
 #define ZPQ_WRITE_BUFFER 1
 
+#if HAVE_LIBZ || HAVE_LIBZSTD
+#define USE_COMPRESSION
+#endif
+
 struct ZpqStream;
 typedef struct ZpqStream ZpqStream;
 

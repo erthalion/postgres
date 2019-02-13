@@ -154,6 +154,7 @@ secure_read(Port *port, ZpqStream *zs, void *ptr, size_t len)
 	ProcessClientReadInterrupt(false);
 
 retry:
+#ifdef USE_COMPRESSION
 	if (zs)
 	{
 		n = zpq_read_drain(zs, ptr, len);
@@ -170,6 +171,10 @@ retry:
 		buf = ptr;
 		buf_len = len;
 	}
+#else
+	buf = ptr;
+	buf_len = len;
+#endif
 
 #ifdef USE_SSL
 	waitfor = 0;
@@ -233,10 +238,12 @@ retry:
 		goto retry;
 	}
 
+#ifdef USE_COMPRESSION
 	if (zs && n > 0)
 	{
 		n = zpq_read(zs, ptr, len, buf, n);
 	}
+#endif
 
 	/*
 	 * Process interrupts that happened during a successful (or non-blocking,
@@ -282,6 +289,7 @@ secure_write(Port *port, ZpqStream *zs, void *ptr, size_t len)
 	/* Deal with any already-pending interrupt condition. */
 	ProcessClientWriteInterrupt(false);
 
+#ifdef USE_COMPRESSION
 	if (zs)
 	{
 		buf = zpq_buffer(zs, ZPQ_WRITE_BUFFER);
@@ -294,6 +302,10 @@ secure_write(Port *port, ZpqStream *zs, void *ptr, size_t len)
 		buf = ptr;
 		buf_len = len;
 	}
+#else
+	buf = ptr;
+	buf_len = len;
+#endif
 
 retry:
 	waitfor = 0;
@@ -347,6 +359,11 @@ retry:
 	 */
 	ProcessClientWriteInterrupt(false);
 
+	/*
+	 * compressed could be bigger, maybe because this from zlib:
+	 * destLen is the total size of the destination buffer,
+	 * which must be at least 0.1% larger than sourceLen plus 12 bytes.
+	 */
 	return (n == buf_len) ? len : n;
 }
 

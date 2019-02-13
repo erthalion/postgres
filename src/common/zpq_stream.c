@@ -305,6 +305,7 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, void *source, size_t sourc
 	{
 		if (zs->rx.avail_in > 0) /* If there is some data in receiver buffer, then decompress it */
 		{
+			/* Handle Z_BUF_ERROR for no progress? */
 			rc = inflate(&zs->rx, Z_SYNC_FLUSH);
 			if (rc != Z_OK)
 			{
@@ -328,17 +329,19 @@ zlib_write(ZpqStream *zstream, void const *buf, size_t size, void *target, size_
 	zs->tx.next_out = target;
 	zs->tx.avail_out = target_size;
 
+	/* repeat sending data until first partial write */
 	do
 	{
 		if (zs->tx.avail_out == ZLIB_BUFFER_SIZE) /* Compress buffer is empty */
 		{
 			if (zs->tx.avail_in != 0) /* Has something in input buffer */
 			{
+				/* Handle Z_BUF_ERROR for no progress? */
 				rc = deflate(&zs->tx, Z_SYNC_FLUSH);
 				Assert(rc == Z_OK);
 			}
 		}
-	} while (zs->tx.avail_out == ZLIB_BUFFER_SIZE && zs->tx.avail_in != 0); /* repeat sending data until first partial write */
+	} while (zs->tx.avail_out == ZLIB_BUFFER_SIZE && zs->tx.avail_in != 0);
 
 	zs->tx_buffered = 0;
 
