@@ -224,6 +224,122 @@ retry:
 }
 
 ssize_t
+secure_read_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len)
+{
+	ssize_t		n = 0;
+	int			waitfor;
+	void *buf;
+	ssize_t buf_len;
+
+	/* Deal with any already-pending interrupt condition. */
+	ProcessClientReadInterrupt(false);
+
+retry:
+	fprintf(stdout, "secure_read_tmp\n");
+	if (zs)
+	{
+		ZlibStream *stream = (ZlibStream*)zs;
+
+		if (stream->rx.avail_in != 0)
+		{
+			size_t processed = 0;
+			buf = stream->rx.next_in;
+			buf_len = stream->rx.avail_in;
+
+			n = zpq_read_tmp(zs, ptr, len, buf, n, &processed);
+			return n;
+		}
+		else
+		{
+			buf = &(stream->rx_buf);
+			buf_len = ZLIB_BUFFER_SIZE;
+		}
+	}
+	else
+	{
+		buf = ptr;
+		buf_len = len;
+	}
+
+#ifdef USE_SSL
+	waitfor = 0;
+	if (port->ssl_in_use)
+	{
+		n = be_tls_read(port, buf, buf_len, &waitfor);
+	}
+	else
+#endif
+	{
+		n = secure_raw_read(port, buf, buf_len);
+		waitfor = WL_SOCKET_READABLE;
+	}
+
+	/* In blocking mode, wait until the socket is ready */
+	if (n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN))
+	{
+		WaitEvent	event;
+
+		Assert(waitfor);
+
+		ModifyWaitEvent(FeBeWaitSet, 0, waitfor, NULL);
+
+		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1,
+						 WAIT_EVENT_CLIENT_READ);
+
+		/*
+		 * If the postmaster has died, it's not safe to continue running,
+		 * because it is the postmaster's job to kill us if some other backend
+		 * exits uncleanly.  Moreover, we won't run very well in this state;
+		 * helper processes like walwriter and the bgwriter will exit, so
+		 * performance may be poor.  Finally, if we don't exit, pg_ctl will be
+		 * unable to restart the postmaster without manual intervention, so no
+		 * new connections can be accepted.  Exiting clears the deck for a
+		 * postmaster restart.
+		 *
+		 * (Note that we only make this check when we would otherwise sleep on
+		 * our latch.  We might still continue running for a while if the
+		 * postmaster is killed in mid-query, or even through multiple queries
+		 * if we never have to wait for read.  We don't want to burn too many
+		 * cycles checking for this very rare condition, and this should cause
+		 * us to exit quickly in most cases.)
+		 */
+		if (event.events & WL_POSTMASTER_DEATH)
+			ereport(FATAL,
+					(errcode(ERRCODE_ADMIN_SHUTDOWN),
+					 errmsg("terminating connection due to unexpected postmaster exit")));
+
+		/* Handle interrupt. */
+		if (event.events & WL_LATCH_SET)
+		{
+			ResetLatch(MyLatch);
+			ProcessClientReadInterrupt(true);
+
+			/*
+			 * We'll retry the read. Most likely it will return immediately
+			 * because there's still no data available, and we'll wait for the
+			 * socket to become ready again.
+			 */
+		}
+		goto retry;
+	}
+
+	if (zs && n > 0)
+	{
+		size_t processed = 0;
+		n = zpq_read_tmp(zs, ptr, len, buf, n, &processed);
+	}
+
+	/*
+	 * Process interrupts that happened during a successful (or non-blocking,
+	 * or hard-failed) read.
+	 */
+	ProcessClientReadInterrupt(false);
+
+	return n;
+}
+
+
+ssize_t
 secure_raw_read(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
@@ -309,6 +425,95 @@ retry:
 	ProcessClientWriteInterrupt(false);
 
 	return n;
+}
+
+ssize_t
+secure_write_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len)
+{
+	ssize_t		n;
+	int			waitfor;
+	void *buf;
+	ssize_t buf_len;
+	int i = 0;
+
+	/* Deal with any already-pending interrupt condition. */
+	ProcessClientWriteInterrupt(false);
+
+	fprintf(stdout, "secure_write_tmp\n");
+	if (zs)
+	{
+		size_t processed = 0;
+		ZlibStream *stream = (ZlibStream*)zs;
+
+		buf = &(stream->tx_buf);
+		buf_len = ZLIB_BUFFER_SIZE;
+
+		buf_len = zpq_write_tmp(zs, ptr, len, buf, buf_len, &processed);
+		/*fprintf(stdout, "zpq_write_tmp post deflate> buffer ");*/
+		/*for (i = 0; i < 15; i++)*/
+			/*fprintf(stdout, "%c", ((Bytef*)buf)[i]);*/
+
+		/*fprintf(stdout, "\n");*/
+	}
+	else
+	{
+		buf = ptr;
+		buf_len = len;
+	}
+
+retry:
+	waitfor = 0;
+#ifdef USE_SSL
+	if (port->ssl_in_use)
+	{
+		n = be_tls_write(port, buf, buf_len, &waitfor);
+	}
+	else
+#endif
+	{
+		n = secure_raw_write(port, buf, buf_len);
+		waitfor = WL_SOCKET_WRITEABLE;
+	}
+
+	if (n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN))
+	{
+		WaitEvent	event;
+
+		Assert(waitfor);
+
+		ModifyWaitEvent(FeBeWaitSet, 0, waitfor, NULL);
+
+		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1,
+						 WAIT_EVENT_CLIENT_WRITE);
+
+		/* See comments in secure_read. */
+		if (event.events & WL_POSTMASTER_DEATH)
+			ereport(FATAL,
+					(errcode(ERRCODE_ADMIN_SHUTDOWN),
+					 errmsg("terminating connection due to unexpected postmaster exit")));
+
+		/* Handle interrupt. */
+		if (event.events & WL_LATCH_SET)
+		{
+			ResetLatch(MyLatch);
+			ProcessClientWriteInterrupt(true);
+
+			/*
+			 * We'll retry the write. Most likely it will return immediately
+			 * because there's still no buffer space available, and we'll wait
+			 * for the socket to become ready again.
+			 */
+		}
+		goto retry;
+	}
+
+	/*
+	 * Process interrupts that happened during a successful (or non-blocking,
+	 * or hard-failed) write.
+	 */
+	ProcessClientWriteInterrupt(false);
+
+	return (n == buf_len) ? len : n;
 }
 
 ssize_t

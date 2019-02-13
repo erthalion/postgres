@@ -1012,10 +1012,12 @@ pq_recvbuf(bool nowait)
 	for (;;)
 	{
 		size_t processed = 0;
-		r = PqStream
-			? zpq_read(PqStream, PqRecvBuffer + PqRecvLength,
-					   PQ_RECV_BUFFER_SIZE - PqRecvLength, &processed)
-			: secure_read(MyProcPort, PqRecvBuffer + PqRecvLength,
+		/*r = PqStream*/
+			/*? zpq_read(PqStream, PqRecvBuffer + PqRecvLength,*/
+					   /*PQ_RECV_BUFFER_SIZE - PqRecvLength, &processed)*/
+			/*: secure_read(MyProcPort, PqRecvBuffer + PqRecvLength,*/
+						  /*PQ_RECV_BUFFER_SIZE - PqRecvLength);*/
+		r = secure_read_tmp(MyProcPort, PqStream, PqRecvBuffer + PqRecvLength,
 						  PQ_RECV_BUFFER_SIZE - PqRecvLength);
 		PqRecvLength += processed;
 
@@ -1467,9 +1469,10 @@ internal_flush(void)
 		int		r;
 		size_t  processed = 0;
 		size_t  available = bufend - bufptr;
-		r = PqStream
-			? zpq_write(PqStream, bufptr, available, &processed)
-			: secure_write(MyProcPort, bufptr, available);
+		/*r = PqStream*/
+			/*? zpq_write(PqStream, bufptr, available, &processed)*/
+			/*: secure_write(MyProcPort, bufptr, available);*/
+		r = secure_write_tmp(MyProcPort, PqStream, bufptr, available);
 		bufptr += processed;
 		PqSendStart += processed;
 
