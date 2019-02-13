@@ -261,17 +261,9 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 
 	while (1)
 	{
-		fprintf(stdout, "zpq_read> avail_out = %d\n", zs->rx.avail_out);
-		fprintf(stdout, "zpq_read> avail_in = %d\n", zs->rx.avail_in);
-		fprintf(stdout, "zpq_read> size = %ld\n", size);
-
 		if (zs->rx.avail_in != 0) /* If there is some data in receiver buffer, then decompress it */
 		{
 			rc = inflate(&zs->rx, Z_SYNC_FLUSH);
-
-			fprintf(stdout, "zpq_read post inflate> avail_out = %d\n", zs->rx.avail_out);
-			fprintf(stdout, "zpq_read post inflate> avail_in = %d\n", zs->rx.avail_in);
-			fprintf(stdout, "zpq_read post inflate> rc = %d\n", rc);
 
 			if (rc != Z_OK)
 			{
@@ -279,8 +271,6 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 			}
 			if (zs->rx.avail_out != size)
 			{
-				fprintf(stdout, "zpq_read post inflate> return size - avail_out %ld\n",
-								size - zs->rx.avail_out);
 				return size - zs->rx.avail_out;
 			}
 			if (zs->rx.avail_in == 0)
@@ -293,7 +283,6 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 			zs->rx.next_in = zs->rx_buf;
 		}
 		rc = zs->rx_func(zs->arg, zs->rx.next_in + zs->rx.avail_in, zs->rx_buf + ZLIB_BUFFER_SIZE - zs->rx.next_in - zs->rx.avail_in);
-		fprintf(stdout, "zpq_read> rc read %ld\n", rc);
 		if (rc > 0)
 		{
 			zs->rx.avail_in += rc;
@@ -308,7 +297,7 @@ zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 
 ssize_t
 zpq_read_tmp(ZpqStream *zstream, void *buf, size_t size,
-								 void *source, size_t source_size, size_t *processed)
+								 void *source, size_t source_size)
 {
 	ZlibStream* zs = (ZlibStream*)zstream;
 	int rc = 0;
@@ -379,7 +368,7 @@ zlib_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
 ssize_t
 zpq_write_tmp(ZpqStream *zstream,
 			  void const *buf, size_t size,
-			  void *target, size_t target_size, size_t *processed)
+			  void *target, size_t target_size)
 {
 	ZlibStream* zs = (ZlibStream*)zstream;
     int rc;

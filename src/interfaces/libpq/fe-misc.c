@@ -632,7 +632,6 @@ pqReadData(PGconn *conn)
 {
 	int			someread = 0;
 	int			nread;
-	size_t      processed;
 
 	if (conn->sock == PGINVALID_SOCKET)
 	{
@@ -681,12 +680,9 @@ pqReadData(PGconn *conn)
 
 	/* OK, try to read some data */
 retry3:
-	processed = 0;
-
 	nread = pqsecure_read_tmp(conn, conn->inBuffer + conn->inEnd,
 							  conn->inBufSize - conn->inEnd);
 
-	conn->inEnd += processed;
 	if (nread < 0)
 	{
 		if (nread == ZPQ_DECOMPRESS_ERROR)
@@ -783,12 +779,9 @@ retry3:
 	 * arrived.
 	 */
 retry4:
-	processed = 0;
-
 	nread = pqsecure_read_tmp(conn, conn->inBuffer + conn->inEnd,
 							  conn->inBufSize - conn->inEnd);
 
-	conn->inEnd += processed;
 	if (nread < 0)
 	{
 		if (nread == ZPQ_DECOMPRESS_ERROR)
@@ -872,8 +865,6 @@ pqSendSome(PGconn *conn, int len)
 	while (len > 0)
 	{
 		int			sent;
-		size_t      processed = 0;
-		fprintf(stdout, "pre send\n");
 #ifndef WIN32
 		sent = pqsecure_write_tmp(conn, ptr, len);
 #else
@@ -884,10 +875,6 @@ pqSendSome(PGconn *conn, int len)
 		 */
 		sent = pqsecure_write_tmp(conn, ptr, Min(len, 65536));
 #endif
-
-		ptr += processed;
-		len -= processed;
-		remaining -= processed;
 
 		if (sent < 0)
 		{

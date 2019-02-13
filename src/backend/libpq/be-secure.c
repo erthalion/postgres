@@ -241,11 +241,10 @@ retry:
 
 		if (stream->rx.avail_in != 0)
 		{
-			size_t processed = 0;
 			buf = stream->rx.next_in;
 			buf_len = stream->rx.avail_in;
 
-			n = zpq_read_tmp(zs, ptr, len, buf, n, &processed);
+			n = zpq_read_tmp(zs, ptr, len, buf, n);
 			return n;
 		}
 		else
@@ -324,8 +323,7 @@ retry:
 
 	if (zs && n > 0)
 	{
-		size_t processed = 0;
-		n = zpq_read_tmp(zs, ptr, len, buf, n, &processed);
+		n = zpq_read_tmp(zs, ptr, len, buf, n);
 	}
 
 	/*
@@ -439,13 +437,12 @@ secure_write_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len)
 
 	if (zs)
 	{
-		size_t processed = 0;
 		ZlibStream *stream = (ZlibStream*)zs;
 
 		buf = &(stream->tx_buf);
 		buf_len = ZLIB_BUFFER_SIZE;
 
-		buf_len = zpq_write_tmp(zs, ptr, len, buf, buf_len, &processed);
+		buf_len = zpq_write_tmp(zs, ptr, len, buf, buf_len);
 	}
 	else
 	{
