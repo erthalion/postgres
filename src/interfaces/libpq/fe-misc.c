@@ -62,14 +62,6 @@ static int  pqSocketCheck(PGconn *conn, int forRead, int forWrite,
 static int	pqSocketPoll(int sock, int forRead, int forWrite, time_t end_time);
 
 
-#define pq_read_conn(conn,processed)									\
-	(conn->zstream														\
-	 ? zpq_read(conn->zstream, conn->inBuffer + conn->inEnd,			\
-				conn->inBufSize - conn->inEnd, &processed)				\
-	 : pqsecure_read(conn, conn->inBuffer + conn->inEnd,				\
-					 conn->inBufSize - conn->inEnd))
-
-
 /*
  * PQlibVersion: return the libpq version number
  */
@@ -641,7 +633,6 @@ pqReadData(PGconn *conn)
 	int			someread = 0;
 	int			nread;
 	size_t      processed;
-	int i = 0;
 
 	if (conn->sock == PGINVALID_SOCKET)
 	{
@@ -692,12 +683,9 @@ pqReadData(PGconn *conn)
 retry3:
 	processed = 0;
 
-	fprintf(stdout, "pre read\n");
-	/*nread = pq_read_conn(conn, processed);*/
 	nread = pqsecure_read_tmp(conn, conn->inBuffer + conn->inEnd,
 							  conn->inBufSize - conn->inEnd);
 
-	fprintf(stdout, "nread %d, processed %ld\n", nread, processed);
 	conn->inEnd += processed;
 	if (nread < 0)
 	{
@@ -796,14 +784,11 @@ retry3:
 	 */
 retry4:
 	processed = 0;
-	fprintf(stdout, "pre read\n");
-	/*nread = pq_read_conn(conn, processed);*/
+
 	nread = pqsecure_read_tmp(conn, conn->inBuffer + conn->inEnd,
 							  conn->inBufSize - conn->inEnd);
 
-	fprintf(stdout, "nread %d, processed %ld\n", nread, processed);
 	conn->inEnd += processed;
-
 	if (nread < 0)
 	{
 		if (nread == ZPQ_DECOMPRESS_ERROR)
@@ -884,28 +869,21 @@ pqSendSome(PGconn *conn, int len)
 	}
 
 	/* while there's still data to send */
-	/*while (len > 0 || zpq_buffered(conn->zstream))*/
 	while (len > 0)
 	{
 		int			sent;
 		size_t      processed = 0;
 		fprintf(stdout, "pre send\n");
-		/*sent = conn->zstream*/
-			/*? zpq_write(conn->zstream, ptr, len, &processed)*/
 #ifndef WIN32
-			/*: pqsecure_write(conn, ptr, len);*/
 		sent = pqsecure_write_tmp(conn, ptr, len);
 #else
-
 		/*
 		 * Windows can fail on large sends, per KB article Q201213. The
 		 * failure-point appears to be different in different versions of
 		 * Windows, but 64k should always be safe.
 		 */
-			/*: pqsecure_write(conn, ptr, Min(len, 65536));*/
 		sent = pqsecure_write_tmp(conn, ptr, Min(len, 65536));
 #endif
-		fprintf(stdout, "sent %d, processed %ld\n", sent, processed);
 
 		ptr += processed;
 		len -= processed;

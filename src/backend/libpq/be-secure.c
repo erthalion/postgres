@@ -235,7 +235,6 @@ secure_read_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len)
 	ProcessClientReadInterrupt(false);
 
 retry:
-	fprintf(stdout, "secure_read_tmp\n");
 	if (zs)
 	{
 		ZlibStream *stream = (ZlibStream*)zs;
@@ -434,12 +433,10 @@ secure_write_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len)
 	int			waitfor;
 	void *buf;
 	ssize_t buf_len;
-	int i = 0;
 
 	/* Deal with any already-pending interrupt condition. */
 	ProcessClientWriteInterrupt(false);
 
-	fprintf(stdout, "secure_write_tmp\n");
 	if (zs)
 	{
 		size_t processed = 0;
@@ -449,11 +446,6 @@ secure_write_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len)
 		buf_len = ZLIB_BUFFER_SIZE;
 
 		buf_len = zpq_write_tmp(zs, ptr, len, buf, buf_len, &processed);
-		/*fprintf(stdout, "zpq_write_tmp post deflate> buffer ");*/
-		/*for (i = 0; i < 15; i++)*/
-			/*fprintf(stdout, "%c", ((Bytef*)buf)[i]);*/
-
-		/*fprintf(stdout, "\n");*/
 	}
 	else
 	{

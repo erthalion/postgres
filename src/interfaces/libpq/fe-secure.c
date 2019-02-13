@@ -235,7 +235,6 @@ pqsecure_read_tmp(PGconn *conn, void *ptr, size_t len)
 	void *buf;
 	ssize_t buf_len;
 
-	fprintf(stdout, "pqsecure_read_tmp\n");
 	if (conn->zstream)
 	{
 		ZlibStream *stream = (ZlibStream*)conn->zstream;
@@ -364,9 +363,7 @@ pqsecure_write_tmp(PGconn *conn, const void *ptr, size_t len)
 	ssize_t		n;
 	void *buf;
 	ssize_t buf_len;
-	int i = 0;
 
-	fprintf(stdout, "pqsecure_write_tmp\n");
 	if (conn->zstream)
 	{
 		size_t processed = 0;
@@ -376,11 +373,6 @@ pqsecure_write_tmp(PGconn *conn, const void *ptr, size_t len)
 		buf_len = ZLIB_BUFFER_SIZE;
 
 		buf_len = zpq_write_tmp(conn->zstream, ptr, len, buf, buf_len, &processed);
-		/*fprintf(stdout, "zpq_write_tmp post deflate> buffer ");*/
-		/*for (i = 0; i < 15; i++)*/
-			/*fprintf(stdout, "%c", ((Bytef*)buf)[i]);*/
-
-		/*fprintf(stdout, "\n");*/
 	}
 	else
 	{
