@@ -218,21 +218,15 @@ pqsecure_read(PGconn *conn, void *ptr, size_t len)
 
 	if (conn->zstream)
 	{
-		ZlibStream *stream = (ZlibStream*)conn->zstream;
+		n = zpq_read_drain(conn->zstream, ptr, len);
 
-		if (stream->rx.avail_in != 0)
+		if (n == 0)
 		{
-			buf = stream->rx.next_in;
-			buf_len = stream->rx.avail_in;
-
-			n = zpq_read(conn->zstream, ptr, len, buf, n);
-			return n;
+			buf = zpq_buffer(conn->zstream, ZPQ_READ_BUFFER);
+			buf_len = zpq_buffer_size(conn->zstream, ZPQ_READ_BUFFER);
 		}
 		else
-		{
-			buf = &(stream->rx_buf);
-			buf_len = ZLIB_BUFFER_SIZE;
-		}
+			return n;
 	}
 	else
 	{
@@ -326,10 +320,8 @@ pqsecure_write(PGconn *conn, const void *ptr, size_t len)
 
 	if (conn->zstream)
 	{
-		ZlibStream *stream = (ZlibStream*)conn->zstream;
-
-		buf = &(stream->tx_buf);
-		buf_len = ZLIB_BUFFER_SIZE;
+		buf = zpq_buffer(conn->zstream, ZPQ_WRITE_BUFFER);
+		buf_len = zpq_buffer_size(conn->zstream, ZPQ_WRITE_BUFFER);
 
 		buf_len = zpq_write(conn->zstream, ptr, len, buf, buf_len);
 	}

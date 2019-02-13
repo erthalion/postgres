@@ -16,6 +16,9 @@ typedef struct
 	void    (*free)(ZpqStream *zs);
 	char const* (*error)(ZpqStream *zs);
 	size_t  (*buffered)(ZpqStream *zs);
+	void*  	(*buffer)(ZpqStream *zs, int type);
+	size_t  (*buffer_size)(ZpqStream *zs, int type);
+	size_t  (*read_drain)(ZpqStream *zs, void *ptr, size_t len);
 } ZpqAlgorithm;
 
 
@@ -186,6 +189,37 @@ zstd_buffered(ZpqStream *zstream)
 	return zs != NULL ? zs->tx_buffered + zs->tx_not_flushed : 0;
 }
 
+static void*
+zstd_buffer(ZpqStream *zstream, int type)
+{
+	ZstdStream* zs = (ZstdStream*)zstream;
+
+	if (type == ZPQ_READ_BUFFER)
+		return &zs->rx_buff;
+	else if (type == ZPQ_WRITE_BUFFER)
+		return &zs->tx_buff;
+	else
+		return NULL;
+}
+
+static size_t
+zstd_buffer_size(ZpqStream *zstream, int type)
+{
+	return ZSTD_BUFFER_SIZE;
+}
+
+static size_t
+zstd_read_drain(ZpqStream *zstream, void *ptr, size_t len)
+{
+	ZlibStream* zs = (ZlibStream*)zstream;
+	ssize_t		n = 0;
+
+	if (zs->rx.avail_in != 0)
+		return zpq_read(zstream, ptr, len, zs->rx.next_in, n);
+	else
+		return 0;
+}
+
 static char
 zstd_name(void)
 {
@@ -199,23 +233,23 @@ zstd_name(void)
 #include <malloc.h>
 #include <zlib.h>
 
-/*#define ZLIB_BUFFER_SIZE 8192*/
+#define ZLIB_BUFFER_SIZE 8192
 #define ZLIB_COMPRESSION_LEVEL 1
 
-/*typedef struct ZlibStream*/
-/*{*/
-	/*z_stream tx;*/
-	/*z_stream rx;*/
+typedef struct ZlibStream
+{
+	z_stream tx;
+	z_stream rx;
 
-	/*zpq_tx_func    tx_func;*/
-	/*zpq_rx_func    rx_func;*/
-	/*void*          arg;*/
+	zpq_tx_func    tx_func;
+	zpq_rx_func    rx_func;
+	void*          arg;
 
-	/*size_t         tx_buffered;*/
+	size_t         tx_buffered;
 
-	/*Bytef          tx_buf[ZLIB_BUFFER_SIZE];*/
-	/*Bytef          rx_buf[ZLIB_BUFFER_SIZE];*/
-/*} ZlibStream;*/
+	Bytef          tx_buf[ZLIB_BUFFER_SIZE];
+	Bytef          rx_buf[ZLIB_BUFFER_SIZE];
+} ZlibStream;
 
 static ZpqStream*
 zlib_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void *arg)
@@ -337,6 +371,37 @@ zlib_buffered(ZpqStream *zstream)
 	return zs != NULL ? zs->tx_buffered : 0;
 }
 
+static void*
+zlib_buffer(ZpqStream *zstream, int type)
+{
+	ZlibStream* zs = (ZlibStream*)zstream;
+
+	if (type == ZPQ_READ_BUFFER)
+		return &zs->rx_buf;
+	else if (type == ZPQ_WRITE_BUFFER)
+		return &zs->tx_buf;
+	else
+		return NULL;
+}
+
+static size_t
+zlib_buffer_size(ZpqStream *zstream, int type)
+{
+	return ZLIB_BUFFER_SIZE;
+}
+
+static size_t
+zlib_read_drain(ZpqStream *zstream, void *ptr, size_t len)
+{
+	ZlibStream* zs = (ZlibStream*)zstream;
+	ssize_t		n = 0;
+
+	if (zs->rx.avail_in != 0)
+		return zpq_read(zstream, ptr, len, zs->rx.next_in, n);
+	else
+		return 0;
+}
+
 static char
 zlib_name(void)
 {
@@ -345,13 +410,13 @@ zlib_name(void)
 
 #endif
 
-static ZpqAlgorithm const zpq_algorithms[] = 
+static ZpqAlgorithm const zpq_algorithms[] =
 {
 #if HAVE_LIBZSTD
-	{zstd_name, zstd_create, zstd_read, zstd_write, zstd_free, zstd_error, zstd_buffered},
+	{zstd_name, zstd_create, zstd_read, zstd_write, zstd_free, zstd_error, zstd_buffered, zstd_buffer, zstd_buffer_size, zstd_read_drain},
 #endif
 #if HAVE_LIBZ
-	{zlib_name, zlib_create, zlib_read, zlib_write, zlib_free, zlib_error, zlib_buffered},
+	{zlib_name, zlib_create, zlib_read, zlib_write, zlib_free, zlib_error, zlib_buffered, zlib_buffer, zlib_buffer_size, zlib_read_drain},
 #endif
 	{NULL}
 };
@@ -397,6 +462,24 @@ zpq_buffered(ZpqStream *zs)
 	return zpq_algorithms[zpq_algorithm_impl].buffered(zs);
 }
 
+void*
+zpq_buffer(ZpqStream *zs, int type)
+{
+	return zpq_algorithms[zpq_algorithm_impl].buffer(zs, type);
+}
+
+size_t
+zpq_buffer_size(ZpqStream *zs, int type)
+{
+	return zpq_algorithms[zpq_algorithm_impl].buffer_size(zs, type);
+}
+
+size_t
+zpq_read_drain(ZpqStream *zs, void *ptr, size_t len)
+{
+	return zpq_algorithms[zpq_algorithm_impl].read_drain(zs, ptr, len);
+}
+
 void
 zpq_get_supported_algorithms(char algorithms[ZPQ_MAX_ALGORITHMS])
 {
@@ -428,4 +511,3 @@ zpq_set_algorithm(char name)
 	}
 	return false;
 }
-

@@ -156,21 +156,14 @@ secure_read(Port *port, ZpqStream *zs, void *ptr, size_t len)
 retry:
 	if (zs)
 	{
-		ZlibStream *stream = (ZlibStream*)zs;
-
-		if (stream->rx.avail_in != 0)
+		n = zpq_read_drain(zs, ptr, len);
+		if (n == 0)
 		{
-			buf = stream->rx.next_in;
-			buf_len = stream->rx.avail_in;
-
-			n = zpq_read(zs, ptr, len, buf, n);
-			return n;
+			buf = zpq_buffer(zs, ZPQ_READ_BUFFER);
+			buf_len = zpq_buffer_size(zs, ZPQ_READ_BUFFER);
 		}
 		else
-		{
-			buf = &(stream->rx_buf);
-			buf_len = ZLIB_BUFFER_SIZE;
-		}
+			return n;
 	}
 	else
 	{
@@ -291,10 +284,8 @@ secure_write(Port *port, ZpqStream *zs, void *ptr, size_t len)
 
 	if (zs)
 	{
-		ZlibStream *stream = (ZlibStream*)zs;
-
-		buf = &(stream->tx_buf);
-		buf_len = ZLIB_BUFFER_SIZE;
+		buf = zpq_buffer(zs, ZPQ_WRITE_BUFFER);
+		buf_len = zpq_buffer_size(zs, ZPQ_WRITE_BUFFER);
 
 		buf_len = zpq_write(zs, ptr, len, buf, buf_len);
 	}

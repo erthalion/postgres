@@ -13,6 +13,9 @@
 #define ZPQ_MAX_ALGORITHMS (8)
 #define ZPQ_NO_COMPRESSION 'n'
 
+#define ZPQ_READ_BUFFER 0
+#define ZPQ_WRITE_BUFFER 1
+
 struct ZpqStream;
 typedef struct ZpqStream ZpqStream;
 
@@ -26,30 +29,12 @@ ssize_t zpq_write(ZpqStream* zs, void const* buf, size_t size,
 								 void *target, size_t target_size);
 char const* zpq_error(ZpqStream* zs);
 size_t zpq_buffered(ZpqStream* zs);
+void* zpq_buffer(ZpqStream* zs, int type);
+size_t zpq_buffer_size(ZpqStream* zs, int type);
+size_t zpq_read_drain(ZpqStream* zs, void *ptr, size_t len);
 void zpq_free(ZpqStream* zs);
 
 void zpq_get_supported_algorithms(char algorithms[ZPQ_MAX_ALGORITHMS]);
 bool zpq_set_algorithm(char name);
-
-#if HAVE_LIBZ
-#include <zlib.h>
-#define ZLIB_BUFFER_SIZE 8192
-
-typedef struct ZlibStream
-{
-	z_stream tx;
-	z_stream rx;
-
-	zpq_tx_func    tx_func;
-	zpq_rx_func    rx_func;
-	void*          arg;
-
-	size_t         tx_buffered;
-
-	Bytef          tx_buf[ZLIB_BUFFER_SIZE];
-	Bytef          rx_buf[ZLIB_BUFFER_SIZE];
-} ZlibStream;
-
-#endif
 
 #endif
