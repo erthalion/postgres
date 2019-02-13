@@ -91,10 +91,8 @@ extern bool secure_loaded_verify_locations(void);
 extern void secure_destroy(void);
 extern int	secure_open_server(Port *port);
 extern void secure_close(Port *port);
-extern ssize_t secure_read(Port *port, void *ptr, size_t len);
-extern ssize_t secure_read_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len);
-extern ssize_t secure_write(Port *port, void *ptr, size_t len);
-extern ssize_t secure_write_tmp(Port *port, ZpqStream *zs, void *ptr, size_t len);
+extern ssize_t secure_read(Port *port, ZpqStream *zs, void *ptr, size_t len);
+extern ssize_t secure_write(Port *port, ZpqStream *zs, void *ptr, size_t len);
 extern ssize_t secure_raw_read(Port *port, void *ptr, size_t len);
 extern ssize_t secure_raw_write(Port *port, const void *ptr, size_t len);
 

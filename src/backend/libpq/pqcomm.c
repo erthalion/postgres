@@ -223,7 +223,7 @@ pq_configure(Port* port)
 	compression[5] = compression_algorithm;
 	/* Switch on compression at client side */
 	socket_set_nonblocking(false);
-	while ((rc = secure_write(MyProcPort, compression, sizeof(compression))) < 0
+	while ((rc = secure_write(MyProcPort, PqStream, compression, sizeof(compression))) < 0
 		   && errno == EINTR);
 	if ((size_t)rc != sizeof(compression))
 		return -1;
@@ -1011,16 +1011,8 @@ pq_recvbuf(bool nowait)
 	/* Can fill buffer from PqRecvLength and upwards */
 	for (;;)
 	{
-		size_t processed = 0;
-		/*r = PqStream*/
-			/*? zpq_read(PqStream, PqRecvBuffer + PqRecvLength,*/
-					   /*PQ_RECV_BUFFER_SIZE - PqRecvLength, &processed)*/
-			/*: secure_read(MyProcPort, PqRecvBuffer + PqRecvLength,*/
-						  /*PQ_RECV_BUFFER_SIZE - PqRecvLength);*/
-		r = secure_read_tmp(MyProcPort, PqStream, PqRecvBuffer + PqRecvLength,
+		r = secure_read(MyProcPort, PqStream, PqRecvBuffer + PqRecvLength,
 						  PQ_RECV_BUFFER_SIZE - PqRecvLength);
-		PqRecvLength += processed;
-
 		if (r < 0)
 		{
 			if (r == ZPQ_DECOMPRESS_ERROR)
@@ -1467,14 +1459,8 @@ internal_flush(void)
 	while (bufptr < bufend || zpq_buffered(PqStream) != 0) /* has more data to flush or unsent data in internal compression buffer */
 	{
 		int		r;
-		size_t  processed = 0;
 		size_t  available = bufend - bufptr;
-		/*r = PqStream*/
-			/*? zpq_write(PqStream, bufptr, available, &processed)*/
-			/*: secure_write(MyProcPort, bufptr, available);*/
-		r = secure_write_tmp(MyProcPort, PqStream, bufptr, available);
-		bufptr += processed;
-		PqSendStart += processed;
+		r = secure_write(MyProcPort, PqStream, bufptr, available);
 
 		if (r < 0 || (r == 0 && available))
 		{
