@@ -9,8 +9,10 @@ typedef struct
 {
 	char    (*name)(void);
 	ZpqStream* (*create)(zpq_tx_func tx_func, zpq_rx_func rx_func, void *arg);
-	ssize_t (*read)(ZpqStream *zs, void *buf, size_t size, size_t *processed);
-	ssize_t (*write)(ZpqStream *zs, void const *buf, size_t size, size_t *processed);
+	ssize_t (*read)(ZpqStream *zs, void *buf, size_t size,
+								   void *source, size_t source_size);
+	ssize_t (*write)(ZpqStream *zs, void const *buf, size_t size,
+									void *target, size_t target_size);
 	void    (*free)(ZpqStream *zs);
 	char const* (*error)(ZpqStream *zs);
 	size_t  (*buffered)(ZpqStream *zs);
@@ -71,7 +73,8 @@ zstd_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void *arg)
 }
 
 static ssize_t
-zstd_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
+zstd_read(ZpqStream *zstream, void *buf, size_t size,
+							  void *source, size_t source_size)
 {
 	ZstdStream* zs = (ZstdStream*)zstream;
 	ssize_t rc;
@@ -106,7 +109,6 @@ zstd_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 		}
 		else /* read failed */
 		{
-			*processed = out.pos;
 			zs->rx_total_raw += out.pos;
 			return rc;
 		}
@@ -114,7 +116,8 @@ zstd_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
 }
 
 static ssize_t
-zstd_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
+zstd_write(ZpqStream *zstream, void const *buf, size_t size,
+							   void *target, size_t target_size)
 {
 	ZstdStream* zs = (ZstdStream*)zstream;
 	ssize_t rc;
@@ -146,7 +149,6 @@ zstd_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
 		}
 		else
 		{
-			*processed = in_buf.pos;
 			zs->tx_buffered = zs->tx.pos;
 			zs->tx_total_raw += in_buf.pos;
 			return rc;
@@ -252,52 +254,7 @@ zlib_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void *arg)
 }
 
 static ssize_t
-zlib_read(ZpqStream *zstream, void *buf, size_t size, size_t *processed)
-{
-	ZlibStream* zs = (ZlibStream*)zstream;
-	int rc;
-	zs->rx.next_out = (Bytef *)buf;
-	zs->rx.avail_out = size;
-
-	while (1)
-	{
-		if (zs->rx.avail_in != 0) /* If there is some data in receiver buffer, then decompress it */
-		{
-			rc = inflate(&zs->rx, Z_SYNC_FLUSH);
-
-			if (rc != Z_OK)
-			{
-				return ZPQ_DECOMPRESS_ERROR;
-			}
-			if (zs->rx.avail_out != size)
-			{
-				return size - zs->rx.avail_out;
-			}
-			if (zs->rx.avail_in == 0)
-			{
-				zs->rx.next_in = zs->rx_buf;
-			}
-		}
-		else
-		{
-			zs->rx.next_in = zs->rx_buf;
-		}
-		rc = zs->rx_func(zs->arg, zs->rx.next_in + zs->rx.avail_in, zs->rx_buf + ZLIB_BUFFER_SIZE - zs->rx.next_in - zs->rx.avail_in);
-		if (rc > 0)
-		{
-			zs->rx.avail_in += rc;
-		}
-		else
-		{
-			*processed = size - zs->rx.avail_out;
-			return rc;
-		}
-	}
-}
-
-ssize_t
-zpq_read_tmp(ZpqStream *zstream, void *buf, size_t size,
-								 void *source, size_t source_size)
+zlib_read(ZpqStream *zstream, void *buf, size_t size, void *source, size_t source_size)
 {
 	ZlibStream* zs = (ZlibStream*)zstream;
 	int rc = 0;
@@ -328,47 +285,7 @@ zpq_read_tmp(ZpqStream *zstream, void *buf, size_t size,
 }
 
 static ssize_t
-zlib_write(ZpqStream *zstream, void const *buf, size_t size, size_t *processed)
-{
-	ZlibStream* zs = (ZlibStream*)zstream;
-    int rc;
-	zs->tx.next_in = (Bytef *)buf;
-	zs->tx.avail_in = size;
-	do
-	{
-		if (zs->tx.avail_out == ZLIB_BUFFER_SIZE) /* Compress buffer is empty */
-		{
-			zs->tx.next_out = zs->tx_buf; /* Reset pointer to the  beginning of buffer */
-
-			if (zs->tx.avail_in != 0) /* Has something in input buffer */
-			{
-				rc = deflate(&zs->tx, Z_SYNC_FLUSH);
-				Assert(rc == Z_OK);
-				zs->tx.next_out = zs->tx_buf; /* Reset pointer to the  beginning of buffer */
-			}
-		}
-		rc = zs->tx_func(zs->arg, zs->tx.next_out, ZLIB_BUFFER_SIZE - zs->tx.avail_out);
-		if (rc > 0)
-		{
-			zs->tx.next_out += rc;
-			zs->tx.avail_out += rc;
-		}
-		else
-		{
-			*processed = size - zs->tx.avail_in;
-			zs->tx_buffered = ZLIB_BUFFER_SIZE - zs->tx.avail_out;
-			return rc;
-		}
-	} while (zs->tx.avail_out == ZLIB_BUFFER_SIZE && zs->tx.avail_in != 0); /* repeat sending data until first partial write */
-
-	zs->tx_buffered = ZLIB_BUFFER_SIZE - zs->tx.avail_out;
-	return size - zs->tx.avail_in;
-}
-
-ssize_t
-zpq_write_tmp(ZpqStream *zstream,
-			  void const *buf, size_t size,
-			  void *target, size_t target_size)
+zlib_write(ZpqStream *zstream, void const *buf, size_t size, void *target, size_t target_size)
 {
 	ZlibStream* zs = (ZlibStream*)zstream;
     int rc;
@@ -446,15 +363,19 @@ zpq_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void *arg)
 }
 
 ssize_t
-zpq_read(ZpqStream *zs, void *buf, size_t size, size_t* processed)
+zpq_read(ZpqStream *zs, void *buf, size_t size,
+						void *source, size_t source_size)
 {
-	return zpq_algorithms[zpq_algorithm_impl].read(zs, buf, size, processed);
+	return zpq_algorithms[zpq_algorithm_impl].read(zs, buf, size,
+													   source, source_size);
 }
 
 ssize_t
-zpq_write(ZpqStream *zs, void const *buf, size_t size, size_t* processed)
+zpq_write(ZpqStream *zs, void const *buf, size_t size,
+						 void *target, size_t target_size)
 {
-	return zpq_algorithms[zpq_algorithm_impl].write(zs, buf, size, processed);
+	return zpq_algorithms[zpq_algorithm_impl].write(zs, buf, size,
+														target, target_size);
 }
 
 void

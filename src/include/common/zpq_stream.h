@@ -20,13 +20,10 @@ typedef ssize_t(*zpq_tx_func)(void* arg, void const* data, size_t size);
 typedef ssize_t(*zpq_rx_func)(void* arg, void* data, size_t size);
 
 ZpqStream* zpq_create(zpq_tx_func tx_func, zpq_rx_func rx_func, void* arg);
-ssize_t zpq_read(ZpqStream* zs, void* buf, size_t size, size_t* processed);
-ssize_t zpq_read_tmp(ZpqStream *zstream, void *buf, size_t size,
-								  void *source, size_t source_size);
-ssize_t zpq_write(ZpqStream* zs, void const* buf, size_t size, size_t* processed);
-ssize_t zpq_write_tmp(ZpqStream* zs,
-					  void const* buf, size_t size,
-					  void *target, size_t target_size);
+ssize_t zpq_read(ZpqStream* zs, void* buf, size_t size,
+								void *source, size_t source_size);
+ssize_t zpq_write(ZpqStream* zs, void const* buf, size_t size,
+								 void *target, size_t target_size);
 char const* zpq_error(ZpqStream* zs);
 size_t zpq_buffered(ZpqStream* zs);
 void zpq_free(ZpqStream* zs);
