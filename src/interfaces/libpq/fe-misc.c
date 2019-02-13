@@ -680,8 +680,8 @@ pqReadData(PGconn *conn)
 
 	/* OK, try to read some data */
 retry3:
-	nread = pqsecure_read_tmp(conn, conn->inBuffer + conn->inEnd,
-							  conn->inBufSize - conn->inEnd);
+	nread = pqsecure_read(conn, conn->inBuffer + conn->inEnd,
+								conn->inBufSize - conn->inEnd);
 
 	if (nread < 0)
 	{
@@ -779,8 +779,8 @@ retry3:
 	 * arrived.
 	 */
 retry4:
-	nread = pqsecure_read_tmp(conn, conn->inBuffer + conn->inEnd,
-							  conn->inBufSize - conn->inEnd);
+	nread = pqsecure_read(conn, conn->inBuffer + conn->inEnd,
+								conn->inBufSize - conn->inEnd);
 
 	if (nread < 0)
 	{
@@ -866,14 +866,14 @@ pqSendSome(PGconn *conn, int len)
 	{
 		int			sent;
 #ifndef WIN32
-		sent = pqsecure_write_tmp(conn, ptr, len);
+		sent = pqsecure_write(conn, ptr, len);
 #else
 		/*
 		 * Windows can fail on large sends, per KB article Q201213. The
 		 * failure-point appears to be different in different versions of
 		 * Windows, but 64k should always be safe.
 		 */
-		sent = pqsecure_write_tmp(conn, ptr, Min(len, 65536));
+		sent = pqsecure_write(conn, ptr, Min(len, 65536));
 #endif
 
 		if (sent < 0)

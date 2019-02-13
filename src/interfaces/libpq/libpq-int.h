@@ -661,9 +661,7 @@ extern void pqsecure_destroy(void);
 extern PostgresPollingStatusType pqsecure_open_client(PGconn *);
 extern void pqsecure_close(PGconn *);
 extern ssize_t pqsecure_read(PGconn *, void *ptr, size_t len);
-extern ssize_t pqsecure_read_tmp(PGconn *, void *ptr, size_t len);
 extern ssize_t pqsecure_write(PGconn *, const void *ptr, size_t len);
-extern ssize_t pqsecure_write_tmp(PGconn *, const void *ptr, size_t len);
 extern ssize_t pqsecure_raw_read(PGconn *, void *ptr, size_t len);
 extern ssize_t pqsecure_raw_write(PGconn *, const void *ptr, size_t len);
 

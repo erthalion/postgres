@@ -212,25 +212,6 @@ pqsecure_close(PGconn *conn)
 ssize_t
 pqsecure_read(PGconn *conn, void *ptr, size_t len)
 {
-	ssize_t		n;
-
-#ifdef USE_SSL
-	if (conn->ssl_in_use)
-	{
-		n = pgtls_read(conn, ptr, len);
-	}
-	else
-#endif
-	{
-		n = pqsecure_raw_read(conn, ptr, len);
-	}
-
-	return n;
-}
-
-ssize_t
-pqsecure_read_tmp(PGconn *conn, void *ptr, size_t len)
-{
 	ssize_t		n = 0;
 	void *buf;
 	ssize_t buf_len;
@@ -338,25 +319,6 @@ pqsecure_raw_read(PGconn *conn, void *ptr, size_t len)
  */
 ssize_t
 pqsecure_write(PGconn *conn, const void *ptr, size_t len)
-{
-	ssize_t		n;
-
-#ifdef USE_SSL
-	if (conn->ssl_in_use)
-	{
-		n = pgtls_write(conn, ptr, len);
-	}
-	else
-#endif
-	{
-		n = pqsecure_raw_write(conn, ptr, len);
-	}
-
-	return n;
-}
-
-ssize_t
-pqsecure_write_tmp(PGconn *conn, const void *ptr, size_t len)
 {
 	ssize_t		n;
 	ssize_t 	buf_len;
