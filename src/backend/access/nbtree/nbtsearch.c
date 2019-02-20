@@ -1248,56 +1248,59 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	}
 
 	/* Check if the next unique key can be found within the current page */
-	buf = so->currPos.buf;
-
-	page = BufferGetPage(buf);
-	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-
-	low = P_FIRSTDATAKEY(opaque);
-	high = PageGetMaxOffsetNumber(page);
-	compare_offset = ScanDirectionIsForward(dir) ? high : low;
-
-	if(_bt_compare(scan->indexRelation, prefix,
-				   so->skipScanKey, page, compare_offset) > compare_value)
-	{
-		bool keyFound = false;
-
-		LockBuffer(buf, BT_READ);
-		offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-							 ScanDirectionIsForward(dir));
-
-		/* Lock the page for SERIALIZABLE transactions */
-		PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(buf),
-						  scan->xs_snapshot);
-
-		/* We know in which direction to look */
-		_bt_initialize_more_data(so, dir);
-
-		if (ScanDirectionIsForward(dir))
-		{
-			/* Move back for _bt_next */
-			offnum = OffsetNumberPrev(offnum);
-		}
-
-		/* Now read the data */
-		keyFound = _bt_readpage(scan, dir, offnum);
-		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
-
-		if (keyFound)
-		{
-			/* set IndexTuple */
-			currItem = &so->currPos.items[so->currPos.itemIndex];
-			scan->xs_ctup.t_self = currItem->heapTid;
-			if (scan->xs_want_itup)
-				scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
-			return true;
-		}
-	}
-
 	if (BTScanPosIsValid(so->currPos))
 	{
-		ReleaseBuffer(so->currPos.buf);
-		so->currPos.buf = InvalidBuffer;
+		buf = so->currPos.buf;
+
+		page = BufferGetPage(buf);
+		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+
+		low = P_FIRSTDATAKEY(opaque);
+		high = PageGetMaxOffsetNumber(page);
+		compare_offset = ScanDirectionIsForward(dir) ? high : low;
+
+		if(_bt_compare(scan->indexRelation, prefix,
+					   so->skipScanKey, page, compare_offset) > compare_value)
+		{
+			bool keyFound = false;
+
+			LockBuffer(buf, BT_READ);
+			offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
+								 ScanDirectionIsForward(dir));
+
+			/* Lock the page for SERIALIZABLE transactions */
+			PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(buf),
+							  scan->xs_snapshot);
+
+			/* We know in which direction to look */
+			_bt_initialize_more_data(so, dir);
+
+			if (ScanDirectionIsForward(dir))
+			{
+				/* Move back for _bt_next */
+				offnum = OffsetNumberPrev(offnum);
+			}
+
+			/* Now read the data */
+			keyFound = _bt_readpage(scan, dir, offnum);
+			_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+
+			if (keyFound)
+			{
+				/* set IndexTuple */
+				currItem = &so->currPos.items[so->currPos.itemIndex];
+				scan->xs_ctup.t_self = currItem->heapTid;
+				if (scan->xs_want_itup)
+					scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+				return true;
+			}
+		}
+
+		if (BTScanPosIsValid(so->currPos))
+		{
+			ReleaseBuffer(so->currPos.buf);
+			so->currPos.buf = InvalidBuffer;
+		}
 	}
 
 	/*
@@ -1305,9 +1308,9 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	 * the root. Use _bt_search and _bt_binsrch to get the buffer and offset
 	 * number
 	 */
-	stack =_bt_search(scan->indexRelation, prefix, so->skipScanKey,
-					  ScanDirectionIsForward(dir), &buf, BT_READ,
-					  scan->xs_snapshot);
+	stack = _bt_search(scan->indexRelation, prefix, so->skipScanKey,
+					   ScanDirectionIsForward(dir), &buf, BT_READ,
+					   scan->xs_snapshot);
 	_bt_freestack(stack);
 	so->currPos.buf = buf;
 	offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
