@@ -87,6 +87,7 @@
 #include "pgstat.h"
 #include "portability/mem.h"
 #include "storage/fd.h"
+#include "/home/ddolgov/projects/liburing/src/liburing.h"
 #include "storage/ipc.h"
 #include "utils/guc.h"
 #include "utils/resowner_private.h"
@@ -769,6 +770,50 @@ durable_link_or_rename(const char *oldfile, const char *newfile, int elevel)
 	return 0;
 }
 
+#define QD	64
+#define BS	4096
+
+static struct io_uring in_ring;
+static struct io_uring out_ring;
+static struct iovec iovecs[QD];
+
+struct io_data {
+	off_t offset;
+	struct iovec *iov;
+};
+
+static int setup_context(unsigned entries, struct io_uring *ring)
+{
+	int ret;
+
+	ret = io_uring_queue_init(entries, ring, 0);
+	if (ret < 0) {
+		fprintf(stderr, "queue_init: %s\n", strerror(-ret));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int queue_read(int fd, off_t size, off_t offset)
+{
+	struct io_uring_sqe *sqe;
+	struct io_data *data;
+
+	sqe = io_uring_get_sqe(&in_ring);
+	if (!sqe)
+		return 1;
+
+	data = malloc(sizeof(*data));
+	data->offset = offset;
+	data->iov = &iovecs[sqe_index(sqe)];
+
+	io_uring_prep_readv(sqe, fd, data->iov, 1, offset);
+	io_uring_sqe_set_data(sqe, data);
+	iovecs[sqe_index(sqe)].iov_len = size;
+	return 0;
+}
+
 /*
  * InitFileAccess --- initialize this module during backend startup
  *
@@ -791,6 +836,8 @@ InitFileAccess(void)
 	VfdCache->fd = VFD_CLOSED;
 
 	SizeVfdCache = 1;
+
+	setup_context(QD, &in_ring);
 
 	/* register proc-exit hook to ensure temp files are dropped at exit */
 	on_proc_exit(AtProcExit_Files, 0);
@@ -1815,8 +1862,9 @@ FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
 		return returnCode;
 
 	pgstat_report_wait_start(wait_event_info);
-	returnCode = posix_fadvise(VfdCache[file].fd, offset, amount,
-							   POSIX_FADV_WILLNEED);
+	returnCode = queue_read(VfdCache[file].fd, amount, offset);
+	/*returnCode = posix_fadvise(VfdCache[file].fd, offset, amount,*/
+							   /*POSIX_FADV_WILLNEED);*/
 	pgstat_report_wait_end();
 
 	return returnCode;
