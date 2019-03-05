@@ -1483,12 +1483,12 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 				return true;
 			}
 		}
+	}
 
-		if (BTScanPosIsValid(so->currPos))
-		{
-			ReleaseBuffer(so->currPos.buf);
-			so->currPos.buf = InvalidBuffer;
-		}
+	if (BTScanPosIsValid(so->currPos))
+	{
+		ReleaseBuffer(so->currPos.buf);
+		so->currPos.buf = InvalidBuffer;
 	}
 
 	/*
@@ -1508,36 +1508,39 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	}
 	else
 	{
-		bool found;
+		/* For backward scan finding offnum is more involved. It is wrong to
+		 * just use binary search, since we will find the last item from the
+		 * sequence of equal items, and we need the first one. Otherwise e.g.
+		 * backward cursor scan will return an incorrect value. */
 		TupleDesc	itupdesc;
 		int			indnkeyatts;
-		int i;
+		int 		i;
 
 		offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
 							 ScanDirectionIsForward(dir));
+		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
-		found = _bt_next(scan, dir);
-
-		itupdesc = RelationGetDescr(indexRel);
-		indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRel);
-		for (i = 0; i < indnkeyatts; i++)
+		/* One step back to find a previous value */
+		if (_bt_next(scan, dir))
 		{
-			Datum datum;
-			bool null;
-			int flags;
+			itupdesc = RelationGetDescr(indexRel);
+			indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRel);
+			for (i = 0; i < indnkeyatts; i++)
+			{
+				Datum datum;
+				bool null;
+				int flags;
 
-			datum = index_getattr(scan->xs_itup, i + 1, itupdesc, &null);
-			flags = (null ? SK_ISNULL : 0) |
-					(indexRel->rd_indoption[i] << SK_BT_INDOPTION_SHIFT);
-			so->skipScanKey[i].sk_flags = flags;
-			so->skipScanKey[i].sk_argument = datum;
-		}
+				datum = index_getattr(scan->xs_itup, i + 1, itupdesc, &null);
+				flags = (null ? SK_ISNULL : 0) |
+						(indexRel->rd_indoption[i] << SK_BT_INDOPTION_SHIFT);
+				so->skipScanKey[i].sk_flags = flags;
+				so->skipScanKey[i].sk_argument = datum;
+			}
 
-		/*offnum = _bt_binsrch_tmp(scan->indexRelation, buf, prefix, so->skipScanKey,*/
-							 /*ScanDirectionIsForward(dir));*/
-		/* Check if the next unique key can be found within the current page */
-		if (BTScanPosIsValid(so->currPos))
-		{
+			/* And now find the last item from the sequence for the current,
+			 * value with the intention do OffsetNumberNext. As a result we
+			 * end up on a first element from the sequence. */
 			buf = so->currPos.buf;
 
 			page = BufferGetPage(buf);
@@ -1550,26 +1553,34 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 			if(_bt_compare(scan->indexRelation, prefix,
 						   so->skipScanKey, page, compare_offset) > compare_value)
 			{
-				bool keyFound = false;
+				offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
+									 ScanDirectionIsForward(dir));
+			}
+			else
+			{
+				if (BTScanPosIsValid(so->currPos))
+				{
+					/*_bt_drop_lock_and_maybe_pin(scan, &so->currPos);*/
+					ReleaseBuffer(so->currPos.buf);
+					so->currPos.buf = InvalidBuffer;
+				}
 
-				LockBuffer(buf, BT_READ);
+				stack = _bt_search(scan->indexRelation, prefix, so->skipScanKey,
+								   ScanDirectionIsForward(dir), &buf, BT_READ,
+								   scan->xs_snapshot);
+				_bt_freestack(stack);
+				so->currPos.buf = buf;
 				offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
 									 ScanDirectionIsForward(dir));
 			}
 		}
-
-		/*
-		 * We haven't found scan key within the current page, so let's scan from
-		 * the root. Use _bt_search and _bt_binsrch to get the buffer and offset
-		 * number
-		 */
-		stack = _bt_search(scan->indexRelation, prefix, so->skipScanKey,
-						   ScanDirectionIsForward(dir), &buf, BT_READ,
-						   scan->xs_snapshot);
-		_bt_freestack(stack);
-		so->currPos.buf = buf;
-			offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-								 ScanDirectionIsForward(dir));
+		else
+		{
+			_bt_freeskey(so->skipScanKey);
+			so->skipScanKey = NULL;
+			BTScanPosInvalidate(so->currPos);
+			return false;
+		}
 	}
 
 	/* Lock the page for SERIALIZABLE transactions */
