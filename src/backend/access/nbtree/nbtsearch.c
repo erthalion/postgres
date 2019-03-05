@@ -1578,7 +1578,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		{
 			_bt_freeskey(so->skipScanKey);
 			so->skipScanKey = NULL;
-			BTScanPosInvalidate(so->currPos);
 			return false;
 		}
 	}
