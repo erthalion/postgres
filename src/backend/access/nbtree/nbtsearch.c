@@ -1558,12 +1558,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 			}
 			else
 			{
-				if (BTScanPosIsValid(so->currPos))
-				{
-					/*_bt_drop_lock_and_maybe_pin(scan, &so->currPos);*/
-					ReleaseBuffer(so->currPos.buf);
-					so->currPos.buf = InvalidBuffer;
-				}
+				ReleaseBuffer(so->currPos.buf);
+				so->currPos.buf = InvalidBuffer;
 
 				stack = _bt_search(scan->indexRelation, prefix, so->skipScanKey,
 								   ScanDirectionIsForward(dir), &buf, BT_READ,

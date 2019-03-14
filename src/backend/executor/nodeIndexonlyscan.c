@@ -123,7 +123,12 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	{
 		if (!index_skip(scandesc, direction, node->ioss_NumDistinctKeys))
 		{
-			/* Reached end of index. */
+			/* Reached end of index. At this point currPos is invalidated,
+			 * and we need to reset ioss_FirstTupleEmitted, since otherwise
+			 * after going backwards, reaching the end of index, and going
+			 * forward again we apply skip again. It would be incorrect and
+			 * lead to an extra skipped item. */
+			node->ioss_FirstTupleEmitted = false;
 			return ExecClearTuple(slot);
 		}
 	}
