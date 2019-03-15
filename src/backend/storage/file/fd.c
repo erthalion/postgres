@@ -795,6 +795,11 @@ static int setup_context(unsigned entries, struct io_uring *ring)
 	return 0;
 }
 
+static unsigned sqe_index(struct io_uring_sqe *sqe)
+{
+	return sqe - in_ring.sq.sqes;
+}
+
 static int queue_read(int fd, off_t size, off_t offset)
 {
 	struct io_uring_sqe *sqe;
