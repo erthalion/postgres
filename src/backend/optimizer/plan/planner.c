@@ -4813,15 +4813,16 @@ create_distinct_paths(PlannerInfo *root,
 					path->pathtype == T_IndexOnlyScan &&
 					enable_indexskipscan &&
 					((IndexPath *) path)->indexinfo->amcanskip &&
-					root->distinct_pathkeys > 0)
+					root->distinct_pathkeys != NIL)
 				{
-					Path *subpath = (Path *)
-						create_skipscan_unique_path(root,
-													distinct_rel,
-													path,
-													list_length(root->distinct_pathkeys),
-													numDistinctRows);
-					add_path(distinct_rel, subpath);
+					int distinctPrefixKeys = list_length(root->distinct_pathkeys);
+
+					add_path(distinct_rel,
+							 create_skipscan_unique_path(root,
+														 distinct_rel,
+														 path,
+														 distinctPrefixKeys,
+														 numDistinctRows));
 				}
 			}
 		}

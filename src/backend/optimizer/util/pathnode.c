@@ -2939,29 +2939,30 @@ create_upper_unique_path(PlannerInfo *root,
 IndexPath *
 create_skipscan_unique_path(PlannerInfo *root,
 							RelOptInfo *rel,
-							Path *subpath,
-							int numCols,
+							Path *basepath,
+							int distinctPrefixKeys,
 							double numGroups)
 {
 	IndexPath *pathnode = makeNode(IndexPath);
 
-	Assert(IsA(subpath, IndexPath));
+	Assert(IsA(basepath, IndexPath));
 
-	/* We don't want to modify subpath, so make a copy. */
-	memcpy(pathnode, subpath, sizeof(IndexPath));
+	/* We don't want to modify basepath, so make a copy. */
+	memcpy(pathnode, basepath, sizeof(IndexPath));
 
 	/* The size of the prefix we'll use for skipping. */
 	Assert(pathnode->indexinfo->amcanskip);
-	Assert(numCols > 0);
-	pathnode->indexskipprefix = numCols;
+	Assert(distinctPrefixKeys > 0);
+	Assert(distinctPrefixKeys <= list_length(pathnode->path.pathkeys));
+	pathnode->indexskipprefix = distinctPrefixKeys;
 
 	/*
 	 * The cost to skip to each distinct value should be roughly the same as
 	 * the cost of finding the first key times the number of distinct values
 	 * we expect to find.
 	 */
-	pathnode->path.startup_cost = subpath->startup_cost;
-	pathnode->path.total_cost = subpath->startup_cost * numGroups;
+	pathnode->path.startup_cost = basepath->startup_cost;
+	pathnode->path.total_cost = basepath->startup_cost * numGroups;
 	pathnode->path.rows = numGroups;
 
 	return pathnode;

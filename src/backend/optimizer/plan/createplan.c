@@ -5182,7 +5182,7 @@ make_indexonlyscan(List *qptlist,
 				   List *indexorderby,
 				   List *indextlist,
 				   ScanDirection indexscandir,
-				   int skipprefix)
+				   int skipPrefixSize)
 {
 	IndexOnlyScan *node = makeNode(IndexOnlyScan);
 	Plan	   *plan = &node->scan.plan;
@@ -5197,7 +5197,7 @@ make_indexonlyscan(List *qptlist,
 	node->indexorderby = indexorderby;
 	node->indextlist = indextlist;
 	node->indexorderdir = indexscandir;
-	node->distinctPrefix = skipprefix;
+	node->skipPrefixSize = skipPrefixSize;
 
 	return node;
 }

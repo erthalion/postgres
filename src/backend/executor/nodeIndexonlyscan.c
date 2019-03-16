@@ -119,9 +119,9 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
 	 */
-	if (node->ioss_NumDistinctKeys > 0 && node->ioss_FirstTupleEmitted)
+	if (node->ioss_SkipPrefixSize > 0 && node->ioss_FirstTupleEmitted)
 	{
-		if (!index_skip(scandesc, direction, node->ioss_NumDistinctKeys))
+		if (!index_skip(scandesc, direction, node->ioss_SkipPrefixSize))
 		{
 			/* Reached end of index. At this point currPos is invalidated,
 			 * and we need to reset ioss_FirstTupleEmitted, since otherwise
@@ -523,7 +523,7 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
 	indexstate->ss.ps.ExecProcNode = ExecIndexOnlyScan;
-	indexstate->ioss_NumDistinctKeys = node->distinctPrefix;
+	indexstate->ioss_SkipPrefixSize = node->skipPrefixSize;
 	indexstate->ioss_FirstTupleEmitted = false;
 
 	/*
