@@ -4817,7 +4817,7 @@ create_distinct_paths(PlannerInfo *root,
 				{
 					int distinctPrefixKeys = list_length(root->distinct_pathkeys);
 
-					add_path(distinct_rel,
+					add_path(distinct_rel, (Path *)
 							 create_skipscan_unique_path(root,
 														 distinct_rel,
 														 path,
