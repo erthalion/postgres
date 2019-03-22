@@ -49,6 +49,7 @@ typedef struct f_smgr
 								BlockNumber blocknum, char *buffer, bool skipFsync);
 	void		(*smgr_prefetch) (SMgrRelation reln, ForkNumber forknum,
 								  BlockNumber blocknum);
+	void		(*smgr_submit_prefetch) (SMgrRelation reln, ForkNumber forknum);
 	void		(*smgr_read) (SMgrRelation reln, ForkNumber forknum,
 							  BlockNumber blocknum, char *buffer);
 	void		(*smgr_write) (SMgrRelation reln, ForkNumber forknum,
@@ -76,6 +77,7 @@ static const f_smgr smgrsw[] = {
 		.smgr_unlink = mdunlink,
 		.smgr_extend = mdextend,
 		.smgr_prefetch = mdprefetch,
+		.smgr_submit_prefetch = mdsubmitprefetch,
 		.smgr_read = mdread,
 		.smgr_write = mdwrite,
 		.smgr_writeback = mdwriteback,
@@ -626,6 +628,12 @@ void
 smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
 	smgrsw[reln->smgr_which].smgr_prefetch(reln, forknum, blocknum);
+}
+
+void
+smgrsubmitprefetch(SMgrRelation reln, ForkNumber forknum)
+{
+	smgrsw[reln->smgr_which].smgr_submit_prefetch(reln, forknum);
 }
 
 /*

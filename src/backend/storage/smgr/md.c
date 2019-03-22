@@ -640,6 +640,14 @@ mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 #endif							/* USE_PREFETCH */
 }
 
+void
+mdsubmitprefetch(SMgrRelation reln, ForkNumber forknum)
+{
+#ifdef USE_PREFETCH
+	(void) SubmitFilePrefetch();
+#endif							/* USE_PREFETCH */
+}
+
 /*
  * mdwriteback() -- Tell the kernel to write pages back to storage.
  *

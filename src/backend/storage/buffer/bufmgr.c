@@ -585,6 +585,64 @@ PrefetchBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum)
 #endif							/* USE_PREFETCH */
 }
 
+void
+SubmitPrefetchBuffer(Relation reln, ForkNumber forkNum)
+{
+#ifdef USE_PREFETCH
+	Assert(RelationIsValid(reln));
+
+	/* Open it at the smgr level if not already done */
+	RelationOpenSmgr(reln);
+
+	if (RelationUsesLocalBuffers(reln))
+	{
+		/* see comments in ReadBufferExtended */
+		elog(INFO, "SubmitFilePrefetch: local buffer");
+		if (RELATION_IS_OTHER_TEMP(reln))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot access temporary tables of other sessions")));
+
+		/* pass it off to localbuf.c */
+		/*LocalPrefetchBuffer(reln->rd_smgr, forkNum, blockNum);*/
+	}
+	else
+	{
+		/*BufferTag	newTag;		[> identity of requested block <]*/
+		/*uint32		newHash;	[> hash value for newTag <]*/
+		/*LWLock	   *newPartitionLock;	[> buffer partition lock for it <]*/
+		/*int			buf_id;*/
+
+		/*[> determine its hash code and partition lock ID <]*/
+		/*newHash = BufTableHashCode(&newTag);*/
+		/*newPartitionLock = BufMappingPartitionLock(newHash);*/
+
+		/*[> see if the block is in the buffer pool already <]*/
+		/*LWLockAcquire(newPartitionLock, LW_SHARED);*/
+		/*buf_id = BufTableLookup(&newTag, newHash);*/
+		/*LWLockRelease(newPartitionLock);*/
+
+		/*if (buf_id < 0)*/
+			/*smgrprefetch(reln->rd_smgr, forkNum);*/
+		elog(INFO, "SubmitFilePrefetch: remote buffer");
+		smgrsubmitprefetch(reln->rd_smgr, forkNum);
+
+		/*
+		 * If the block *is* in buffers, we do nothing.  This is not really
+		 * ideal: the block might be just about to be evicted, which would be
+		 * stupid since we know we are going to need it soon.  But the only
+		 * easy answer is to bump the usage_count, which does not seem like a
+		 * great solution: when the caller does ultimately touch the block,
+		 * usage_count would get bumped again, resulting in too much
+		 * favoritism for blocks that are involved in a prefetch sequence. A
+		 * real fix would involve some additional per-buffer state, and it's
+		 * not clear that there's enough of a problem to justify that.
+		 */
+	}
+#endif							/* USE_PREFETCH */
+
+}
+
 
 /*
  * ReadBuffer -- a shorthand for ReadBufferExtended, for reading from main

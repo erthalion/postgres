@@ -1858,16 +1858,24 @@ FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
 
 	Assert(FileIsValid(file));
 
-	DO_DB(elog(LOG, "FilePrefetch: %d (%s) " INT64_FORMAT " %d",
+	elog(INFO, "FilePrefetch: %d (%s) " INT64_FORMAT " %d",
 			   file, VfdCache[file].fileName,
-			   (int64) offset, amount));
+			   (int64) offset, amount);
 
 	returnCode = FileAccess(file);
 	if (returnCode < 0)
 		return returnCode;
 
 	pgstat_report_wait_start(wait_event_info);
+	elog(INFO, "FilePrefetch: io_uring");
 	returnCode = queue_read(VfdCache[file].fd, amount, offset);
+	/*returnCode = io_uring_submit(&in_ring);*/
+	/*if (returnCode < 0) {*/
+		/*elog(INFO, "FilePrefetch: io_uring submit failed: %s\n", strerror(-returnCode));*/
+		/*return -returnCode;*/
+	/*}*/
+
+	/*elog(INFO, "FilePrefetch: posix_fadvice");*/
 	/*returnCode = posix_fadvise(VfdCache[file].fd, offset, amount,*/
 							   /*POSIX_FADV_WILLNEED);*/
 	pgstat_report_wait_end();
@@ -1878,6 +1886,26 @@ FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
 	return 0;
 #endif
 }
+
+int
+SubmitFilePrefetch()
+{
+#if defined(USE_POSIX_FADVISE) && defined(POSIX_FADV_WILLNEED)
+	int			returnCode;
+
+	elog(INFO, "SubmitFilePrefetch: io_uring");
+	returnCode = io_uring_submit(&in_ring);
+	if (returnCode < 0) {
+		elog(INFO, "FilePrefetch: io_uring submit failed: %s\n", strerror(-returnCode));
+		return -returnCode;
+	}
+
+	return returnCode;
+#else
+	return 0;
+#endif
+}
+
 
 void
 FileWriteback(File file, off_t offset, off_t nbytes, uint32 wait_event_info)

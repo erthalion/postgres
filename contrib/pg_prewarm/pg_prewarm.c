@@ -162,6 +162,7 @@ pg_prewarm(PG_FUNCTION_ARGS)
 			PrefetchBuffer(rel, forkNumber, block);
 			++blocks_done;
 		}
+		SubmitPrefetchBuffer(rel, forkNumber);
 #else
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

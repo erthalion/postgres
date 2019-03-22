@@ -164,6 +164,7 @@ extern PGDLLIMPORT int32 *LocalRefCount;
 extern bool ComputeIoConcurrency(int io_concurrency, double *target);
 extern void PrefetchBuffer(Relation reln, ForkNumber forkNum,
 			   BlockNumber blockNum);
+extern void SubmitPrefetchBuffer(Relation reln, ForkNumber forkNum);
 extern Buffer ReadBuffer(Relation reln, BlockNumber blockNum);
 extern Buffer ReadBufferExtended(Relation reln, ForkNumber forkNum,
 				   BlockNumber blockNum, ReadBufferMode mode,
