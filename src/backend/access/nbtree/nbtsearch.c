@@ -1412,12 +1412,15 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	if (so->skipScanKey == NULL)
 	{
 		so->skipScanKey = _bt_mkscankey(indexRel, scan->xs_itup);
+		so->skipScanKey->keysz = prefix;
+		so->skipScanKey->scantid = NULL;
 	}
 	else
 	{
 		TupleDesc	itupdesc;
 		int			indnkeyatts;
 		int i;
+		ScanKey		scankeys = so->skipScanKey->scankeys;
 
 		itupdesc = RelationGetDescr(indexRel);
 		indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRel);
@@ -1430,8 +1433,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 			datum = index_getattr(scan->xs_itup, i + 1, itupdesc, &null);
 			flags = (null ? SK_ISNULL : 0) |
 					(indexRel->rd_indoption[i] << SK_BT_INDOPTION_SHIFT);
-			so->skipScanKey[i].sk_flags = flags;
-			so->skipScanKey[i].sk_argument = datum;
+			scankeys[i].sk_flags = flags;
+			scankeys[i].sk_argument = datum;
 		}
 	}
 
@@ -1447,14 +1450,14 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		high = PageGetMaxOffsetNumber(page);
 		compare_offset = ScanDirectionIsForward(dir) ? high : low;
 
-		if(_bt_compare(scan->indexRelation, prefix,
+		if(_bt_compare(scan->indexRelation,
 					   so->skipScanKey, page, compare_offset) > compare_value)
 		{
 			bool keyFound = false;
 
 			LockBuffer(buf, BT_READ);
-			offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-								 ScanDirectionIsForward(dir));
+			so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 
 			/* Lock the page for SERIALIZABLE transactions */
 			PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(buf),
@@ -1496,15 +1499,15 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	 * the root. Use _bt_search and _bt_binsrch to get the buffer and offset
 	 * number
 	 */
-	stack = _bt_search(scan->indexRelation, prefix, so->skipScanKey,
-					   ScanDirectionIsForward(dir), &buf, BT_READ,
-					   scan->xs_snapshot);
+	so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+	stack = _bt_search(scan->indexRelation, so->skipScanKey,
+					   &buf, BT_READ, scan->xs_snapshot);
 	_bt_freestack(stack);
 	so->currPos.buf = buf;
 	if (ScanDirectionIsForward(dir))
 	{
-		offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-							 ScanDirectionIsForward(dir));
+		so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 	}
 	else
 	{
@@ -1516,8 +1519,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		int			indnkeyatts;
 		int 		i;
 
-		offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-							 ScanDirectionIsForward(dir));
+		so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
 		/* One step back to find a previous value */
@@ -1530,12 +1533,13 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 				Datum datum;
 				bool null;
 				int flags;
+				ScanKey		scankeys = so->skipScanKey->scankeys;
 
 				datum = index_getattr(scan->xs_itup, i + 1, itupdesc, &null);
 				flags = (null ? SK_ISNULL : 0) |
 						(indexRel->rd_indoption[i] << SK_BT_INDOPTION_SHIFT);
-				so->skipScanKey[i].sk_flags = flags;
-				so->skipScanKey[i].sk_argument = datum;
+				scankeys[i].sk_flags = flags;
+				scankeys[i].sk_argument = datum;
 			}
 
 			/* And now find the last item from the sequence for the current,
@@ -1550,29 +1554,29 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 			high = PageGetMaxOffsetNumber(page);
 			compare_offset = ScanDirectionIsForward(dir) ? high : low;
 
-			if(_bt_compare(scan->indexRelation, prefix,
-						   so->skipScanKey, page, compare_offset) > compare_value)
+			if(_bt_compare(scan->indexRelation, so->skipScanKey,
+						   page, compare_offset) > compare_value)
 			{
-				offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-									 ScanDirectionIsForward(dir));
+				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			}
 			else
 			{
 				ReleaseBuffer(so->currPos.buf);
 				so->currPos.buf = InvalidBuffer;
 
-				stack = _bt_search(scan->indexRelation, prefix, so->skipScanKey,
-								   ScanDirectionIsForward(dir), &buf, BT_READ,
-								   scan->xs_snapshot);
+				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+				stack = _bt_search(scan->indexRelation, so->skipScanKey,
+								   &buf, BT_READ, scan->xs_snapshot);
 				_bt_freestack(stack);
 				so->currPos.buf = buf;
-				offnum = _bt_binsrch(scan->indexRelation, buf, prefix, so->skipScanKey,
-									 ScanDirectionIsForward(dir));
+				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			}
 		}
 		else
 		{
-			_bt_freeskey(so->skipScanKey);
+			pfree(so->skipScanKey);
 			so->skipScanKey = NULL;
 			return false;
 		}
@@ -1605,7 +1609,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 		if (!_bt_steppage(scan, dir))
 		{
-			_bt_freeskey(so->skipScanKey);
+			pfree(so->skipScanKey);
 			so->skipScanKey = NULL;
 			return false;
 		}
