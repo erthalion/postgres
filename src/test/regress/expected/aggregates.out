@@ -2201,19 +2201,145 @@ SELECT
 	i/2 AS p,
 	format('%60s', i%2) AS v,
 	i/4 AS c,
-	i/8 AS d
+	i/8 AS d,
+	(random() * (10000/8))::int as e --the same as d but no correlation with p
 	INTO btg
 FROM
 	generate_series(1, 10000) i;
-CREATE INDEX ON btg(p, v);
 VACUUM btg;
 ANALYZE btg;
+-- GROUP BY optimization by reorder columns by frequency
 SET enable_hashagg=off;
 SET max_parallel_workers= 0;
 SET max_parallel_workers_per_gather = 0;
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY p, v;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, v
+   ->  Sort
+         Sort Key: p, v
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, v
+   ->  Sort
+         Sort Key: p, v
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p, c;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, v, c
+   ->  Sort
+         Sort Key: p, v, c
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p, c ORDER BY v, p, c;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: v, p, c
+   ->  Sort
+         Sort Key: v, p, c
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p, d, c;
+          QUERY PLAN          
+------------------------------
+ GroupAggregate
+   Group Key: p, v, d, c
+   ->  Sort
+         Sort Key: p, v, d, c
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p, d, c ORDER BY v, p, d ,c;
+          QUERY PLAN          
+------------------------------
+ GroupAggregate
+   Group Key: v, p, d, c
+   ->  Sort
+         Sort Key: v, p, d, c
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p, d, c ORDER BY p, v, d ,c;
+          QUERY PLAN          
+------------------------------
+ GroupAggregate
+   Group Key: p, v, d, c
+   ->  Sort
+         Sort Key: p, v, d, c
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY p, d, e;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, d, e
+   ->  Sort
+         Sort Key: p, d, e
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY p, e, d;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, e, d
+   ->  Sort
+         Sort Key: p, e, d
+         ->  Seq Scan on btg
+(5 rows)
+
+CREATE STATISTICS btg_dep ON d, e, p FROM btg;
+ANALYZE btg;
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY p, d, e;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, e, d
+   ->  Sort
+         Sort Key: p, e, d
+         ->  Seq Scan on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY p, e, d;
+         QUERY PLAN          
+-----------------------------
+ GroupAggregate
+   Group Key: p, e, d
+   ->  Sort
+         Sort Key: p, e, d
+         ->  Seq Scan on btg
+(5 rows)
+
+-- GROUP BY optimization by reorder columns by index scan
+CREATE INDEX ON btg(p, v);
 SET enable_seqscan=off;
 SET enable_bitmapscan=off;
--- GROUP BY optimization by reorder columns by index scan
+VACUUM btg;
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY p, v;
                    QUERY PLAN                   
