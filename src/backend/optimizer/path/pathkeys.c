@@ -27,6 +27,7 @@
 #include "optimizer/paths.h"
 #include "partitioning/partbounds.h"
 #include "utils/lsyscache.h"
+#include "utils/selfuncs.h"
 
 
 static bool pathkey_is_redundant(PathKey *new_pathkey, List *pathkeys);
@@ -329,6 +330,58 @@ pathkeys_contained_in(List *keys1, List *keys2)
 			break;
 	}
 	return false;
+}
+
+/*
+ * Reorder GROUP BY pathkeys and clauses to match order of pathkeys. Function
+ * returns new lists,  original GROUP BY lists stay untouched.
+ */
+int
+group_keys_reorder_by_pathkeys(List *pathkeys, List **group_pathkeys,
+							   List **group_clauses)
+{
+	List		*new_group_pathkeys= NIL,
+				*new_group_clauses = NIL;
+	ListCell	*key;
+	int			n;
+
+	if (pathkeys == NIL || *group_pathkeys == NIL)
+		return 0;
+
+	/*
+	 * For each pathkey it tries to find corresponding GROUP BY pathkey and
+	 * clause.
+	 */
+	foreach(key, pathkeys)
+	{
+		PathKey			*pathkey = (PathKey *) lfirst(key);
+		SortGroupClause	*sgc;
+
+		/*
+		 * Pathkey should use the same allocated struct, so, equiality of
+		 * pointers is enough
+		 */
+		if (!list_member_ptr(*group_pathkeys, pathkey))
+			break;
+
+		new_group_pathkeys = lappend(new_group_pathkeys, pathkey);
+
+		sgc = get_sortgroupref_clause(pathkey->pk_eclass->ec_sortref,
+									  *group_clauses);
+		new_group_clauses = lappend(new_group_clauses, sgc);
+	}
+
+	n = list_length(new_group_pathkeys);
+
+	/*
+	 * Just append the rest of pathkeys and clauses
+	 */
+	*group_pathkeys = list_concat_unique_ptr(new_group_pathkeys,
+												 *group_pathkeys);
+	*group_clauses = list_concat_unique_ptr(new_group_clauses,
+											*group_clauses);
+
+	return n;
 }
 
 /*
@@ -1775,6 +1828,39 @@ pathkeys_useful_for_ordering(PlannerInfo *root, List *pathkeys)
 }
 
 /*
+ * pathkeys_useful_for_grouping
+ *		Count the number of pathkeys that are useful for grouping (instead of
+ *		explicit sort)
+ *
+ * Group pathkeys could be reordered, so we don't bother about actual order in
+ * pathkeys
+ */
+static int
+pathkeys_useful_for_grouping(PlannerInfo *root, List *pathkeys)
+{
+	ListCell *key;
+	int		  n = 0;
+
+	if (root->group_pathkeys == NIL)
+		return 0;				/* no special ordering requested */
+
+	if (pathkeys == NIL)
+		return 0;				/* unordered path */
+
+	foreach(key, pathkeys)
+	{
+		PathKey	*pathkey = (PathKey *) lfirst(key);
+
+		if (!list_member_ptr(root->group_pathkeys, pathkey))
+			break;
+
+		n++;
+	}
+
+	return n;
+}
+
+/*
  * truncate_useless_pathkeys
  *		Shorten the given pathkey list to just the useful pathkeys.
  */
@@ -1788,6 +1874,9 @@ truncate_useless_pathkeys(PlannerInfo *root,
 
 	nuseful = pathkeys_useful_for_merging(root, rel, pathkeys);
 	nuseful2 = pathkeys_useful_for_ordering(root, pathkeys);
+	if (nuseful2 > nuseful)
+		nuseful = nuseful2;
+	nuseful2 = pathkeys_useful_for_grouping(root, pathkeys);
 	if (nuseful2 > nuseful)
 		nuseful = nuseful2;
 
@@ -1823,6 +1912,8 @@ has_useful_pathkeys(PlannerInfo *root, RelOptInfo *rel)
 {
 	if (rel->joininfo != NIL || rel->has_eclass_joins)
 		return true;			/* might be able to use pathkeys for merging */
+	if (root->group_pathkeys != NIL)
+		return true;			/* might be able to use pathkeys for grouping */ 
 	if (root->query_pathkeys != NIL)
 		return true;			/* might be able to use them for ordering */
 	return false;				/* definitely useless */

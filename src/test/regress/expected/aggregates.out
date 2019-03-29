@@ -2360,14 +2360,12 @@ SELECT count(*) FROM btg GROUP BY p, v ORDER BY p, v;
 
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY v, p;
-                      QUERY PLAN                      
-------------------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  GroupAggregate
-   Group Key: v, p
-   ->  Sort
-         Sort Key: v, p
-         ->  Index Only Scan using btg_p_v_idx on btg
-(5 rows)
+   Group Key: p, v
+   ->  Index Only Scan using btg_p_v_idx on btg
+(3 rows)
 
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY v, p ORDER BY p, v;
@@ -2380,46 +2378,46 @@ SELECT count(*) FROM btg GROUP BY v, p ORDER BY p, v;
 
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY v, p, c;
-         QUERY PLAN          
------------------------------
- GroupAggregate
-   Group Key: v, p, c
-   ->  Sort
-         Sort Key: v, p, c
-         ->  Seq Scan on btg
-(5 rows)
-
-EXPLAIN (COSTS off)
-SELECT count(*) FROM btg GROUP BY v, p, c ORDER BY p, v;
-         QUERY PLAN          
------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  GroupAggregate
    Group Key: p, v, c
    ->  Sort
          Sort Key: p, v, c
-         ->  Seq Scan on btg
+         ->  Index Scan using btg_p_v_idx on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, p, c ORDER BY p, v;
+                   QUERY PLAN                    
+-------------------------------------------------
+ GroupAggregate
+   Group Key: p, v, c
+   ->  Sort
+         Sort Key: p, v, c
+         ->  Index Scan using btg_p_v_idx on btg
 (5 rows)
 
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY v, c, p, d;
-          QUERY PLAN          
-------------------------------
- GroupAggregate
-   Group Key: v, c, p, d
-   ->  Sort
-         Sort Key: v, c, p, d
-         ->  Seq Scan on btg
-(5 rows)
-
-EXPLAIN (COSTS off)
-SELECT count(*) FROM btg GROUP BY v, c, p, d ORDER BY p, v;
-          QUERY PLAN          
-------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  GroupAggregate
    Group Key: p, v, c, d
    ->  Sort
          Sort Key: p, v, c, d
-         ->  Seq Scan on btg
+         ->  Index Scan using btg_p_v_idx on btg
+(5 rows)
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, c, p, d ORDER BY p, v;
+                   QUERY PLAN                    
+-------------------------------------------------
+ GroupAggregate
+   Group Key: p, v, c, d
+   ->  Sort
+         Sort Key: p, v, c, d
+         ->  Index Scan using btg_p_v_idx on btg
 (5 rows)
 
 RESET enable_hashagg;
