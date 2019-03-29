@@ -1953,7 +1953,26 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
-
+/************************<DEBUG OPT GROUP BY>*********************************/
+	{
+		{"debug_group_by_reorder_by_pathkeys", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("enable reorder GROUP BY by pathkeys"),
+			NULL
+		},
+		&debug_group_by_reorder_by_pathkeys,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"debug_enable_cheapest_group_by", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("find a cheapest order of columns in GROUP BY."),
+			NULL
+		},
+		&debug_cheapest_group_by,
+		true,
+		NULL, NULL, NULL
+	},
+/************************</DEBUG OPT GROUP BY>********************************/
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, false, NULL, NULL, NULL

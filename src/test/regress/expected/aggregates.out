@@ -2228,9 +2228,9 @@ SELECT count(*) FROM btg GROUP BY v, p;
          QUERY PLAN          
 -----------------------------
  GroupAggregate
-   Group Key: v, p
+   Group Key: p, v
    ->  Sort
-         Sort Key: v, p
+         Sort Key: p, v
          ->  Seq Scan on btg
 (5 rows)
 
@@ -2239,9 +2239,9 @@ SELECT count(*) FROM btg GROUP BY v, p, c;
          QUERY PLAN          
 -----------------------------
  GroupAggregate
-   Group Key: v, p, c
+   Group Key: p, v, c
    ->  Sort
-         Sort Key: v, p, c
+         Sort Key: p, v, c
          ->  Seq Scan on btg
 (5 rows)
 
@@ -2261,9 +2261,9 @@ SELECT count(*) FROM btg GROUP BY v, p, d, c;
           QUERY PLAN          
 ------------------------------
  GroupAggregate
-   Group Key: v, p, d, c
+   Group Key: p, v, d, c
    ->  Sort
-         Sort Key: v, p, d, c
+         Sort Key: p, v, d, c
          ->  Seq Scan on btg
 (5 rows)
 
@@ -2318,9 +2318,9 @@ SELECT count(*) FROM btg GROUP BY p, d, e;
          QUERY PLAN          
 -----------------------------
  GroupAggregate
-   Group Key: p, d, e
+   Group Key: p, e, d
    ->  Sort
-         Sort Key: p, d, e
+         Sort Key: p, e, d
          ->  Seq Scan on btg
 (5 rows)
 
