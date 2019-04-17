@@ -25,6 +25,7 @@
 #include "postgres.h"
 
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -416,6 +417,13 @@ transformDeleteStmt(ParseState *pstate, DeleteStmt *stmt)
 										 true,
 										 ACL_DELETE);
 
+	if (!table_support_delete(pstate->p_target_relation))
+		ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("Table access method doesn't support the operation"),
+					 parser_errposition(pstate,
+										exprLocation((Node *) stmt))));
+
 	/* grab the namespace item made by setTargetTable */
 	nsitem = (ParseNamespaceItem *) llast(pstate->p_namespace);
 
@@ -552,6 +560,20 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
 		targetPerms |= ACL_UPDATE;
 	qry->resultRelation = setTargetTable(pstate, stmt->relation,
 										 false, false, targetPerms);
+
+	if (!table_support_insert(pstate->p_target_relation))
+		ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("Table access method doesn't support the operation"),
+					 parser_errposition(pstate,
+										exprLocation((Node *) stmt))));
+
+	if (!table_support_speculative(pstate->p_target_relation) && isOnConflictUpdate)
+		ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("Table access method doesn't support the operation"),
+					 parser_errposition(pstate,
+										exprLocation((Node *) stmt))));
 
 	/* Validate stmt->cols list, or build default list if no list given */
 	icolumns = checkInsertTargets(pstate, stmt->cols, &attrnos);
@@ -2236,6 +2258,13 @@ transformUpdateStmt(ParseState *pstate, UpdateStmt *stmt)
 										 stmt->relation->inh,
 										 true,
 										 ACL_UPDATE);
+
+	if (!table_support_update(pstate->p_target_relation))
+		ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("Table access method doesn't support the operation"),
+					 parser_errposition(pstate,
+										exprLocation((Node *) stmt))));
 
 	/* grab the namespace item made by setTargetTable */
 	nsitem = (ParseNamespaceItem *) llast(pstate->p_namespace);

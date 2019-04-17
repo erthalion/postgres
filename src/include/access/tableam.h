@@ -1050,6 +1050,12 @@ table_insert(Relation rel, TupleTableSlot *slot, CommandId cid,
 								  bistate);
 }
 
+static inline bool
+table_support_insert(Relation rel)
+{
+	return rel->rd_tableam == NULL || rel->rd_tableam->tuple_insert != NULL;
+}
+
 /*
  * Perform a "speculative insertion". These can be backed out afterwards
  * without aborting the whole transaction.  Other sessions can wait for the
@@ -1082,6 +1088,14 @@ table_complete_speculative(Relation rel, TupleTableSlot *slot,
 												succeeded);
 }
 
+static inline bool
+table_support_speculative(Relation rel)
+{
+	return rel->rd_tableam == NULL ||
+		   (rel->rd_tableam->tuple_insert_speculative != NULL &&
+			rel->rd_tableam->tuple_complete_speculative != NULL);
+}
+
 /*
  * Insert multiple tuples into a table.
  *
@@ -1102,6 +1116,14 @@ table_multi_insert(Relation rel, TupleTableSlot **slots, int nslots,
 {
 	rel->rd_tableam->multi_insert(rel, slots, nslots,
 								  cid, options, bistate);
+}
+
+static inline bool
+table_support_multi_insert(Relation rel)
+{
+	return rel->rd_tableam == NULL ||
+		   (rel->rd_tableam->multi_insert != NULL &&
+			rel->rd_tableam->finish_bulk_insert != NULL);
 }
 
 /*
@@ -1138,6 +1160,12 @@ table_delete(Relation rel, ItemPointer tid, CommandId cid,
 	return rel->rd_tableam->tuple_delete(rel, tid, cid,
 										 snapshot, crosscheck,
 										 wait, tmfd, changingPart);
+}
+
+static inline bool
+table_support_delete(Relation rel)
+{
+	return rel->rd_tableam == NULL || rel->rd_tableam->tuple_delete != NULL;
 }
 
 /*
@@ -1184,6 +1212,12 @@ table_update(Relation rel, ItemPointer otid, TupleTableSlot *slot,
 										 cid, snapshot, crosscheck,
 										 wait, tmfd,
 										 lockmode, update_indexes);
+}
+
+static inline TM_Result
+table_support_update(Relation rel)
+{
+	return rel->rd_tableam == NULL || rel->rd_tableam->tuple_update;
 }
 
 /*

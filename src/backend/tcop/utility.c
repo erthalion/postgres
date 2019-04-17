@@ -18,6 +18,7 @@
 
 #include "access/htup_details.h"
 #include "access/reloptions.h"
+#include "access/tableam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"

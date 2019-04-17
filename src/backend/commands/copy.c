@@ -901,6 +901,13 @@ DoCopy(ParseState *pstate, const CopyStmt *stmt,
 											NULL, false, false);
 		rte->requiredPerms = (is_from ? ACL_INSERT : ACL_SELECT);
 
+		if (is_from && !table_support_multi_insert(rel))
+			ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("Table access method doesn't support the operation"),
+						 parser_errposition(pstate,
+											exprLocation((Node *) stmt))));
+
 		if (stmt->whereClause)
 		{
 			/* add rte to column namespace  */
