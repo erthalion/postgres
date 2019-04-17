@@ -1,0 +1,25 @@
+CREATE EXTENSION toytable;
+create table toytab (i int4, j int4, k int4) using toytable;
+select * from toytab;
+ i  | j  | k  
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+(10 rows)
+
+delete from toytab;
+ERROR:  Table access method doesn't support the operation
+insert into toytab values(1, 2, 3);
+ERROR:  Table access method doesn't support the operation
+update toytab set i = 4;
+ERROR:  Table access method doesn't support the operation
+copy toytab from stdin;
+ERROR:  Table access method doesn't support the operation

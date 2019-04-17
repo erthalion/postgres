@@ -1,0 +1,4 @@
+comment = 'Dummy implementation of table AM api'
+default_version = '1.0'
+module_pathname = '$libdir/toytable'
+relocatable = true
