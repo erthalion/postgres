@@ -957,7 +957,8 @@ ROLLBACK;
 SELECT
 	i AS id,
 	i/2 AS p,
-	format('%60s', i%2) AS v,
+	i%2 AS v,
+	format('%60s', i%2) AS s,
 	i/4 AS c,
 	i/8 AS d,
 	(random() * (10000/8))::int as e --the same as d but no correlation with p
@@ -1010,6 +1011,14 @@ SELECT count(*) FROM btg GROUP BY p, d, e;
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY p, e, d;
 
+-- GROUP BY optimization by reorder columns by frequency
+-- taking into account comparison costs
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY v, s;
+
+EXPLAIN (COSTS off)
+SELECT count(*) FROM btg GROUP BY s, v;
 
 -- GROUP BY optimization by reorder columns by index scan
 

@@ -17,16 +17,20 @@
  */
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "access/stratnum.h"
 #include "catalog/pg_opfamily.h"
+#include "catalog/pg_proc.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
+#include "nodes/supportnodes.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "partitioning/partbounds.h"
 #include "utils/lsyscache.h"
+#include "utils/syscache.h"
 #include "utils/selfuncs.h"
 
 
@@ -393,6 +397,112 @@ group_keys_reorder_by_pathkeys(List *pathkeys, List **group_pathkeys,
 	return n;
 }
 
+#include <math.h>
+#define LOG2(x)  (log(x) / 0.693147180559945)
+
+/*
+ * get_width_cost_multiplier
+ *		Returns relative complexity of comparing two valyes based on it's width.
+ * The idea behind - long values have more expensive comparison. Return value is
+ * in cpu_operator_cost unit.
+ */
+static double
+get_width_cost_multiplier(PlannerInfo *root, Expr *expr)
+{
+	double	width = -1.0; /* fake value */
+
+	if (IsA(expr, RelabelType))
+		expr = (Expr *) ((RelabelType *) expr)->arg;
+
+	/* Try to find actual stat in corresonding relation */
+	if (IsA(expr, Var))
+	{
+		Var		*var = (Var *) expr;
+
+		if (var->varno > 0 && var->varno < root->simple_rel_array_size)
+		{
+			RelOptInfo	*rel = root->simple_rel_array[var->varno];
+
+			if (rel != NULL &&
+				var->varattno >= rel->min_attr &&
+				var->varattno <= rel->max_attr)
+			{
+				int	ndx = var->varattno - rel->min_attr;
+
+				if (rel->attr_widths[ndx] > 0)
+					width = rel->attr_widths[ndx];
+			}
+		}
+	}
+
+	/* Didn't find any actual stats, use estimation by type */
+	if (width < 0.0)
+	{
+		Node	*node = (Node*) expr;
+
+		width = get_typavgwidth(exprType(node), exprTypmod(node));
+	}
+
+	/*
+	 * Any value in pgsql is passed by Datum type, so any operation with value
+	 * could not be cheaper than operation with Datum type
+	 */
+	if (width <= sizeof(Datum))
+		return sizeof(Datum);
+		/*return 1.0;*/
+
+	/*
+	 * Seems, cost of comparision is not directly proportional to args width,
+	 * because comparing args could be differ width (we known only average over
+	 * column) and difference often could be defined only by looking on first
+	 * bytes. So, use log16(width) as estimation.
+	 */
+
+	return width;
+	/*return 1.0 + 0.125 * LOG2(width / sizeof(Datum));*/
+}
+
+static Cost
+get_func_cost(PlannerInfo *root, Oid funcid)
+{
+	HeapTuple	proctup;
+	Form_pg_proc procform;
+
+	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+	if (!HeapTupleIsValid(proctup))
+		elog(ERROR, "cache lookup failed for function %u", funcid);
+	procform = (Form_pg_proc) GETSTRUCT(proctup);
+
+	if (OidIsValid(procform->prosupport))
+	{
+		SupportRequestCost req;
+		SupportRequestCost *sresult;
+
+		req.type = T_SupportRequestCost;
+		req.root = root;
+		req.funcid = funcid;
+
+		/* Initialize cost fields so that support function doesn't have to */
+		req.startup = 0;
+		req.per_tuple = 0;
+
+		sresult = (SupportRequestCost *)
+			DatumGetPointer(OidFunctionCall1(procform->prosupport,
+											 PointerGetDatum(&req)));
+
+		if (sresult == &req)
+		{
+			/* Success, so accumulate support function's estimate into *cost */
+			ReleaseSysCache(proctup);
+			return req.per_tuple;
+		}
+	}
+
+	/* No support function, or it failed, so rely on procost */
+	ReleaseSysCache(proctup);
+	return procform->procost * cpu_operator_cost;
+}
+
 /*
  * Order tail of list of group pathkeys by uniqueness descendetly. It allows to
  * speedup sorting. Returns newly allocated lists, old ones stay untouched.
@@ -470,10 +580,24 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 		for(i = n_keys_to_est - 1; i < nkeys; i++)
 		{
 			double  est_num_groups;
+			PathKey *pathkey = keys[i].pathkey;
+			EquivalenceMember *em = (EquivalenceMember *)
+									linitial(pathkey->pk_eclass->ec_members);
 
 			lfirst(tail_cell) = keys[i].pathkeyExpr;
 			est_num_groups = estimate_num_groups(root, pathkeyExprList,
 												 nrows, NULL);
+			est_num_groups /= get_width_cost_multiplier(root, (Expr *) keys[i].pathkeyExpr);
+			if (em->em_datatype != InvalidOid)
+			{
+				Oid		sortop;
+
+				sortop = get_opfamily_member(pathkey->pk_opfamily,
+											 em->em_datatype, em->em_datatype,
+											 pathkey->pk_strategy);
+
+				est_num_groups /= get_func_cost(root, get_opcode(sortop));
+			}
 
 			if (est_num_groups > best_est_num_groups)
 			{

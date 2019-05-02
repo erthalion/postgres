@@ -241,28 +241,6 @@ SELECT * FROM check_estimated_rows('SELECT COUNT(*) FROM ndistinct GROUP BY b, c
        200 |     11
 (1 row)
 
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c, d;
-            QUERY PLAN             
------------------------------------
- GroupAggregate
-   Group Key: a, d, c, b
-   ->  Sort
-         Sort Key: a, d, c, b
-         ->  Seq Scan on ndistinct
-(5 rows)
-
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY b, c, d;
-            QUERY PLAN             
------------------------------------
- GroupAggregate
-   Group Key: b, d, c
-   ->  Sort
-         Sort Key: b, d, c
-         ->  Seq Scan on ndistinct
-(5 rows)
-
 TRUNCATE TABLE ndistinct;
 -- under-estimates when using only per-column statistics
 INSERT INTO ndistinct (a, b, c, filler1)
@@ -309,58 +287,6 @@ SELECT * FROM check_estimated_rows('SELECT COUNT(*) FROM ndistinct GROUP BY a, d
 -----------+--------
        500 |     50
 (1 row)
-
--- plans using Group Aggregate, thanks to using correct esimates
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY a, b;
-            QUERY PLAN             
------------------------------------
- GroupAggregate
-   Group Key: b, a
-   ->  Sort
-         Sort Key: b, a
-         ->  Seq Scan on ndistinct
-(5 rows)
-
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c;
-            QUERY PLAN             
------------------------------------
- GroupAggregate
-   Group Key: b, a, c
-   ->  Sort
-         Sort Key: b, a, c
-         ->  Seq Scan on ndistinct
-(5 rows)
-
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c, d;
-            QUERY PLAN             
------------------------------------
- GroupAggregate
-   Group Key: d, b, a, c
-   ->  Sort
-         Sort Key: d, b, a, c
-         ->  Seq Scan on ndistinct
-(5 rows)
-
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY b, c, d;
-         QUERY PLAN          
------------------------------
- HashAggregate
-   Group Key: b, c, d
-   ->  Seq Scan on ndistinct
-(3 rows)
-
-EXPLAIN (COSTS off)
- SELECT COUNT(*) FROM ndistinct GROUP BY a, d;
-         QUERY PLAN          
------------------------------
- HashAggregate
-   Group Key: a, d
-   ->  Seq Scan on ndistinct
-(3 rows)
 
 DROP STATISTICS s10;
 SELECT s.stxkind, d.stxdndistinct
