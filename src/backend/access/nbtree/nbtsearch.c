@@ -1456,7 +1456,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 			bool keyFound = false;
 
 			LockBuffer(buf, BT_READ);
-			so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 
 			/* Lock the page for SERIALIZABLE transactions */
@@ -1506,7 +1505,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	so->currPos.buf = buf;
 	if (ScanDirectionIsForward(dir))
 	{
-		so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 	}
 	else
@@ -1519,7 +1517,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		int			indnkeyatts;
 		int 		i;
 
-		so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
@@ -1557,7 +1554,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 			if(_bt_compare(scan->indexRelation, so->skipScanKey,
 						   page, compare_offset) > compare_value)
 			{
-				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			}
 			else
@@ -1565,12 +1561,10 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 				ReleaseBuffer(so->currPos.buf);
 				so->currPos.buf = InvalidBuffer;
 
-				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 				stack = _bt_search(scan->indexRelation, so->skipScanKey,
 								   &buf, BT_READ, scan->xs_snapshot);
 				_bt_freestack(stack);
 				so->currPos.buf = buf;
-				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			}
 		}

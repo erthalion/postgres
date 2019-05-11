@@ -269,3 +269,53 @@ SELECT DISTINCT four FROM tenk1;
    Scan mode: Skip scan
 (3 rows)
 
+BEGIN;
+DECLARE c SCROLL CURSOR FOR SELECT DISTINCT four FROM tenk1;
+FETCH FROM c;
+ four 
+------
+    0
+(1 row)
+
+FETCH BACKWARD FROM c;
+ four 
+------
+(0 rows)
+
+FETCH 5 FROM c;
+ four 
+------
+    0
+    1
+    2
+    3
+(4 rows)
+
+FETCH BACKWARD 5 FROM c;
+ four 
+------
+    3
+    2
+    1
+    0
+(4 rows)
+
+FETCH 5 FROM c;
+ four 
+------
+    0
+    1
+    2
+    3
+(4 rows)
+
+FETCH BACKWARD 5 FROM c;
+ four 
+------
+    3
+    2
+    1
+    0
+(4 rows)
+
+END;
