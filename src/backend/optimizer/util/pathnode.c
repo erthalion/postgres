@@ -2953,7 +2953,7 @@ create_skipscan_unique_path(PlannerInfo *root,
 	/* The size of the prefix we'll use for skipping. */
 	Assert(pathnode->indexinfo->amcanskip);
 	Assert(distinctPrefixKeys > 0);
-	Assert(distinctPrefixKeys <= list_length(pathnode->path.pathkeys));
+	/*Assert(distinctPrefixKeys <= list_length(pathnode->path.pathkeys));*/
 	pathnode->indexskipprefix = distinctPrefixKeys;
 
 	/*

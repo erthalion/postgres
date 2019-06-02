@@ -4802,21 +4802,44 @@ create_distinct_paths(PlannerInfo *root,
 
 			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
 			{
+				ListCell   		*lc;
+				IndexOptInfo 	*index = ((IndexPath *) path)->indexinfo;
+				bool 			differentOrder = false;
+				int 			i = 0;
+
 				add_path(distinct_rel, (Path *)
 						 create_upper_unique_path(root, distinct_rel,
 												  path,
 												  list_length(root->distinct_pathkeys),
 												  numDistinctRows));
 
+
+				foreach(lc, parse->distinctClause)
+				{
+					SortGroupClause *sgc = lfirst_node(SortGroupClause, lc);
+					TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
+					Var		   *var = (Var *) tle->expr;
+
+					Assert(i < index->ncolumns);
+
+					if (index->indexkeys[i] != var->varattno)
+					{
+						differentOrder = true;
+						break;
+					}
+
+					i++;
+				}
+
 				/* Also consider a skip scan, if possible. */
 				if (IsA(path, IndexPath) &&
 					path->pathtype == T_IndexOnlyScan &&
 					enable_indexskipscan &&
 					((IndexPath *) path)->indexinfo->amcanskip &&
-					root->distinct_pathkeys != NIL)
+					root->distinct_pathkeys != NIL &&
+					!differentOrder)
 				{
-					int distinctPrefixKeys = list_length(root->distinct_pathkeys);
-
+					int distinctPrefixKeys = list_length(parse->distinctClause);
 					add_path(distinct_rel, (Path *)
 							 create_skipscan_unique_path(root,
 														 distinct_rel,
