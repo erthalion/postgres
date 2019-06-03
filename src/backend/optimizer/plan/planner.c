@@ -3615,12 +3615,21 @@ standard_qp_callback(PlannerInfo *root, void *extra)
 
 	if (parse->distinctClause &&
 		grouping_is_sortable(parse->distinctClause))
+	{
+		root->uniq_distinct_pathkeys =
+			make_pathkeys_for_distinctclauses(root,
+											  parse->distinctClause,
+											  tlist, true);
 		root->distinct_pathkeys =
-			make_pathkeys_for_sortclauses(root,
-										  parse->distinctClause,
-										  tlist);
+			make_pathkeys_for_distinctclauses(root,
+											  parse->distinctClause,
+											  tlist, true);
+	}
 	else
+	{
 		root->distinct_pathkeys = NIL;
+		root->uniq_distinct_pathkeys = NIL;
+	}
 
 	root->sort_pathkeys =
 		make_pathkeys_for_sortclauses(root,
@@ -4803,7 +4812,7 @@ create_distinct_paths(PlannerInfo *root,
 			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
 			{
 				ListCell   		*lc;
-				IndexOptInfo 	*index = ((IndexPath *) path)->indexinfo;
+				IndexOptInfo 	*index = NULL;
 				bool 			differentOrder = false;
 				int 			i = 0;
 
@@ -4813,12 +4822,19 @@ create_distinct_paths(PlannerInfo *root,
 												  list_length(root->distinct_pathkeys),
 												  numDistinctRows));
 
+				/* Also consider a skip scan, if possible. */
+				if(IsA(path, IndexPath))
+					index = ((IndexPath *) path)->indexinfo;
+				else
+					continue;
 
-				foreach(lc, parse->distinctClause)
+				foreach(lc, root->uniq_distinct_pathkeys)
 				{
-					SortGroupClause *sgc = lfirst_node(SortGroupClause, lc);
-					TargetEntry *tle = get_sortgroupclause_tle(sgc, parse->targetList);
-					Var		   *var = (Var *) tle->expr;
+					PathKey *pathKey = lfirst_node(PathKey, lc);
+					EquivalenceMember *em =
+						lfirst_node(EquivalenceMember,
+									list_head(pathKey->pk_eclass->ec_members));
+					Var *var = (Var *) em->em_expr;
 
 					Assert(i < index->ncolumns);
 
@@ -4831,15 +4847,14 @@ create_distinct_paths(PlannerInfo *root,
 					i++;
 				}
 
-				/* Also consider a skip scan, if possible. */
-				if (IsA(path, IndexPath) &&
-					path->pathtype == T_IndexOnlyScan &&
+				if (path->pathtype == T_IndexOnlyScan &&
 					enable_indexskipscan &&
-					((IndexPath *) path)->indexinfo->amcanskip &&
+					index->amcanskip &&
 					root->distinct_pathkeys != NIL &&
 					!differentOrder)
 				{
-					int distinctPrefixKeys = list_length(parse->distinctClause);
+					int distinctPrefixKeys =
+						list_length(root->uniq_distinct_pathkeys);
 					add_path(distinct_rel, (Path *)
 							 create_skipscan_unique_path(root,
 														 distinct_rel,

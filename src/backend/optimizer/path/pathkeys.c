@@ -129,15 +129,12 @@ make_canonical_pathkey(PlannerInfo *root,
  * Because the equivclass.c machinery forms only one copy of any EC per query,
  * pointer comparison is enough to decide whether canonical ECs are the same.
  */
+
 static bool
-pathkey_is_redundant(PathKey *new_pathkey, List *pathkeys)
+pathkey_is_unique(PathKey *new_pathkey, List *pathkeys)
 {
 	EquivalenceClass *new_ec = new_pathkey->pk_eclass;
 	ListCell   *lc;
-
-	/* Check for EC containing a constant --- unconditionally redundant */
-	if (EC_MUST_BE_REDUNDANT(new_ec))
-		return true;
 
 	/* If same EC already used in list, then redundant */
 	foreach(lc, pathkeys)
@@ -149,6 +146,19 @@ pathkey_is_redundant(PathKey *new_pathkey, List *pathkeys)
 	}
 
 	return false;
+}
+
+static bool
+pathkey_is_redundant(PathKey *new_pathkey, List *pathkeys)
+{
+	EquivalenceClass *new_ec = new_pathkey->pk_eclass;
+	ListCell   *lc;
+
+	/* Check for EC containing a constant --- unconditionally redundant */
+	if (EC_MUST_BE_REDUNDANT(new_ec))
+		return true;
+
+	return pathkey_is_unique(new_pathkey, pathkeys);
 }
 
 /*
@@ -1095,6 +1105,46 @@ make_pathkeys_for_sortclauses(PlannerInfo *root,
 	}
 	return pathkeys;
 }
+
+List *
+make_pathkeys_for_distinctclauses(PlannerInfo *root,
+								  List *distinctclauses,
+								  List *tlist, bool checkRedundant)
+{
+	List	   *pathkeys = NIL;
+	ListCell   *l;
+
+	foreach(l, distinctclauses)
+	{
+		SortGroupClause *sortcl = (SortGroupClause *) lfirst(l);
+		Expr	   *sortkey;
+		PathKey    *pathkey;
+
+		sortkey = (Expr *) get_sortgroupclause_expr(sortcl, tlist);
+		Assert(OidIsValid(sortcl->sortop));
+		pathkey = make_pathkey_from_sortop(root,
+										   sortkey,
+										   root->nullable_baserels,
+										   sortcl->sortop,
+										   sortcl->nulls_first,
+										   sortcl->tleSortGroupRef,
+										   true);
+
+		/* Canonical form eliminates redundant ordering keys */
+		if (checkRedundant)
+		{
+			if (!pathkey_is_redundant(pathkey, pathkeys))
+				pathkeys = lappend(pathkeys, pathkey);
+		}
+		else
+		{
+			if (!pathkey_is_unique(pathkey, pathkeys))
+				pathkeys = lappend(pathkeys, pathkey);
+		}
+	}
+	return pathkeys;
+}
+
 
 /****************************************************************************
  *		PATHKEYS AND MERGECLAUSES

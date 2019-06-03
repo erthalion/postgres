@@ -298,6 +298,9 @@ struct PlannerInfo
 	List	   *group_pathkeys; /* groupClause pathkeys, if any */
 	List	   *window_pathkeys;	/* pathkeys of bottom window, if any */
 	List	   *distinct_pathkeys;	/* distinctClause pathkeys, if any */
+	List	   *uniq_distinct_pathkeys;	/* unique, but not necessarily not
+										   redundant distinctClause pathkeys,
+										   if any */
 	List	   *sort_pathkeys;	/* sortClause pathkeys, if any */
 
 	List	   *part_schemes;	/* Canonicalised partition schemes used in the

@@ -260,6 +260,46 @@ SELECT DISTINCT four FROM tenk1 WHERE four = 1;
     1
 (1 row)
 
+-- check colums order
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+ four 
+------
+    0
+    2
+(2 rows)
+
+CREATE INDEX tenk1_four_ten on tenk1 (four, ten);
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+ four 
+------
+    0
+    2
+(2 rows)
+
+DROP INDEX tenk1_four_ten;
+CREATE INDEX tenk1_ten_four on tenk1 (ten, four);
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+ four 
+------
+    0
+    2
+(2 rows)
+
+DROP INDEX tenk1_ten_four;
+SELECT DISTINCT four, four FROM tenk1 WHERE ten = 2;
+ four | four 
+------+------
+    0 |    0
+    2 |    2
+(2 rows)
+
+SELECT DISTINCT four, 1 FROM tenk1 WHERE ten = 2;
+ four | ?column? 
+------+----------
+    2 |        1
+    0 |        1
+(2 rows)
+
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT DISTINCT four FROM tenk1;
                     QUERY PLAN                    
