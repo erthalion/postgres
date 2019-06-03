@@ -4830,7 +4830,7 @@ create_distinct_paths(PlannerInfo *root,
 
 				/*
 				 * The order of columns in the index should be the same, as for
-				 * unique distincs pathkeys, otherwise we cannot use_bt_search
+				 * unique distincs pathkeys, otherwise we cannot use _bt_search
 				 * in the skip implementation - this can lead to a missing
 				 * records.
 				 */
