@@ -82,13 +82,24 @@ SELECT DISTINCT four FROM tenk1 WHERE four = 1;
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
 
 CREATE INDEX tenk1_four_ten on tenk1 (four, ten);
+
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+
 DROP INDEX tenk1_four_ten;
 
 CREATE INDEX tenk1_ten_four on tenk1 (ten, four);
+
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+
 DROP INDEX tenk1_ten_four;
 
+-- check projection case
 SELECT DISTINCT four, four FROM tenk1 WHERE ten = 2;
 SELECT DISTINCT four, 1 FROM tenk1 WHERE ten = 2;
 

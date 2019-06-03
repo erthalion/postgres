@@ -276,6 +276,16 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
     2
 (2 rows)
 
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Only Scan using tenk1_four_ten on public.tenk1
+   Output: four
+   Scan mode: Skip scan
+   Index Cond: (tenk1.ten = 2)
+(4 rows)
+
 DROP INDEX tenk1_four_ten;
 CREATE INDEX tenk1_ten_four on tenk1 (ten, four);
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
@@ -285,7 +295,19 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
     2
 (2 rows)
 
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Unique
+   Output: four
+   ->  Index Only Scan using tenk1_ten_four on public.tenk1
+         Output: four
+         Index Cond: (tenk1.ten = 2)
+(5 rows)
+
 DROP INDEX tenk1_ten_four;
+-- check projection case
 SELECT DISTINCT four, four FROM tenk1 WHERE ten = 2;
  four | four 
 ------+------
