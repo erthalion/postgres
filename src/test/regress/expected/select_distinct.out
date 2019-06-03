@@ -276,6 +276,16 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
     2
 (2 rows)
 
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE four = 0;
+ four | ten 
+------+-----
+    0 |   0
+    0 |   2
+    0 |   4
+    0 |   6
+    0 |   8
+(5 rows)
+
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
                       QUERY PLAN                      
@@ -284,6 +294,17 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
    Output: four
    Scan mode: Skip scan
    Index Cond: (tenk1.ten = 2)
+(4 rows)
+
+-- test uniq_distinct_pathkeys
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE four = 0;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Index Only Scan using tenk1_four_ten on public.tenk1
+   Output: four, ten
+   Scan mode: Skip scan
+   Index Cond: (tenk1.four = 0)
 (4 rows)
 
 DROP INDEX tenk1_four_ten;
@@ -295,6 +316,13 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
     2
 (2 rows)
 
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
+ four | ten 
+------+-----
+    0 |   2
+    2 |   2
+(2 rows)
+
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
                          QUERY PLAN                         
@@ -303,6 +331,17 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
    Output: four
    ->  Index Only Scan using tenk1_ten_four on public.tenk1
          Output: four
+         Index Cond: (tenk1.ten = 2)
+(5 rows)
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Unique
+   Output: four, ten
+   ->  Index Only Scan using tenk1_ten_four on public.tenk1
+         Output: four, ten
          Index Cond: (tenk1.ten = 2)
 (5 rows)
 

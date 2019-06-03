@@ -84,18 +84,27 @@ SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
 CREATE INDEX tenk1_four_ten on tenk1 (four, ten);
 
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE four = 0;
 
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+
+-- test uniq_distinct_pathkeys
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE four = 0;
 
 DROP INDEX tenk1_four_ten;
 
 CREATE INDEX tenk1_ten_four on tenk1 (ten, four);
 
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
 
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
 
 DROP INDEX tenk1_ten_four;
 

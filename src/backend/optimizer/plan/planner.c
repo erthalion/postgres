@@ -3619,7 +3619,7 @@ standard_qp_callback(PlannerInfo *root, void *extra)
 		root->uniq_distinct_pathkeys =
 			make_pathkeys_for_distinctclauses(root,
 											  parse->distinctClause,
-											  tlist, true);
+											  tlist, false);
 		root->distinct_pathkeys =
 			make_pathkeys_for_distinctclauses(root,
 											  parse->distinctClause,
