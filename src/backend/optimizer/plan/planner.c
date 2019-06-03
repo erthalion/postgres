@@ -4813,7 +4813,7 @@ create_distinct_paths(PlannerInfo *root,
 			{
 				ListCell   		*lc;
 				IndexOptInfo 	*index = NULL;
-				bool 			differentOrder = false;
+				bool 			differentColumnsOrder = false;
 				int 			i = 0;
 
 				add_path(distinct_rel, (Path *)
@@ -4828,6 +4828,12 @@ create_distinct_paths(PlannerInfo *root,
 				else
 					continue;
 
+				/*
+				 * The order of columns in the index should be the same, as for
+				 * unique distincs pathkeys, otherwise we cannot use_bt_search
+				 * in the skip implementation - this can lead to a missing
+				 * records.
+				 */
 				foreach(lc, root->uniq_distinct_pathkeys)
 				{
 					PathKey *pathKey = lfirst_node(PathKey, lc);
@@ -4840,7 +4846,7 @@ create_distinct_paths(PlannerInfo *root,
 
 					if (index->indexkeys[i] != var->varattno)
 					{
-						differentOrder = true;
+						differentColumnsOrder = true;
 						break;
 					}
 
@@ -4851,7 +4857,7 @@ create_distinct_paths(PlannerInfo *root,
 					enable_indexskipscan &&
 					index->amcanskip &&
 					root->distinct_pathkeys != NIL &&
-					!differentOrder)
+					!differentColumnsOrder)
 				{
 					int distinctPrefixKeys =
 						list_length(root->uniq_distinct_pathkeys);

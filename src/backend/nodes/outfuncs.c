@@ -2209,6 +2209,7 @@ _outPlannerInfo(StringInfo str, const PlannerInfo *node)
 	WRITE_NODE_FIELD(group_pathkeys);
 	WRITE_NODE_FIELD(window_pathkeys);
 	WRITE_NODE_FIELD(distinct_pathkeys);
+	WRITE_NODE_FIELD(uniq_distinct_pathkeys);
 	WRITE_NODE_FIELD(sort_pathkeys);
 	WRITE_NODE_FIELD(processed_tlist);
 	WRITE_NODE_FIELD(minmax_aggs);

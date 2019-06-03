@@ -95,6 +95,30 @@ make_canonical_pathkey(PlannerInfo *root,
 }
 
 /*
+ * pathkey_is_unique
+ *	   Part of pathkey_is_redundant, that is reponsible for the case, when the
+ *	   new pathkey's equivalence class is the same as that of any existing
+ *	   member of the pathkey list.
+ */
+static bool
+pathkey_is_unique(PathKey *new_pathkey, List *pathkeys)
+{
+	EquivalenceClass *new_ec = new_pathkey->pk_eclass;
+	ListCell   *lc;
+
+	/* If same EC already used in list, then redundant */
+	foreach(lc, pathkeys)
+	{
+		PathKey    *old_pathkey = (PathKey *) lfirst(lc);
+
+		if (new_ec == old_pathkey->pk_eclass)
+			return true;
+	}
+
+	return false;
+}
+
+/*
  * pathkey_is_redundant
  *	   Is a pathkey redundant with one already in the given list?
  *
@@ -129,30 +153,10 @@ make_canonical_pathkey(PlannerInfo *root,
  * Because the equivclass.c machinery forms only one copy of any EC per query,
  * pointer comparison is enough to decide whether canonical ECs are the same.
  */
-
-static bool
-pathkey_is_unique(PathKey *new_pathkey, List *pathkeys)
-{
-	EquivalenceClass *new_ec = new_pathkey->pk_eclass;
-	ListCell   *lc;
-
-	/* If same EC already used in list, then redundant */
-	foreach(lc, pathkeys)
-	{
-		PathKey    *old_pathkey = (PathKey *) lfirst(lc);
-
-		if (new_ec == old_pathkey->pk_eclass)
-			return true;
-	}
-
-	return false;
-}
-
 static bool
 pathkey_is_redundant(PathKey *new_pathkey, List *pathkeys)
 {
 	EquivalenceClass *new_ec = new_pathkey->pk_eclass;
-	ListCell   *lc;
 
 	/* Check for EC containing a constant --- unconditionally redundant */
 	if (EC_MUST_BE_REDUNDANT(new_ec))
@@ -1106,6 +1110,13 @@ make_pathkeys_for_sortclauses(PlannerInfo *root,
 	return pathkeys;
 }
 
+/*
+ * make_pathkeys_for_distinctclauses
+ *		Generate a pathkeys list for distinct clauses, that represents the sort
+ *		order specified by a list of SortGroupClauses. Similar to
+ *		make_pathkeys_for_sortclauses, but allows to specify if we need to
+ *		check the full redundancy, or just uniqueness.
+ */
 List *
 make_pathkeys_for_distinctclauses(PlannerInfo *root,
 								  List *distinctclauses,
