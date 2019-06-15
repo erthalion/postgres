@@ -1363,6 +1363,14 @@ ExplainNode(PlanState *planstate, List *ancestors,
 			{
 				IndexScan  *indexscan = (IndexScan *) plan;
 
+				if (indexscan->skipPrefixSize > 0)
+				{
+					if (es->format != EXPLAIN_FORMAT_TEXT)
+						ExplainPropertyInteger("Distinct Prefix", NULL,
+											   indexscan->skipPrefixSize,
+											   es);
+				}
+
 				ExplainIndexScanDetails(indexscan->indexid,
 										indexscan->indexorderdir,
 										es);
@@ -1590,6 +1598,10 @@ ExplainNode(PlanState *planstate, List *ancestors,
 	switch (nodeTag(plan))
 	{
 		case T_IndexScan:
+			if (((IndexScan *) plan)->skipPrefixSize > 0)
+			{
+				ExplainPropertyText("Scan mode", "Skip scan", es);
+			}
 			show_scan_qual(((IndexScan *) plan)->indexqualorig,
 						   "Index Cond", planstate, ancestors, es);
 			if (((IndexScan *) plan)->indexqualorig)

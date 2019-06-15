@@ -4853,7 +4853,8 @@ create_distinct_paths(PlannerInfo *root,
 					i++;
 				}
 
-				if (path->pathtype == T_IndexOnlyScan &&
+				if ((path->pathtype == T_IndexOnlyScan ||
+					 path->pathtype == T_IndexScan) &&
 					enable_indexskipscan &&
 					index->amcanskip &&
 					root->distinct_pathkeys != NIL &&
