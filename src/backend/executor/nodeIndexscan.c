@@ -116,6 +116,7 @@ IndexNext(IndexScanState *node)
 								   node->iss_NumOrderByKeys);
 
 		node->iss_ScanDesc = scandesc;
+		node->iss_ScanDesc->xs_want_itup = true;
 
 		/*
 		 * If no run-time keys to calculate or they are ready, go ahead and

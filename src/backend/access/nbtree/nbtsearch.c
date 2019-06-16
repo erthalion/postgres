@@ -1400,8 +1400,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	Relation 	 indexRel = scan->indexRelation;
 
 	/* We want to return tuples, and we need a starting point */
-	/*Assert(scan->xs_want_itup);*/
-	/*Assert(scan->xs_itup);*/
+	Assert(scan->xs_want_itup);
+	Assert(scan->xs_itup);
 
 	/*
 	 * If skipScanKey is NULL then we initialize it with _bt_mkscankey,
@@ -1419,20 +1419,17 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		_bt_update_skip_scankeys(scan, indexRel);
 	}
 
-	if (BTScanPosIsValid(so->currPos) && !BufferIsValid(so->currPos.buf))
-		so->currPos.buf = _bt_getroot(indexRel, BT_READ);
-
 	/* Check if the next unique key can be found within the current page */
 	if (BTScanPosIsValid(so->currPos) &&
 		_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
 	{
 		bool keyFound = false;
 
-		LockBuffer(buf, BT_READ);
-		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+		LockBuffer(so->currPos.buf, BT_READ);
+		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, so->currPos.buf);
 
 		/* Lock the page for SERIALIZABLE transactions */
-		PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(buf),
+		PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
 						  scan->xs_snapshot);
 
 		/* We know in which direction to look */
