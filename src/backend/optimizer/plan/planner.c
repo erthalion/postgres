@@ -4853,8 +4853,17 @@ create_distinct_paths(PlannerInfo *root,
 					i++;
 				}
 
+				bool filter = false;
+
+				if (path->pathtype == T_IndexScan &&
+					parse->jointree != NULL &&
+					parse->jointree->quals != NULL &&
+					((List *)parse->jointree->quals)->length != 0)
+						filter = true;
+
 				if ((path->pathtype == T_IndexOnlyScan ||
 					 path->pathtype == T_IndexScan) &&
+					!filter &&
 					enable_indexskipscan &&
 					index->amcanskip &&
 					root->distinct_pathkeys != NIL &&
