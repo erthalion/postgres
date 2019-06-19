@@ -278,31 +278,27 @@ FROM tenk1 WHERE four = 1 ORDER BY four;
     1 |   9
 (1 row)
 
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT ON (four) four, ten
 FROM tenk1 ORDER BY four;
-                 QUERY PLAN                  
----------------------------------------------
- Index Scan using tenk1_four on public.tenk1
-   Output: four, ten
+              QUERY PLAN              
+--------------------------------------
+ Index Scan using tenk1_four on tenk1
    Scan mode: Skip scan
-(3 rows)
+(2 rows)
 
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT ON (four) four, ten
 FROM tenk1 WHERE four = 1 ORDER BY four;
-                                                                         QUERY PLAN                                                                          
--------------------------------------------------------------------------------------------------------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Result
-   Output: four, ten
    ->  Unique
-         Output: unique1, unique2, two, four, ten, twenty, hundred, thousand, twothousand, fivethous, tenthous, odd, even, stringu1, stringu2, string4
-         ->  Bitmap Heap Scan on public.tenk1
-               Output: unique1, unique2, two, four, ten, twenty, hundred, thousand, twothousand, fivethous, tenthous, odd, even, stringu1, stringu2, string4
-               Recheck Cond: (tenk1.four = 1)
+         ->  Bitmap Heap Scan on tenk1
+               Recheck Cond: (four = 1)
                ->  Bitmap Index Scan on tenk1_four
-                     Index Cond: (tenk1.four = 1)
-(9 rows)
+                     Index Cond: (four = 1)
+(6 rows)
 
 -- check colums order
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
@@ -330,26 +326,24 @@ SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE four = 0;
     0 |   8
 (5 rows)
 
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
-                      QUERY PLAN                      
-------------------------------------------------------
- Index Only Scan using tenk1_four_ten on public.tenk1
-   Output: four
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Only Scan using tenk1_four_ten on tenk1
    Scan mode: Skip scan
-   Index Cond: (tenk1.ten = 2)
-(4 rows)
+   Index Cond: (ten = 2)
+(3 rows)
 
 -- test uniq_distinct_pathkeys
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE four = 0;
-                      QUERY PLAN                      
-------------------------------------------------------
- Index Only Scan using tenk1_four_ten on public.tenk1
-   Output: four, ten
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Only Scan using tenk1_four_ten on tenk1
    Scan mode: Skip scan
-   Index Cond: (tenk1.four = 0)
-(4 rows)
+   Index Cond: (four = 0)
+(3 rows)
 
 DROP INDEX tenk1_four_ten;
 CREATE INDEX tenk1_ten_four on tenk1 (ten, four);
@@ -367,27 +361,23 @@ SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
     2 |   2
 (2 rows)
 
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
-                         QUERY PLAN                         
-------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Unique
-   Output: four
-   ->  Index Only Scan using tenk1_ten_four on public.tenk1
-         Output: four
-         Index Cond: (tenk1.ten = 2)
-(5 rows)
+   ->  Index Only Scan using tenk1_ten_four on tenk1
+         Index Cond: (ten = 2)
+(3 rows)
 
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
-                         QUERY PLAN                         
-------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Unique
-   Output: four, ten
-   ->  Index Only Scan using tenk1_ten_four on public.tenk1
-         Output: four, ten
-         Index Cond: (tenk1.ten = 2)
-(5 rows)
+   ->  Index Only Scan using tenk1_ten_four on tenk1
+         Index Cond: (ten = 2)
+(3 rows)
 
 DROP INDEX tenk1_ten_four;
 -- check projection case
@@ -405,14 +395,13 @@ SELECT DISTINCT four, 1 FROM tenk1 WHERE ten = 2;
     0 |        1
 (2 rows)
 
-EXPLAIN (VERBOSE, COSTS OFF)
+EXPLAIN (COSTS OFF)
 SELECT DISTINCT four FROM tenk1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using tenk1_four on public.tenk1
-   Output: four
+                QUERY PLAN                 
+-------------------------------------------
+ Index Only Scan using tenk1_four on tenk1
    Scan mode: Skip scan
-(3 rows)
+(2 rows)
 
 BEGIN;
 DECLARE c SCROLL CURSOR FOR SELECT DISTINCT four FROM tenk1;
