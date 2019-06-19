@@ -244,7 +244,7 @@ SELECT null IS NOT DISTINCT FROM null as "yes";
  t
 (1 row)
 
--- index skip scan
+-- index only skip scan
 SELECT DISTINCT four FROM tenk1;
  four 
 ------
@@ -259,6 +259,33 @@ SELECT DISTINCT four FROM tenk1 WHERE four = 1;
 ------
     1
 (1 row)
+
+-- index skip scan
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT ON (four) four
+FROM tenk1 ORDER BY four;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan using tenk1_four on public.tenk1
+   Output: four
+   Scan mode: Skip scan
+(3 rows)
+
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT ON (four) four, ten
+FROM tenk1 WHERE four = 1 ORDER BY four;
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Result
+   Output: four, ten
+   ->  Unique
+         Output: unique1, unique2, two, four, ten, twenty, hundred, thousand, twothousand, fivethous, tenthous, odd, even, stringu1, stringu2, string4
+         ->  Bitmap Heap Scan on public.tenk1
+               Output: unique1, unique2, two, four, ten, twenty, hundred, thousand, twothousand, fivethous, tenthous, odd, even, stringu1, stringu2, string4
+               Recheck Cond: (tenk1.four = 1)
+               ->  Bitmap Index Scan on tenk1_four
+                     Index Cond: (tenk1.four = 1)
+(9 rows)
 
 -- check colums order
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;

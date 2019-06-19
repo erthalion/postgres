@@ -74,9 +74,17 @@ SELECT 2 IS NOT DISTINCT FROM 2 as "yes";
 SELECT 2 IS NOT DISTINCT FROM null as "no";
 SELECT null IS NOT DISTINCT FROM null as "yes";
 
--- index skip scan
+-- index only skip scan
 SELECT DISTINCT four FROM tenk1;
 SELECT DISTINCT four FROM tenk1 WHERE four = 1;
+
+-- index skip scan
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT ON (four) four
+FROM tenk1 ORDER BY four;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT DISTINCT ON (four) four, ten
+FROM tenk1 WHERE four = 1 ORDER BY four;
 
 -- check colums order
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;

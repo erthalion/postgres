@@ -4813,7 +4813,8 @@ create_distinct_paths(PlannerInfo *root,
 			{
 				ListCell   		*lc;
 				IndexOptInfo 	*index = NULL;
-				bool 			differentColumnsOrder = false;
+				bool 			different_columns_order = false,
+								not_empty_qual = false;
 				int 			i = 0;
 
 				add_path(distinct_rel, (Path *)
@@ -4846,28 +4847,30 @@ create_distinct_paths(PlannerInfo *root,
 
 					if (index->indexkeys[i] != var->varattno)
 					{
-						differentColumnsOrder = true;
+						different_columns_order = true;
 						break;
 					}
 
 					i++;
 				}
 
-				bool filter = false;
-
+				/*
+				 * XXX: In case of index scan quals evaluation happens after
+				 * ExecScanFetch, which means skip results could be fitered out
+				 */
 				if (path->pathtype == T_IndexScan &&
 					parse->jointree != NULL &&
 					parse->jointree->quals != NULL &&
 					((List *)parse->jointree->quals)->length != 0)
-						filter = true;
+						not_empty_qual = true;
 
 				if ((path->pathtype == T_IndexOnlyScan ||
 					 path->pathtype == T_IndexScan) &&
-					!filter &&
 					enable_indexskipscan &&
 					index->amcanskip &&
 					root->distinct_pathkeys != NIL &&
-					!differentColumnsOrder)
+					!different_columns_order &&
+					!not_empty_qual)
 				{
 					int distinctPrefixKeys =
 						list_length(root->uniq_distinct_pathkeys);
