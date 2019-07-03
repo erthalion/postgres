@@ -77,6 +77,7 @@ SELECT null IS NOT DISTINCT FROM null as "yes";
 -- index only skip scan
 SELECT DISTINCT four FROM tenk1;
 SELECT DISTINCT four FROM tenk1 WHERE four = 1;
+SELECT DISTINCT four FROM tenk1 ORDER BY four DESC;
 
 -- index skip scan
 SELECT DISTINCT ON (four) four, ten

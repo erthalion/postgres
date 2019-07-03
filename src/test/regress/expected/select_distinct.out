@@ -260,6 +260,15 @@ SELECT DISTINCT four FROM tenk1 WHERE four = 1;
     1
 (1 row)
 
+SELECT DISTINCT four FROM tenk1 ORDER BY four DESC;
+ four 
+------
+    3
+    2
+    1
+    0
+(4 rows)
+
 -- index skip scan
 SELECT DISTINCT ON (four) four, ten
 FROM tenk1 ORDER BY four;

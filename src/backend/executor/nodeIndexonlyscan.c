@@ -71,6 +71,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 */
 	estate = node->ss.ps.state;
 	direction = estate->es_direction;
+	elog(DEBUG1, "Index only next, direction %d", direction);
 	/* flip direction if this is an overall backward scan */
 	if (ScanDirectionIsBackward(((IndexOnlyScan *) node->ss.ps.plan)->indexorderdir))
 	{
