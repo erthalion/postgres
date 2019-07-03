@@ -1363,6 +1363,14 @@ ExplainNode(PlanState *planstate, List *ancestors,
 			{
 				IndexScan  *indexscan = (IndexScan *) plan;
 
+				if (indexscan->skipPrefixSize > 0)
+				{
+					if (es->format != EXPLAIN_FORMAT_TEXT)
+						ExplainPropertyInteger("Distinct Prefix", NULL,
+											   indexscan->skipPrefixSize,
+											   es);
+				}
+
 				ExplainIndexScanDetails(indexscan->indexid,
 										indexscan->indexorderdir,
 										es);
@@ -1372,6 +1380,14 @@ ExplainNode(PlanState *planstate, List *ancestors,
 		case T_IndexOnlyScan:
 			{
 				IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) plan;
+
+				if (indexonlyscan->skipPrefixSize > 0)
+				{
+					if (es->format != EXPLAIN_FORMAT_TEXT)
+						ExplainPropertyInteger("Distinct Prefix", NULL,
+											   indexonlyscan->skipPrefixSize,
+											   es);
+				}
 
 				ExplainIndexScanDetails(indexonlyscan->indexid,
 										indexonlyscan->indexorderdir,
@@ -1582,6 +1598,10 @@ ExplainNode(PlanState *planstate, List *ancestors,
 	switch (nodeTag(plan))
 	{
 		case T_IndexScan:
+			if (((IndexScan *) plan)->skipPrefixSize > 0)
+			{
+				ExplainPropertyText("Scan mode", "Skip scan", es);
+			}
 			show_scan_qual(((IndexScan *) plan)->indexqualorig,
 						   "Index Cond", planstate, ancestors, es);
 			if (((IndexScan *) plan)->indexqualorig)
@@ -1595,6 +1615,10 @@ ExplainNode(PlanState *planstate, List *ancestors,
 										   planstate, es);
 			break;
 		case T_IndexOnlyScan:
+			if (((IndexOnlyScan *) plan)->skipPrefixSize > 0)
+			{
+				ExplainPropertyText("Scan mode", "Skip scan", es);
+			}
 			show_scan_qual(((IndexOnlyScan *) plan)->indexqual,
 						   "Index Cond", planstate, ancestors, es);
 			if (((IndexOnlyScan *) plan)->indexqual)
