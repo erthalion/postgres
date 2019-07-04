@@ -1419,13 +1419,27 @@ _bt_next(IndexScanDesc scan, ScanDirection dir)
 	/* OK, itemIndex says what to return */
 	if (scan->xs_want_itup)
 	{
-		int i;
-		for(i = 0; i < 3; i++)
+		if (ScanDirectionIsForward(dir))
 		{
-			currItem = &so->currPos.items[i];
-			print_itup(BufferGetBlockNumber(so->currPos.buf),
-					   (IndexTuple) (so->currTuples + currItem->tupleOffset),
-					   NULL, scan->indexRelation, "_bt_next:items");
+			int i;
+			for(i = 0; i < 3; i++)
+			{
+				currItem = &so->currPos.items[i];
+				print_itup(BufferGetBlockNumber(so->currPos.buf),
+						   (IndexTuple) (so->currTuples + currItem->tupleOffset),
+						   NULL, scan->indexRelation, "_bt_next:items");
+			}
+		}
+		else
+		{
+			int i;
+			for(i = 0; i < 3; i++)
+			{
+				currItem = &so->currPos.items[MaxIndexTuplesPerPage - i];
+				print_itup(BufferGetBlockNumber(so->currPos.buf),
+						   (IndexTuple) (so->currTuples + currItem->tupleOffset),
+						   NULL, scan->indexRelation, "_bt_next:items");
+			}
 		}
 	}
 
@@ -1535,67 +1549,84 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 					   &buf, BT_READ, scan->xs_snapshot);
 	_bt_freestack(stack);
 	so->currPos.buf = buf;
-	if (ScanDirectionIsForward(dir))
-	{
-		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-	}
-	else
-	{
-		Page 		page;
-		ItemId		iid;
-		IndexTuple  itup;
+	offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+	/*if (ScanDirectionIsForward(dir))*/
+	/*{*/
+		/*offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);*/
+	/*}*/
+	/*else*/
+	/*{*/
+		/*Page 		page;*/
+		/*ItemId		iid;*/
+		/*IndexTuple  itup;*/
 
 		/* For backward scan finding offnum is more involved. It is wrong to
 		 * just use binary search, since we will find the last item from the
 		 * sequence of equal items, and we need the first one. Otherwise e.g.
 		 * backward cursor scan will return an incorrect value. */
-		elog(DEBUG1, "_bt_skip:backwards");
-		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+		/*elog(DEBUG1, "_bt_skip:backwards");*/
+		/*offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);*/
+		/*_bt_drop_lock_and_maybe_pin(scan, &so->currPos);*/
 
-		page = BufferGetPage(so->currPos.buf);
-		iid = PageGetItemId(page, offnum);
-		itup = (IndexTuple) PageGetItem(page, iid);
+		/*page = BufferGetPage(so->currPos.buf);*/
+		/*iid = PageGetItemId(page, offnum);*/
+		/*itup = (IndexTuple) PageGetItem(page, iid);*/
 
-		print_itup(BufferGetBlockNumber(so->currPos.buf), itup,
-				   NULL, scan->indexRelation,
-				   "_bt_skip:offnum binsearch");
+		/*print_itup(BufferGetBlockNumber(so->currPos.buf), itup,*/
+				   /*NULL, scan->indexRelation,*/
+				   /*"_bt_skip:offnum binsearch");*/
 
-		_bt_readpage_last(scan, dir, offnum);
+		/*_bt_readpage_last(scan, dir, offnum);*/
 
-		/* One step back to find a previous value */
-		if (_bt_next(scan, dir))
-		{
-			_bt_update_skip_scankeys(scan, indexRel);
+		/*[> One step back to find a previous value <]*/
+		/*if (_bt_next(scan, dir))*/
+		/*{*/
+			/*_bt_update_skip_scankeys(scan, indexRel);*/
 
 			/* And now find the last item from the sequence for the current,
 			 * value with the intention do OffsetNumberNext. As a result we
 			 * end up on a first element from the sequence. */
-			if (_bt_scankey_within_page(scan, so->skipScanKey,
-										so->currPos.buf, dir))
-			{
-				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-			}
-			else
-			{
-				ReleaseBuffer(so->currPos.buf);
-				so->currPos.buf = InvalidBuffer;
+			/*if (_bt_scankey_within_page(scan, so->skipScanKey,*/
+										/*so->currPos.buf, dir))*/
+			/*{*/
+				/*offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);*/
 
-				stack = _bt_search(scan->indexRelation, so->skipScanKey,
-								   &buf, BT_READ, scan->xs_snapshot);
-				_bt_freestack(stack);
-				so->currPos.buf = buf;
-				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-			}
-		}
-		else
-		{
-			pfree(so->skipScanKey);
-			so->skipScanKey = NULL;
-			elog(DEBUG1, "_bt_skip finished");
-			return false;
-		}
-	}
+				/*page = BufferGetPage(so->currPos.buf);*/
+				/*iid = PageGetItemId(page, offnum);*/
+				/*itup = (IndexTuple) PageGetItem(page, iid);*/
+
+				/*print_itup(BufferGetBlockNumber(so->currPos.buf), itup,*/
+						   /*NULL, scan->indexRelation,*/
+						   /*"_bt_skip:after next on page");*/
+			/*}*/
+			/*else*/
+			/*{*/
+				/*ReleaseBuffer(so->currPos.buf);*/
+				/*so->currPos.buf = InvalidBuffer;*/
+
+				/*stack = _bt_search(scan->indexRelation, so->skipScanKey,*/
+								   /*&buf, BT_READ, scan->xs_snapshot);*/
+				/*_bt_freestack(stack);*/
+				/*so->currPos.buf = buf;*/
+				/*offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);*/
+
+				/*page = BufferGetPage(so->currPos.buf);*/
+				/*iid = PageGetItemId(page, offnum);*/
+				/*itup = (IndexTuple) PageGetItem(page, iid);*/
+
+				/*print_itup(BufferGetBlockNumber(so->currPos.buf), itup,*/
+						   /*NULL, scan->indexRelation,*/
+						   /*"_bt_skip:after next binsearch");*/
+			/*}*/
+		/*}*/
+		/*else*/
+		/*{*/
+			/*pfree(so->skipScanKey);*/
+			/*so->skipScanKey = NULL;*/
+			/*elog(DEBUG1, "_bt_skip finished");*/
+			/*return false;*/
+		/*}*/
+	/*}*/
 
 	/* Lock the page for SERIALIZABLE transactions */
 	PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(buf),
@@ -1619,8 +1650,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	if (ScanDirectionIsForward(dir))
 		/* Move back for _bt_next */
 		offnum = OffsetNumberPrev(offnum);
-	else
-		offnum = OffsetNumberNext(offnum);
+	/*else*/
+		/*offnum = OffsetNumberNext(offnum);*/
 
 	page = BufferGetPage(so->currPos.buf);
 	iid = PageGetItemId(page, offnum);
@@ -2139,7 +2170,7 @@ _bt_readpage_last(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 
 					_bt_saveitem(so, MaxIndexTuplesPerPage - 1, offnum, itup);
 
-					so->currPos.lastItem = 1;
+					so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
 				}
 				else
 				{
@@ -2184,7 +2215,8 @@ _bt_readpage_last(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 		so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
 	}
 
-	return (so->currPos.firstItem <= so->currPos.lastItem);
+	/*return (so->currPos.firstItem <= so->currPos.lastItem);*/
+	return false;
 }
 
 /* Save an index item into so->currPos.items[itemIndex] */

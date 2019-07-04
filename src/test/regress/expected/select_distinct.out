@@ -269,6 +269,34 @@ SELECT DISTINCT four FROM tenk1 ORDER BY four DESC;
     0
 (4 rows)
 
+CREATE TABLE distinct_a (a int, b int, c int);
+INSERT INTO distinct_a (
+    SELECT five, hundred, 10 FROM
+    generate_series(1, 5) five,
+    generate_series(1, 100) hundred
+);
+CREATE INDEX ON distinct_a (a, b);
+ANALYZE a;
+SELECT DISTINCT ON (a) a, b FROM distinct_a WHERE b = 2;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 2
+ 3 | 2
+ 4 | 2
+ 5 | 2
+(5 rows)
+
+SELECT DISTINCT ON (a) a, b FROM distinct_a ORDER BY a DESC, b DESC;
+ a |  b  
+---+-----
+ 5 | 100
+ 4 | 100
+ 3 | 100
+ 2 | 100
+ 1 | 100
+(5 rows)
+
 -- index skip scan
 SELECT DISTINCT ON (four) four, ten
 FROM tenk1 ORDER BY four;

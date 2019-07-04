@@ -71,7 +71,6 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 */
 	estate = node->ss.ps.state;
 	direction = estate->es_direction;
-	elog(DEBUG1, "Index only next, direction %d", direction);
 	/* flip direction if this is an overall backward scan */
 	if (ScanDirectionIsBackward(((IndexOnlyScan *) node->ss.ps.plan)->indexorderdir))
 	{
@@ -80,6 +79,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		else if (ScanDirectionIsBackward(direction))
 			direction = ForwardScanDirection;
 	}
+	elog(DEBUG1, "Index only next, direction %d", direction);
 	scandesc = node->ioss_ScanDesc;
 	econtext = node->ss.ps.ps_ExprContext;
 	slot = node->ss.ss_ScanTupleSlot;
