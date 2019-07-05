@@ -1382,8 +1382,8 @@ _bt_next(IndexScanDesc scan, ScanDirection dir)
  *  _bt_skip() -- Skip items that have the same prefix as the most recently
  * 				  fetched index tuple.
  *
- * The current position is set so that a subsequent call to _bt_next will fetch
- * the first tuple that differs in the leading 'prefix' keys.
+ * 		The current position is set so that a subsequent call to _bt_next will
+ * 		fetch the first tuple that differs in the leading 'prefix' keys.
  */
 bool
 _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
@@ -1731,11 +1731,11 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
  *	_bt_read_closest() -- Load data from closest two items, previous and
  *						  current on one the current index page into so->currPos
  *
- * Similar to _bt_readpage, except that it reads only a current and a previous
- * item. So far it is being used for _bt_skip.
+ * 		Similar to _bt_readpage, except that it reads only a current and a
+ * 		previous item. So far it is being used for _bt_skip.
  *
- * Returns true if required two matching items found on the page, false
- * otherwise.
+ * 		Returns true if required two matching items found on the page, false
+ * 		otherwise.
  */
 static bool
 _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
@@ -2645,6 +2645,10 @@ _bt_initialize_more_data(BTScanOpaque so, ScanDirection dir)
 	so->markItemIndex = -1;		/* ditto */
 }
 
+/*
+ * _bt_update_skip_scankeys() -- set up a new values for the existing scankeys
+ * 								 based on the current index tuple
+ */
 static inline void
 _bt_update_skip_scankeys(IndexScanDesc scan, Relation indexRel)
 {
@@ -2669,6 +2673,10 @@ _bt_update_skip_scankeys(IndexScanDesc scan, Relation indexRel)
 	}
 }
 
+/*
+ * _bt_scankey_within_page() -- check if the provided scankey could be found
+ * 								within a page, specified by the buffer.
+ */
 static inline bool
 _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
 						Buffer buf, ScanDirection dir)

@@ -1408,7 +1408,6 @@ typedef struct IndexScanState
  *		TableSlot		   slot for holding tuples fetched from the table
  *		VMBuffer		   buffer in use for visibility map testing, if any
  *		PscanLen		   size of parallel index-only scan descriptor
- *		NumDistinctKeys	   number of keys for skip-based DISTINCT
  *		SkipPrefixSize	   number of keys for skip-based DISTINCT
  *		FirstTupleEmitted  has the first tuple been emitted
  * ----------------

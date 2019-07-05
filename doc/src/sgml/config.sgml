@@ -4422,9 +4422,8 @@ ANY <replaceable class="parameter">num_sync</replaceable> ( <replaceable class="
       <listitem>
        <para>
         Enables or disables the query planner's use of index-skip-scan plan
-        types (see <xref linkend="indexes-index-skip-scans"/>). This parameter requires
-        that <varname>enable_indexonlyscan</varname> is <literal>on</literal>.
-        The default is <literal>on</literal>.
+        types (see <xref linkend="indexes-index-skip-scans"/>). The default is
+        <literal>on</literal>.
        </para>
       </listitem>
      </varlistentry>

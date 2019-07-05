@@ -520,7 +520,7 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
 	indexstate->ss.ps.ExecProcNode = ExecIndexOnlyScan;
-	indexstate->ioss_SkipPrefixSize = node->skipPrefixSize;
+	indexstate->ioss_SkipPrefixSize = node->indexskipprefixsize;
 	indexstate->ioss_FirstTupleEmitted = false;
 
 	/*

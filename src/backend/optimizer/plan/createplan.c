@@ -5201,7 +5201,7 @@ make_indexscan(List *qptlist,
 	node->indexorderbyorig = indexorderbyorig;
 	node->indexorderbyops = indexorderbyops;
 	node->indexorderdir = indexscandir;
-	node->skipPrefixSize = skipPrefixSize;
+	node->indexskipprefixsize = skipPrefixSize;
 
 	return node;
 }
@@ -5230,7 +5230,7 @@ make_indexonlyscan(List *qptlist,
 	node->indexorderby = indexorderby;
 	node->indextlist = indextlist;
 	node->indexorderdir = indexscandir;
-	node->skipPrefixSize = skipPrefixSize;
+	node->indexskipprefixsize = skipPrefixSize;
 
 	return node;
 }

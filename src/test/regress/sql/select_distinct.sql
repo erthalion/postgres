@@ -88,7 +88,10 @@ INSERT INTO distinct_a (
 CREATE INDEX ON distinct_a (a, b);
 ANALYZE a;
 
+-- test index skip scan with a condition on a non unique field
 SELECT DISTINCT ON (a) a, b FROM distinct_a WHERE b = 2;
+
+-- test index skip scan backwards
 SELECT DISTINCT ON (a) a, b FROM distinct_a ORDER BY a DESC, b DESC;
 
 DROP TABLE distinct_a;
@@ -143,6 +146,7 @@ SELECT DISTINCT four, 1 FROM tenk1 WHERE ten = 2;
 EXPLAIN (COSTS OFF)
 SELECT DISTINCT four FROM tenk1;
 
+-- test cursor forward/backward movements
 BEGIN;
 DECLARE c SCROLL CURSOR FOR SELECT DISTINCT four FROM tenk1;
 

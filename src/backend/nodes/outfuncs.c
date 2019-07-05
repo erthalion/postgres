@@ -559,7 +559,7 @@ _outIndexScan(StringInfo str, const IndexScan *node)
 	WRITE_NODE_FIELD(indexorderbyorig);
 	WRITE_NODE_FIELD(indexorderbyops);
 	WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-	WRITE_INT_FIELD(skipPrefixSize);
+	WRITE_INT_FIELD(indexskipprefixsize);
 }
 
 static void
@@ -574,7 +574,7 @@ _outIndexOnlyScan(StringInfo str, const IndexOnlyScan *node)
 	WRITE_NODE_FIELD(indexorderby);
 	WRITE_NODE_FIELD(indextlist);
 	WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-	WRITE_INT_FIELD(skipPrefixSize);
+	WRITE_INT_FIELD(indexskipprefixsize);
 }
 
 static void

@@ -130,6 +130,7 @@ static void ExplainDummyGroup(const char *objtype, const char *labelname,
 static void ExplainXMLTag(const char *tagname, int flags, ExplainState *es);
 static void ExplainJSONLineEnding(ExplainState *es);
 static void ExplainYAMLLineStarting(ExplainState *es);
+static void ExplainIndexSkipScanKeys(ExplainState *es, int skipPrefixSize);
 static void escape_yaml(StringInfo buf, const char *str);
 
 
@@ -1042,6 +1043,22 @@ ExplainPreScanNode(PlanState *planstate, Bitmapset **rels_used)
 }
 
 /*
+ * ExplainIndexSkipScanKeys -
+ *	  Append information about index skip scan to es->str.
+ *
+ * Can be used to print the skip prefix size.
+ */
+static void
+ExplainIndexSkipScanKeys(ExplainState *es, int skipPrefixSize)
+{
+	if (skipPrefixSize > 0)
+	{
+		if (es->format != EXPLAIN_FORMAT_TEXT)
+			ExplainPropertyInteger("Distinct Prefix", NULL, skipPrefixSize, es);
+	}
+}
+
+/*
  * ExplainNode -
  *	  Appends a description of a plan tree to es->str
  *
@@ -1363,13 +1380,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
 			{
 				IndexScan  *indexscan = (IndexScan *) plan;
 
-				if (indexscan->skipPrefixSize > 0)
-				{
-					if (es->format != EXPLAIN_FORMAT_TEXT)
-						ExplainPropertyInteger("Distinct Prefix", NULL,
-											   indexscan->skipPrefixSize,
-											   es);
-				}
+				ExplainIndexSkipScanKeys(es, indexscan->indexskipprefixsize);
 
 				ExplainIndexScanDetails(indexscan->indexid,
 										indexscan->indexorderdir,
@@ -1381,13 +1392,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
 			{
 				IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) plan;
 
-				if (indexonlyscan->skipPrefixSize > 0)
-				{
-					if (es->format != EXPLAIN_FORMAT_TEXT)
-						ExplainPropertyInteger("Distinct Prefix", NULL,
-											   indexonlyscan->skipPrefixSize,
-											   es);
-				}
+				ExplainIndexSkipScanKeys(es, indexonlyscan->indexskipprefixsize);
 
 				ExplainIndexScanDetails(indexonlyscan->indexid,
 										indexonlyscan->indexorderdir,
@@ -1598,9 +1603,9 @@ ExplainNode(PlanState *planstate, List *ancestors,
 	switch (nodeTag(plan))
 	{
 		case T_IndexScan:
-			if (((IndexScan *) plan)->skipPrefixSize > 0)
+			if (((IndexScan *) plan)->indexskipprefixsize > 0)
 			{
-				ExplainPropertyText("Scan mode", "Skip scan", es);
+				ExplainPropertyBool("Scan mode", true, es);
 			}
 			show_scan_qual(((IndexScan *) plan)->indexqualorig,
 						   "Index Cond", planstate, ancestors, es);
@@ -1615,9 +1620,9 @@ ExplainNode(PlanState *planstate, List *ancestors,
 										   planstate, es);
 			break;
 		case T_IndexOnlyScan:
-			if (((IndexOnlyScan *) plan)->skipPrefixSize > 0)
+			if (((IndexOnlyScan *) plan)->indexskipprefixsize > 0)
 			{
-				ExplainPropertyText("Scan mode", "Skip scan", es);
+				ExplainPropertyBool("Scan mode", true, es);
 			}
 			show_scan_qual(((IndexOnlyScan *) plan)->indexqual,
 						   "Index Cond", planstate, ancestors, es);

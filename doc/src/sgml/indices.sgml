@@ -1252,11 +1252,11 @@ SELECT target FROM tests WHERE subject = 'some-subject' AND success;
      efficiently, it can be not very efficient, since it requires to scan all
      the equal values of a key. In such cases planner will consider apply index
      skip scan approach, which is based on the idea of
-     <ulink url="https://wiki.postgresql.org/wiki/Free_Space_Map_Problems">
-     Loose index scan</ulink>. Rather than scanning all equal values of a key,
-     as soon as a new value is found, it will search for a larger value on the
-     same index page, and if not found, restart the search by looking for a
-     larger value. This is much faster when the index has many equal keys.
+     <firstterm>Loose index scan</firstterm>. Rather than scanning all equal
+     values of a key, as soon as a new value is found, it will search for a
+     larger value on the same index page, and if not found, restart the search
+     by looking for a larger value. This is much faster when the index has many
+     equal keys.
     </para>
   </sect2>
  </sect1>
