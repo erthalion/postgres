@@ -91,6 +91,8 @@ ANALYZE a;
 SELECT DISTINCT ON (a) a, b FROM distinct_a WHERE b = 2;
 SELECT DISTINCT ON (a) a, b FROM distinct_a ORDER BY a DESC, b DESC;
 
+DROP TABLE distinct_a;
+
 -- index skip scan
 SELECT DISTINCT ON (four) four, ten
 FROM tenk1 ORDER BY four;

@@ -79,7 +79,6 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		else if (ScanDirectionIsBackward(direction))
 			direction = ForwardScanDirection;
 	}
-	elog(DEBUG1, "Index only next, direction %d", direction);
 	scandesc = node->ioss_ScanDesc;
 	econtext = node->ss.ps.ps_ExprContext;
 	slot = node->ss.ss_ScanTupleSlot;

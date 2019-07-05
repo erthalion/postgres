@@ -297,6 +297,7 @@ SELECT DISTINCT ON (a) a, b FROM distinct_a ORDER BY a DESC, b DESC;
  1 | 100
 (5 rows)
 
+DROP TABLE distinct_a;
 -- index skip scan
 SELECT DISTINCT ON (four) four, ten
 FROM tenk1 ORDER BY four;
