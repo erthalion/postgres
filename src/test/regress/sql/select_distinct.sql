@@ -83,7 +83,7 @@ CREATE TABLE distinct_a (a int, b int, c int);
 INSERT INTO distinct_a (
     SELECT five, hundred, 10 FROM
     generate_series(1, 5) five,
-    generate_series(1, 100) hundred
+    generate_series(1, 10000) hundred
 );
 CREATE INDEX ON distinct_a (a, b);
 ANALYZE a;
@@ -94,7 +94,83 @@ SELECT DISTINCT ON (a) a, b FROM distinct_a WHERE b = 2;
 -- test index skip scan backwards
 SELECT DISTINCT ON (a) a, b FROM distinct_a ORDER BY a DESC, b DESC;
 
+-- test opposite scan/index directions inside a cursor
+-- forward/backward
+BEGIN;
+DECLARE c SCROLL CURSOR FOR
+SELECT DISTINCT ON (a) a,b FROM distinct_a ORDER BY a, b;
+
+FETCH FROM c;
+FETCH BACKWARD FROM c;
+
+FETCH 6 FROM c;
+FETCH BACKWARD 6 FROM c;
+
+FETCH 6 FROM c;
+FETCH BACKWARD 6 FROM c;
+
+END;
+
+-- backward/forward
+BEGIN;
+DECLARE c SCROLL CURSOR FOR
+SELECT DISTINCT ON (a) a,b FROM distinct_a ORDER BY a DESC, b DESC;
+
+FETCH FROM c;
+FETCH BACKWARD FROM c;
+
+FETCH 6 FROM c;
+FETCH BACKWARD 6 FROM c;
+
+FETCH 6 FROM c;
+FETCH BACKWARD 6 FROM c;
+
+END;
+
 DROP TABLE distinct_a;
+
+-- test missing values and skipping from the end
+CREATE TABLE distinct_abc(a int, b int, c int);
+CREATE INDEX ON distinct_abc(a, b, c);
+INSERT INTO distinct_abc
+	VALUES (1, 1, 1),
+		   (1, 1, 2),
+		   (1, 2, 2),
+		   (1, 2, 3),
+		   (2, 2, 1),
+		   (2, 2, 3),
+		   (3, 1, 1),
+		   (3, 1, 2),
+		   (3, 2, 2),
+		   (3, 2, 3);
+
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT ON (a) a,b,c FROM distinct_abc WHERE c = 2;
+
+BEGIN;
+DECLARE c SCROLL CURSOR FOR
+SELECT DISTINCT ON (a) a,b,c FROM distinct_abc WHERE c = 2;
+
+FETCH ALL FROM c;
+FETCH BACKWARD ALL FROM c;
+
+END;
+
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT ON (a) a,b,c FROM distinct_abc WHERE c = 2
+ORDER BY a DESC, b DESC;
+
+BEGIN;
+DECLARE c SCROLL CURSOR FOR
+SELECT DISTINCT ON (a) a,b,c FROM distinct_abc WHERE c = 2
+ORDER BY a DESC, b DESC;
+
+FETCH ALL FROM c;
+FETCH BACKWARD ALL FROM c;
+
+END;
+
+DROP TABLE distinct_abc;
 
 -- index skip scan
 SELECT DISTINCT ON (four) four, ten

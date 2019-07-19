@@ -739,11 +739,13 @@ index_can_return(Relation indexRelation, int attno)
  * ----------------
  */
 bool
-index_skip(IndexScanDesc scan, ScanDirection direction, int prefix)
+index_skip(IndexScanDesc scan, ScanDirection direction,
+		   ScanDirection indexdir, bool scanstart, int prefix)
 {
 	SCAN_CHECKS;
 
-	return scan->indexRelation->rd_indam->amskip(scan, direction, prefix);
+	return scan->indexRelation->rd_indam->amskip(scan, direction,
+												 indexdir, scanstart, prefix);
 }
 
 /* ----------------

@@ -29,7 +29,7 @@ static OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf);
 static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir,
 						 OffsetNumber offnum);
 static bool _bt_read_closest(IndexScanDesc scan, ScanDirection dir,
-							 OffsetNumber offnum);
+							 ScanDirection indexdir, OffsetNumber offnum);
 static void _bt_saveitem(BTScanOpaque so, int itemIndex,
 						 OffsetNumber offnum, IndexTuple itup);
 static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir);
@@ -1384,9 +1384,30 @@ _bt_next(IndexScanDesc scan, ScanDirection dir)
  *
  * 		The current position is set so that a subsequent call to _bt_next will
  * 		fetch the first tuple that differs in the leading 'prefix' keys.
+ *
+ * 		There are four different kinds of skipping (depending on dir and
+ * 		indexdir, that are important to distinguish, especially in the presense
+ * 		of an index condition:
+ *
+ * 		* Advancing forward and reading forward
+ * 			simple scan
+ *
+ * 		* Advancing forward and reading backward
+ * 			scan inside a cursor fetching backward, when skipping is necessary
+ * 			right from the start
+ *
+ * 		* Advancing backward and reading forward
+ * 			scan with order by desc inside a cursor fetching forward, when
+ * 			skipping is necessary right from the start
+ *
+ * 		* Advancing backward and reading backward
+ * 			simple scan with order by desc
+ *
+ * 		This function in conjunction with _bt_read_closest handles them all.
  */
 bool
-_bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
+_bt_skip(IndexScanDesc scan, ScanDirection dir,
+		 ScanDirection indexdir, bool scanstart, int prefix)
 {
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	BTStack stack;
@@ -1394,6 +1415,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	OffsetNumber offnum;
 	BTScanPosItem *currItem;
 	Relation 	 indexRel = scan->indexRelation;
+	OffsetNumber startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
 
 	/* We want to return tuples, and we need a starting point */
 	Assert(scan->xs_want_itup);
@@ -1414,6 +1436,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	{
 		_bt_update_skip_scankeys(scan, indexRel);
 	}
+	_bt_update_skip_scankeys(scan, indexRel);
 
 	/* Check if the next unique key can be found within the current page */
 	if (BTScanPosIsValid(so->currPos) &&
@@ -1438,7 +1461,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 		}
 
 		/* Now read the data */
-		keyFound = _bt_read_closest(scan, dir, offnum);
+		keyFound = _bt_read_closest(scan, dir, indexdir, offnum);
 		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
 		if (keyFound)
@@ -1477,12 +1500,165 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir, int prefix)
 	/* We know in which direction to look */
 	_bt_initialize_more_data(so, dir);
 
-	if (ScanDirectionIsForward(dir))
-		/* Move back for _bt_next */
+	/*
+	 * Simplest case, advance forward and read also forward. At this moment we
+	 * are at the next distinct key at the beginning of the series. Go back one
+	 * step and let _bt_read_closest figure out about index condition.
+	 */
+	if (ScanDirectionIsForward(dir) && ScanDirectionIsForward(indexdir))
 		offnum = OffsetNumberPrev(offnum);
 
+	/*
+	 * Andvance backward but read forward. At this moment we are at the next
+	 * distinct key at the beginning of the series. In case if scan just
+	 * started, we can read forward without doing anything else. Otherwise find
+	 * previous distinct key and the beginning of it's series and read forward
+	 * from there. To do so, go back one step, perform binary search to find
+	 * the first item in the series and let _bt_read_closest do everything
+	 * else.
+	 */
+	else if (ScanDirectionIsBackward(dir) && ScanDirectionIsForward(indexdir))
+	{
+		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+
+		if (!scanstart)
+		{
+			_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+
+			/* One step back to find a previous value */
+			_bt_read_closest(scan, dir, dir, offnum);
+
+			if (_bt_next(scan, dir))
+			{
+				_bt_update_skip_scankeys(scan, indexRel);
+
+				/* And now find the last item from the sequence for the current,
+				 * value with the intention do OffsetNumberNext. As a result we
+				 * end up on a first element from the sequence. */
+				if (_bt_scankey_within_page(scan, so->skipScanKey,
+											so->currPos.buf, dir))
+					offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+				else
+				{
+					ReleaseBuffer(so->currPos.buf);
+					so->currPos.buf = InvalidBuffer;
+
+					stack = _bt_search(scan->indexRelation, so->skipScanKey,
+									   &buf, BT_READ, scan->xs_snapshot);
+					_bt_freestack(stack);
+					so->currPos.buf = buf;
+					offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+
+				}
+			}
+			else
+			{
+				pfree(so->skipScanKey);
+				so->skipScanKey = NULL;
+				return false;
+			}
+		}
+	}
+
+	/*
+	 * Andvance forward but read backward. At this moment we are at the next
+	 * distinct key at the beginning of the series. In case if scan just
+	 * started, we can go one step back and read forward without doing anything
+	 * else. Otherwise find the next distinct key and the beginning of it's
+	 * series, go one step back and read backward from there.
+	 *
+	 * An interesting situation can happen if one of distinct keys do not pass
+	 * a corresponding index condition at all. In this case reading backward
+	 * can lead to a previous distinc key being found, creating a loop. To
+	 * avoid that check the value to be returned, and jump one more time if
+	 * it's the same as at the beginning.
+	 */
+	else if (ScanDirectionIsForward(dir) && ScanDirectionIsBackward(indexdir))
+	{
+		if (scanstart)
+			offnum = OffsetNumberPrev(offnum);
+		else
+		{
+			OffsetNumber nextOffset = startOffset;
+
+			while(nextOffset == startOffset)
+			{
+				/*
+				 * Find a next index tuple to update scan key. It could be at
+				 * the end, so check for max offset
+				 */
+				OffsetNumber curOffnum = offnum;
+				Page page = BufferGetPage(so->currPos.buf);
+				OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
+				ItemId itemid = PageGetItemId(page, Min(offnum, maxoff));
+
+				_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+
+				scan->xs_itup = (IndexTuple) PageGetItem(page, itemid);
+				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+
+				_bt_update_skip_scankeys(scan, indexRel);
+
+				if (BTScanPosIsValid(so->currPos))
+				{
+					ReleaseBuffer(so->currPos.buf);
+					so->currPos.buf = InvalidBuffer;
+				}
+
+				stack = _bt_search(scan->indexRelation, so->skipScanKey,
+								   &buf, BT_READ, scan->xs_snapshot);
+				_bt_freestack(stack);
+				so->currPos.buf = buf;
+				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+
+				/*
+				 * Jump to the next key returned the same offset, which means
+				 * we are at the end and need to return
+				 */
+				if (offnum == curOffnum)
+				{
+					_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+
+					BTScanPosUnpinIfPinned(so->currPos);
+					BTScanPosInvalidate(so->currPos)
+
+					pfree(so->skipScanKey);
+					so->skipScanKey = NULL;
+					return false;
+				}
+
+				offnum = OffsetNumberPrev(offnum);
+
+				/* Check if _bt_read_closest returns already found item */
+				if (_bt_read_closest(scan, dir, indexdir, offnum))
+				{
+					IndexTuple itup;
+
+					currItem = &so->currPos.items[so->currPos.lastItem];
+					itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+					nextOffset = ItemPointerGetOffsetNumber(&itup->t_tid);
+				}
+				else
+				{
+					elog(ERROR, "Could not read closest index tuples: %d", offnum);
+					pfree(so->skipScanKey);
+					so->skipScanKey = NULL;
+					return false;
+				}
+
+				/*
+				 * If the nextOffset is the same as before, it means we are in
+				 * the loop, return offnum to the original position and jump
+				 * further
+				 */
+				if (nextOffset == startOffset)
+					offnum = OffsetNumberNext(offnum);
+			}
+		}
+	}
+
 	/* Now read the data */
-	if (!_bt_read_closest(scan, dir, offnum))
+	if (!_bt_read_closest(scan, dir, indexdir, offnum))
 	{
 		/*
 		 * There's no actually-matching data on this page.  Try to advance to
@@ -1729,7 +1905,9 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 
 /*
  *	_bt_read_closest() -- Load data from closest two items, previous and
- *						  current on one the current index page into so->currPos
+ *						  current on one the current index page into
+ *						  so->currPos. Previous may be not passing index
+ *						  condition, but it is needed for skip scan.
  *
  * 		Similar to _bt_readpage, except that it reads only a current and a
  * 		previous item. So far it is being used for _bt_skip.
@@ -1738,13 +1916,15 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
  * 		otherwise.
  */
 static bool
-_bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
+_bt_read_closest(IndexScanDesc scan, ScanDirection dir,
+				 ScanDirection indexdir, OffsetNumber offnum)
 {
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	Page		page;
 	BTPageOpaque opaque;
 	OffsetNumber minoff;
 	OffsetNumber maxoff;
+	IndexTuple 	 prevItup = NULL;
 	int			itemIndex;
 	bool		continuescan;
 	int			indnatts;
@@ -1801,11 +1981,8 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 	 */
 	Assert(BTScanPosIsPinned(so->currPos));
 
-	if (ScanDirectionIsForward(dir))
+	if (ScanDirectionIsForward(indexdir))
 	{
-		IndexTuple prevItup = NULL;
-		OffsetNumber prevOffNum;
-
 		/* load items[] in ascending order */
 		itemIndex = 0;
 
@@ -1831,24 +2008,37 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 			if (_bt_checkkeys(scan, itup, indnatts, dir, &continuescan))
 			{
 				/* tuple passes all scan key conditions, so remember it */
-
-				if (prevItup == NULL)
+				if (ScanDirectionIsBackward(dir))
 				{
-					_bt_saveitem(so, 0, offnum, itup);
+					_bt_saveitem(so, itemIndex, offnum, itup);
 					itemIndex++;
 				}
-				else
+				else if (prevItup != NULL)
 				{
-					_bt_saveitem(so, 0, prevOffNum, prevItup);
+					/*
+					 * Save the current item and the previous, even if the
+					 * latter does not pass scan key conditions
+					 */
+					ItemPointerData tid = prevItup->t_tid;
+					OffsetNumber prevOffnum = ItemPointerGetOffsetNumber(&tid);
+
+					_bt_saveitem(so, itemIndex, prevOffnum, prevItup);
 					itemIndex++;
 
-					_bt_saveitem(so, 1, offnum, itup);
+					_bt_saveitem(so, itemIndex, offnum, itup);
 					itemIndex++;
+				}
 
+				if (itemIndex == 2)
+				{
 					Assert(itemIndex <= MaxIndexTuplesPerPage);
 					so->currPos.firstItem = 0;
-					so->currPos.itemIndex = 0;
-					so->currPos.lastItem = 2;
+					/*
+					 * Actual itemIndex depends on in which direction do we
+					 * advance if this direction is different from indexdir
+					 */
+					so->currPos.itemIndex = ScanDirectionIsForward(dir) ? 0 : 1;
+					so->currPos.lastItem = 1;
 
 					/*
 					 * All of the closest items were found, so we can report
@@ -1861,7 +2051,6 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 			if (!continuescan)
 				break;
 
-			prevOffNum = offnum;
 			prevItup = itup;
 			offnum = OffsetNumberNext(offnum);
 		}
@@ -1897,9 +2086,6 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 	}
 	else
 	{
-		IndexTuple prevItup = NULL;
-		OffsetNumber prevOffNum;
-
 		/* load items[] in descending order */
 		itemIndex = MaxIndexTuplesPerPage;
 
@@ -1943,20 +2129,38 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 			if (passes_quals && tuple_alive)
 			{
 				/* tuple passes all scan key conditions, so remember it */
-				if (prevItup == NULL)
+				if (ScanDirectionIsForward(dir))
 				{
-					_bt_saveitem(so, MaxIndexTuplesPerPage - 1, offnum, itup);
-					so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
+					itemIndex--;
+					_bt_saveitem(so, itemIndex, offnum, itup);
 				}
-				else
+				else if (prevItup != NULL)
 				{
-					_bt_saveitem(so, MaxIndexTuplesPerPage - 1, prevOffNum, prevItup);
-					_bt_saveitem(so, MaxIndexTuplesPerPage - 2, offnum, itup);
+					/*
+					 * Save the current item and the previous, even if the
+					 * latter does not pass scan key conditions
+					 */
+					ItemPointerData tid = prevItup->t_tid;
+					OffsetNumber prevOffnum = ItemPointerGetOffsetNumber(&tid);
 
+					itemIndex--;
+					_bt_saveitem(so, itemIndex, prevOffnum, prevItup);
+
+					itemIndex--;
+					_bt_saveitem(so, itemIndex, offnum, itup);
+				}
+
+				if (MaxIndexTuplesPerPage - itemIndex == 2)
+				{
 					Assert(itemIndex <= MaxIndexTuplesPerPage);
 					so->currPos.firstItem = MaxIndexTuplesPerPage - 2;
-					so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
-					so->currPos.lastItem = MaxIndexTuplesPerPage - 2;
+					/*
+					 * Actual itemIndex depends on in which direction do we
+					 * advance if this direction is different from indexdir
+					 */
+					so->currPos.itemIndex = MaxIndexTuplesPerPage -
+						(ScanDirectionIsForward(dir) ? 2 : 1);
+					so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
 
 					/*
 					 * All of the closest items were found, so we can report
@@ -1964,8 +2168,6 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 					 */
 					return true;
 				}
-
-				itemIndex--;
 			}
 			if (!continuescan)
 			{
@@ -1974,7 +2176,6 @@ _bt_read_closest(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 				break;
 			}
 
-			prevOffNum = offnum;
 			prevItup = itup;
 			offnum = OffsetNumberPrev(offnum);
 		}

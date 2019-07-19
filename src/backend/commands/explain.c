@@ -1605,7 +1605,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
 		case T_IndexScan:
 			if (((IndexScan *) plan)->indexskipprefixsize > 0)
 			{
-				ExplainPropertyBool("Scan mode", true, es);
+				ExplainPropertyBool("Skip scan mode", true, es);
 			}
 			show_scan_qual(((IndexScan *) plan)->indexqualorig,
 						   "Index Cond", planstate, ancestors, es);
@@ -1622,7 +1622,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
 		case T_IndexOnlyScan:
 			if (((IndexOnlyScan *) plan)->indexskipprefixsize > 0)
 			{
-				ExplainPropertyBool("Scan mode", true, es);
+				ExplainPropertyBool("Skip scan mode", true, es);
 			}
 			show_scan_qual(((IndexOnlyScan *) plan)->indexqual,
 						   "Index Cond", planstate, ancestors, es);

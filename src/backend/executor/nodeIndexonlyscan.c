@@ -65,6 +65,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	IndexScanDesc scandesc;
 	TupleTableSlot *slot;
 	ItemPointer tid;
+	IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) node->ss.ps.plan;
 
 	/*
 	 * extract necessary information from index scan node
@@ -72,7 +73,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	estate = node->ss.ps.state;
 	direction = estate->es_direction;
 	/* flip direction if this is an overall backward scan */
-	if (ScanDirectionIsBackward(((IndexOnlyScan *) node->ss.ps.plan)->indexorderdir))
+	if (ScanDirectionIsBackward(indexonlyscan->indexorderdir))
 	{
 		if (ScanDirectionIsForward(direction))
 			direction = BackwardScanDirection;
@@ -119,9 +120,27 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
 	 */
-	if (node->ioss_SkipPrefixSize > 0 && node->ioss_FirstTupleEmitted)
+	if (node->ioss_SkipPrefixSize > 0)
 	{
-		if (!index_skip(scandesc, direction, node->ioss_SkipPrefixSize))
+		bool startscan = false;
+
+		/*
+		 * If advancing direction is different from index direction, we must
+		 * skip right away, but _bt_skip requires a starting point.
+		 */
+		if (direction * indexonlyscan->indexorderdir < 0 &&
+			!node->ioss_FirstTupleEmitted)
+		{
+			if (index_getnext_tid(scandesc, direction))
+			{
+				node->ioss_FirstTupleEmitted = true;
+				startscan = true;
+			}
+		}
+
+		if (node->ioss_FirstTupleEmitted &&
+			!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
+						startscan, node->ioss_SkipPrefixSize))
 		{
 			/* Reached end of index. At this point currPos is invalidated,
 			 * and we need to reset ioss_FirstTupleEmitted, since otherwise
