@@ -587,20 +587,20 @@ SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
 
 EXPLAIN (COSTS OFF)
 SELECT DISTINCT four FROM tenk1 WHERE ten = 2;
-                     QUERY PLAN                      
------------------------------------------------------
- Unique
-   ->  Index Only Scan using tenk1_ten_four on tenk1
-         Index Cond: (ten = 2)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Only Scan using tenk1_ten_four on tenk1
+   Skip scan mode: true
+   Index Cond: (ten = 2)
 (3 rows)
 
 EXPLAIN (COSTS OFF)
 SELECT DISTINCT on (four, ten) four, ten FROM tenk1 WHERE ten = 2;
-                     QUERY PLAN                      
------------------------------------------------------
- Unique
-   ->  Index Only Scan using tenk1_ten_four on tenk1
-         Index Cond: (ten = 2)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Index Only Scan using tenk1_ten_four on tenk1
+   Skip scan mode: true
+   Index Cond: (ten = 2)
 (3 rows)
 
 DROP INDEX tenk1_ten_four;
