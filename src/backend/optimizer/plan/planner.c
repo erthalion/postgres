@@ -4872,8 +4872,16 @@ create_distinct_paths(PlannerInfo *root,
 					}
 
 					/*
-					 * XXX: In case of index scan quals evaluation happens after
-					 * ExecScanFetch, which means skip results could be fitered out
+					 * XXX: In case of index scan quals evaluation happens
+					 * after ExecScanFetch, which means skip results could be
+					 * fitered out. Consider the following query:
+					 *
+					 * 		select distinct (a, b) a, b, c from t where  c < 100;
+					 *
+					 * Skip scan returns one tuple for one distinct set of (a, b)
+					 * with arbitrary one of c, so if the choosed c does not
+					 * match the qual and there is any c that matches the qual,
+					 * we miss that tuple.
 					 */
 					if (path->pathtype == T_IndexScan &&
 						parse->jointree != NULL &&
@@ -4883,8 +4891,6 @@ create_distinct_paths(PlannerInfo *root,
 
 					if (!different_columns_order &&	!not_empty_qual)
 					{
-						/*int distinctPrefixKeys =*/
-							/*list_length(root->uniq_distinct_pathkeys);*/
 						add_path(distinct_rel, (Path *)
 								 create_skipscan_unique_path(root,
 															 distinct_rel,

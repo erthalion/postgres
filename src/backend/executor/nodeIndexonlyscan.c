@@ -125,8 +125,11 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		bool startscan = false;
 
 		/*
-		 * If advancing direction is different from index direction, we must
-		 * skip right away, but _bt_skip requires a starting point.
+		 * When fetching a cursor in the direction opposite to a general scan
+		 * direction, the result must be what normal fetching should have
+		 * returned, but in reversed order. In other words, return the last or
+		 * first scanned tuple in a DISTINCT set, depending on a cursor
+		 * direction. Skip to that tuple before returning the first tuple.
 		 */
 		if (direction * indexonlyscan->indexorderdir < 0 &&
 			!node->ioss_FirstTupleEmitted)
