@@ -1215,6 +1215,30 @@ doConnect(void)
 	return conn;
 }
 
+static void*
+executeStatementThread(void *buf)
+{
+	PGresult   *res;
+	PGconn 	   *con;
+	char 	   *sql = (char*) buf;
+
+	if ((con = doConnect()) == NULL)
+	{
+		fprintf(stderr, "Cannot connect");
+		exit(1);
+	}
+
+	res = PQexec(con, sql);
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		fprintf(stderr, "%s", PQerrorMessage(con));
+		exit(1);
+	}
+	PQclear(res);
+
+	PQfinish(con);
+}
+
 /* qsort comparator for Variable array */
 static int
 compareVariableNames(const void *v1, const void *v2)
@@ -3749,7 +3773,7 @@ initGenerateData(PGconn *con)
 	/*
 	 * accounts is big enough to be worth using COPY and tracking runtime
 	 */
-	res = PQexec(con, "copy pgbench_accounts from stdin");
+	res = PQexec(con, "copy pgbench_accounts from stdin freeze");
 	if (PQresultStatus(res) != PGRES_COPY_IN)
 	{
 		fprintf(stderr, "%s", PQerrorMessage(con));
@@ -3851,11 +3875,14 @@ initCreatePKeys(PGconn *con)
 		"alter table pgbench_accounts add primary key (aid)"
 	};
 	int			i;
+	pthread_t *threads = (pthread_t *)
+						 pg_malloc(sizeof(pthread_t) * lengthof(DDLINDEXes));
 
 	fprintf(stderr, "creating primary keys...\n");
 	for (i = 0; i < lengthof(DDLINDEXes); i++)
 	{
 		char		buffer[256];
+		int 		err;
 
 		strlcpy(buffer, DDLINDEXes[i], sizeof(buffer));
 
@@ -3870,7 +3897,18 @@ initCreatePKeys(PGconn *con)
 			PQfreemem(escape_tablespace);
 		}
 
-		executeStatement(con, buffer);
+		err =  pthread_create(&threads[i], NULL, executeStatementThread,
+					   		  (void*) pg_strdup(buffer));
+		if (err != 0 || threads[i] == INVALID_THREAD)
+		{
+			fprintf(stderr, "could not create thread: %s\n", strerror(err));
+			exit(1);
+		}
+	}
+
+	for (i = 0; i < lengthof(DDLINDEXes); i++)
+	{
+		pthread_join(threads[i], NULL);
 	}
 }
 
