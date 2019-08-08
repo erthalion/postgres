@@ -231,6 +231,8 @@ const char *progname;
 
 volatile bool timer_exceeded = false;	/* flag from signal handler */
 
+int	maintenance_work_mem = 64; /* maintenance_work_mem for initialization phase */
+
 /*
  * Variable definitions.
  *
@@ -608,6 +610,7 @@ usage(void)
 		   "  %s [OPTION]... [DBNAME]\n"
 		   "\nInitialization options:\n"
 		   "  -i, --initialize         invokes initialization mode\n"
+		   "  -m, --memory         	   maintenance_work_mem in MB for init\n"
 		   "  -I, --init-steps=[dtgvpf]+ (default \"dtgvp\")\n"
 		   "                           run selected initialization steps\n"
 		   "  -F, --fillfactor=NUM     set fill factor\n"
@@ -690,6 +693,14 @@ is_an_int(const char *str)
 	return *ptr == '\0';
 }
 
+static const char*
+appendMemory(const char* sql)
+{
+	char* memory = psprintf("set maintenance_work_mem to '%dMB'",
+							maintenance_work_mem);
+
+	return psprintf("%s; %s;", memory, sql);
+}
 
 /*
  * strtoint64 -- convert a string to 64-bit integer
@@ -3773,7 +3784,7 @@ initGenerateData(PGconn *con)
 	/*
 	 * accounts is big enough to be worth using COPY and tracking runtime
 	 */
-	res = PQexec(con, "copy pgbench_accounts from stdin freeze");
+	res = PQexec(con, appendMemory("copy pgbench_accounts from stdin freeze"));
 	if (PQresultStatus(res) != PGRES_COPY_IN)
 	{
 		fprintf(stderr, "%s", PQerrorMessage(con));
@@ -3884,7 +3895,7 @@ initCreatePKeys(PGconn *con)
 		char		buffer[256];
 		int 		err;
 
-		strlcpy(buffer, DDLINDEXes[i], sizeof(buffer));
+		strlcpy(appendMemory(buffer), DDLINDEXes[i], sizeof(buffer));
 
 		if (index_tablespace != NULL)
 		{
@@ -5135,6 +5146,7 @@ main(int argc, char **argv)
 		{"fillfactor", required_argument, NULL, 'F'},
 		{"host", required_argument, NULL, 'h'},
 		{"initialize", no_argument, NULL, 'i'},
+		{"memory", no_argument, NULL, 'm'},
 		{"init-steps", required_argument, NULL, 'I'},
 		{"jobs", required_argument, NULL, 'j'},
 		{"log", no_argument, NULL, 'l'},
@@ -5236,7 +5248,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	while ((c = getopt_long(argc, argv, "iI:h:nvp:dqb:SNc:j:Crs:t:T:U:lf:D:F:M:P:R:L:", long_options, &optindex)) != -1)
+	while ((c = getopt_long(argc, argv, "iI:m:h:nvp:dqb:SNc:j:Crs:t:T:U:lf:D:F:M:P:R:L:", long_options, &optindex)) != -1)
 	{
 		char	   *script;
 
@@ -5244,6 +5256,9 @@ main(int argc, char **argv)
 		{
 			case 'i':
 				is_init_mode = true;
+				break;
+			case 'm':
+				maintenance_work_mem = atoi(optarg);
 				break;
 			case 'I':
 				if (initialize_steps)
