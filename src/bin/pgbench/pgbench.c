@@ -231,7 +231,8 @@ const char *progname;
 
 volatile bool timer_exceeded = false;	/* flag from signal handler */
 
-int	maintenance_work_mem = 64; /* maintenance_work_mem for initialization phase */
+int	maintenance_work_mem = 0; 	/* maintenance_work_mem for initialization */
+bool copy_freeze = false; 		/* do copy freeze */
 
 /*
  * Variable definitions.
@@ -610,7 +611,6 @@ usage(void)
 		   "  %s [OPTION]... [DBNAME]\n"
 		   "\nInitialization options:\n"
 		   "  -i, --initialize         invokes initialization mode\n"
-		   "  -m, --memory         	   maintenance_work_mem in MB for init\n"
 		   "  -I, --init-steps=[dtgvpf]+ (default \"dtgvp\")\n"
 		   "                           run selected initialization steps\n"
 		   "  -F, --fillfactor=NUM     set fill factor\n"
@@ -655,6 +655,8 @@ usage(void)
 		   "  --random-seed=SEED       set random seed (\"time\", \"rand\", integer)\n"
 		   "  --sampling-rate=NUM      fraction of transactions to log (e.g., 0.01 for 1%%)\n"
 		   "  --show-script=NAME       show builtin script code, then exit\n"
+		   "  --maintenance-work-mem   maintenance_work_mem in MB for init\n"
+		   "  --copy-freeze   		   perform copy freeze\n"
 		   "\nCommon options:\n"
 		   "  -d, --debug              print debugging output\n"
 		   "  -h, --host=HOSTNAME      database server host or socket directory\n"
@@ -693,11 +695,16 @@ is_an_int(const char *str)
 	return *ptr == '\0';
 }
 
-static const char*
-appendMemory(const char* sql)
+static char *
+appendMemory(char *sql)
 {
-	char* memory = psprintf("set maintenance_work_mem to '%dMB'",
-							maintenance_work_mem);
+	char *memory;
+
+	if (maintenance_work_mem == 0)
+		return sql;
+
+	memory = psprintf("set maintenance_work_mem to '%dMB'",
+					  maintenance_work_mem);
 
 	return psprintf("%s; %s;", memory, sql);
 }
@@ -1224,30 +1231,6 @@ doConnect(void)
 	}
 
 	return conn;
-}
-
-static void*
-executeStatementThread(void *buf)
-{
-	PGresult   *res;
-	PGconn 	   *con;
-	char 	   *sql = (char*) buf;
-
-	if ((con = doConnect()) == NULL)
-	{
-		fprintf(stderr, "Cannot connect");
-		exit(1);
-	}
-
-	res = PQexec(con, sql);
-	if (PQresultStatus(res) != PGRES_COMMAND_OK)
-	{
-		fprintf(stderr, "%s", PQerrorMessage(con));
-		exit(1);
-	}
-	PQclear(res);
-
-	PQfinish(con);
 }
 
 /* qsort comparator for Variable array */
@@ -3740,6 +3723,8 @@ initGenerateData(PGconn *con)
 	double		elapsed_sec,
 				remaining_sec;
 	int			log_interval = 1;
+	char 		*copy = "copy pgbench_accounts from stdin";
+	char 		*copy_freeze = "copy pgbench_accounts from stdin freeze";
 
 	fprintf(stderr, "generating data...\n");
 
@@ -3784,7 +3769,7 @@ initGenerateData(PGconn *con)
 	/*
 	 * accounts is big enough to be worth using COPY and tracking runtime
 	 */
-	res = PQexec(con, appendMemory("copy pgbench_accounts from stdin freeze"));
+	res = PQexec(con, appendMemory(copy_freeze ? copy : copy_freeze));
 	if (PQresultStatus(res) != PGRES_COPY_IN)
 	{
 		fprintf(stderr, "%s", PQerrorMessage(con));
@@ -3886,14 +3871,11 @@ initCreatePKeys(PGconn *con)
 		"alter table pgbench_accounts add primary key (aid)"
 	};
 	int			i;
-	pthread_t *threads = (pthread_t *)
-						 pg_malloc(sizeof(pthread_t) * lengthof(DDLINDEXes));
 
 	fprintf(stderr, "creating primary keys...\n");
 	for (i = 0; i < lengthof(DDLINDEXes); i++)
 	{
 		char		buffer[256];
-		int 		err;
 
 		strlcpy(appendMemory(buffer), DDLINDEXes[i], sizeof(buffer));
 
@@ -3908,18 +3890,7 @@ initCreatePKeys(PGconn *con)
 			PQfreemem(escape_tablespace);
 		}
 
-		err =  pthread_create(&threads[i], NULL, executeStatementThread,
-					   		  (void*) pg_strdup(buffer));
-		if (err != 0 || threads[i] == INVALID_THREAD)
-		{
-			fprintf(stderr, "could not create thread: %s\n", strerror(err));
-			exit(1);
-		}
-	}
-
-	for (i = 0; i < lengthof(DDLINDEXes); i++)
-	{
-		pthread_join(threads[i], NULL);
+		executeStatement(con, buffer);
 	}
 }
 
@@ -5146,7 +5117,6 @@ main(int argc, char **argv)
 		{"fillfactor", required_argument, NULL, 'F'},
 		{"host", required_argument, NULL, 'h'},
 		{"initialize", no_argument, NULL, 'i'},
-		{"memory", no_argument, NULL, 'm'},
 		{"init-steps", required_argument, NULL, 'I'},
 		{"jobs", required_argument, NULL, 'j'},
 		{"log", no_argument, NULL, 'l'},
@@ -5176,6 +5146,8 @@ main(int argc, char **argv)
 		{"foreign-keys", no_argument, NULL, 8},
 		{"random-seed", required_argument, NULL, 9},
 		{"show-script", required_argument, NULL, 10},
+		{"maintenance-work-mem", required_argument, NULL, 11},
+		{"copy-freeze", no_argument, NULL, 12},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -5248,7 +5220,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	while ((c = getopt_long(argc, argv, "iI:m:h:nvp:dqb:SNc:j:Crs:t:T:U:lf:D:F:M:P:R:L:", long_options, &optindex)) != -1)
+	while ((c = getopt_long(argc, argv, "iI:h:nvp:dqb:SNc:j:Crs:t:T:U:lf:D:F:M:P:R:L:", long_options, &optindex)) != -1)
 	{
 		char	   *script;
 
@@ -5256,9 +5228,6 @@ main(int argc, char **argv)
 		{
 			case 'i':
 				is_init_mode = true;
-				break;
-			case 'm':
-				maintenance_work_mem = atoi(optarg);
 				break;
 			case 'I':
 				if (initialize_steps)
@@ -5538,6 +5507,18 @@ main(int argc, char **argv)
 					fprintf(stderr, "-- %s: %s\n%s\n", s->name, s->desc, s->script);
 					exit(0);
 				}
+				break;
+			case 11:			/* maintenance-work-mem */
+				maintenance_work_mem = atoi(optarg);
+				if (maintenance_work_mem <= 0)
+				{
+					fprintf(stderr, "invalid maintenance_work_mem: \"%s\"\n",
+							optarg);
+					exit(1);
+				}
+				break;
+			case 12:			/* copy-freeze */
+				copy_freeze = true;
 				break;
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
