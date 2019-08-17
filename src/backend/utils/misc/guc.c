@@ -2338,6 +2338,16 @@ static struct config_int ConfigureNamesInt[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		{"async_queue_depth", PGC_POSTMASTER, RESOURCES_KERNEL,
+			gettext_noop("Queue depth"),
+			NULL
+		},
+		&async_queue_depth,
+		64, 25, INT_MAX,
+		NULL, NULL, NULL
+	},
+
 	/*
 	 * See also CheckRequiredParameterValues() if this parameter changes
 	 */

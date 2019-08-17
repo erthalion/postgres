@@ -53,6 +53,12 @@ typedef struct f_smgr
 								  BlockNumber blocknum);
 	void		(*smgr_read) (SMgrRelation reln, ForkNumber forknum,
 							  BlockNumber blocknum, char *buffer);
+	void		(*smgr_queue_read) (SMgrRelation reln, ForkNumber forknum,
+							  BlockNumber blocknum, char *buffer);
+	void		(*smgr_submit_read) (SMgrRelation reln, ForkNumber forknum,
+							  BlockNumber blocknum);
+	BlockNumber	(*smgr_wait_read) (SMgrRelation reln, ForkNumber forknum,
+							  BlockNumber blocknum);
 	void		(*smgr_write) (SMgrRelation reln, ForkNumber forknum,
 							   BlockNumber blocknum, char *buffer, bool skipFsync);
 	void		(*smgr_writeback) (SMgrRelation reln, ForkNumber forknum,
@@ -76,6 +82,9 @@ static const f_smgr smgrsw[] = {
 		.smgr_extend = mdextend,
 		.smgr_prefetch = mdprefetch,
 		.smgr_read = mdread,
+		.smgr_queue_read = mdqueueread,
+		.smgr_submit_read = mdsubmitread,
+		.smgr_wait_read = mdwaitread,
 		.smgr_write = mdwrite,
 		.smgr_writeback = mdwriteback,
 		.smgr_nblocks = mdnblocks,
@@ -563,6 +572,37 @@ smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		 char *buffer)
 {
 	smgrsw[reln->smgr_which].smgr_read(reln, forknum, blocknum, buffer);
+}
+
+/*
+ *	smgrqueueread() -- queue a read for a particular block from a relation into
+ *					   the supplied buffer.
+ */
+void
+smgrqueueread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+		 char *buffer)
+{
+	smgrsw[reln->smgr_which].smgr_queue_read(reln, forknum, blocknum, buffer);
+}
+
+/*
+ *	smgrsubmitread() -- submit all reads for a particular block from a relation
+ *						into the supplied buffer.
+ */
+void
+smgrsubmitread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
+{
+	smgrsw[reln->smgr_which].smgr_submit_read(reln, forknum, blocknum);
+}
+
+/*
+ *	smgrwaitread() -- wait a reads for a particular block from a relation into
+ *					  the supplied buffer.
+ */
+BlockNumber
+smgrwaitread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
+{
+	return smgrsw[reln->smgr_which].smgr_wait_read(reln, forknum, blocknum);
 }
 
 /*

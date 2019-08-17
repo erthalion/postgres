@@ -32,6 +32,10 @@ extern void mdprefetch(SMgrRelation reln, ForkNumber forknum,
 					   BlockNumber blocknum);
 extern void mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				   char *buffer);
+extern void mdqueueread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+				   char *buffer);
+extern void mdsubmitread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
+extern BlockNumber mdwaitread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 extern void mdwrite(SMgrRelation reln, ForkNumber forknum,
 					BlockNumber blocknum, char *buffer, bool skipFsync);
 extern void mdwriteback(SMgrRelation reln, ForkNumber forknum,

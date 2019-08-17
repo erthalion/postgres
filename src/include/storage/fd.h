@@ -47,6 +47,7 @@ typedef int File;
 
 /* GUC parameter */
 extern PGDLLIMPORT int max_files_per_process;
+extern PGDLLIMPORT int async_queue_depth;
 extern PGDLLIMPORT bool data_sync_retry;
 
 /*
@@ -67,6 +68,13 @@ extern int	max_safe_fds;
 #define FILE_POSSIBLY_DELETED(err)	((err) == ENOENT || (err) == EACCES)
 #endif
 
+typedef struct io_data
+{
+	struct iovec 	 ioVector;
+	uint32		 	 id;
+	int				 returnCode;
+} io_data;
+
 /*
  * prototypes for functions in fd.c
  */
@@ -78,6 +86,10 @@ extern File OpenTemporaryFile(bool interXact);
 extern void FileClose(File file);
 extern int	FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info);
 extern int	FileRead(File file, char *buffer, int amount, off_t offset, uint32 wait_event_info);
+extern int	FileQueueRead(File file, char *buffer, int amount, off_t offset,
+						  uint32 id);
+extern int	FileSubmitRead();
+extern io_data *FileWaitRead();
 extern int	FileWrite(File file, char *buffer, int amount, off_t offset, uint32 wait_event_info);
 extern int	FileSync(File file, uint32 wait_event_info);
 extern off_t FileSize(File file);

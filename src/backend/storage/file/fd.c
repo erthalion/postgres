@@ -79,6 +79,10 @@
 #include <sys/resource.h>		/* for getrlimit */
 #endif
 
+#ifdef HAVE_LIBURING
+#include "liburing.h"
+#endif
+
 #include "miscadmin.h"
 #include "access/xact.h"
 #include "access/xlog.h"
@@ -100,6 +104,9 @@
 #elif defined(USE_POSIX_FADVISE) && defined(POSIX_FADV_DONTNEED)
 #define PG_FLUSH_DATA_WORKS 1
 #endif
+
+
+int			async_queue_depth = 64;
 
 /*
  * We must leave some file descriptors free for system(), the dynamic loader,
@@ -258,6 +265,9 @@ static Oid *tempTableSpaces = NULL;
 static int	numTempTableSpaces = -1;
 static int	nextTempTableSpace = 0;
 
+#ifdef HAVE_LIBURING
+struct io_uring 	ring;
+#endif
 
 /*--------------------
  *
@@ -801,6 +811,15 @@ InitFileAccess(void)
 
 	/* register proc-exit hook to ensure temp files are dropped at exit */
 	on_proc_exit(AtProcExit_Files, 0);
+
+#ifdef HAVE_LIBURING
+	int returnCode = io_uring_queue_init(async_queue_depth, &ring, 0);
+	if (returnCode < 0)
+		ereport(FATAL,
+				(errcode(ERRCODE_SYSTEM_ERROR),
+				 errmsg("Cannot init io uring async_queue_depth %d, %s",
+					    async_queue_depth, strerror(-returnCode))));
+#endif
 }
 
 /*
@@ -1913,6 +1932,96 @@ retry:
 }
 
 int
+FileQueueRead(File file, char *buffer, int amount, off_t offset, uint32 id)
+{
+#ifdef HAVE_LIBURING
+	int				returnCode;
+	io_data		   *data;
+	struct io_uring_sqe *sqe;
+
+	Vfd		   *vfdP;
+
+	Assert(FileIsValid(file));
+
+	DO_DB(elog(LOG, "FileQueueRead: %d (%s) " INT64_FORMAT " %d %p",
+			   file, VfdCache[file].fileName,
+			   (int64) offset,
+			   amount, buffer));
+
+	returnCode = FileAccess(file);
+	if (returnCode < 0)
+		return returnCode;
+
+	vfdP = &VfdCache[file];
+
+	data = (io_data *) palloc(sizeof(io_data));
+	data->id = id;
+	data->ioVector.iov_base = buffer;
+	data->ioVector.iov_len = amount;
+
+	sqe = io_uring_get_sqe(&ring);
+	if (sqe != NULL)
+	{
+		io_uring_prep_readv(sqe, vfdP->fd, &data->ioVector, 1, offset);
+		io_uring_sqe_set_data(sqe, data);
+
+		return 0;
+	}
+	else
+	{
+		ereport(FATAL,
+				(errcode(ERRCODE_SYSTEM_ERROR),
+				 errmsg("Cannot get sqe, %s", strerror(-returnCode))));
+	}
+#else
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("async read is not supported")));
+#endif
+}
+
+int
+FileSubmitRead()
+{
+#ifdef HAVE_LIBURING
+	int			returnCode;
+	returnCode = io_uring_submit(&ring);
+	if (returnCode < 0)
+		return returnCode;
+
+	return 0;
+#else
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("async read is not supported")));
+#endif
+}
+
+io_data *
+FileWaitRead()
+{
+#ifdef HAVE_LIBURING
+	int			returnCode;
+	struct io_uring_cqe *cqe = NULL;
+
+	returnCode = io_uring_wait_cqe(&ring, &cqe);
+	if (returnCode < 0)
+	{
+		io_data	*data = (io_data *) palloc(sizeof(io_data));
+		data->returnCode = returnCode;
+		return data;
+	}
+
+	io_uring_cqe_seen(&ring, cqe);
+	return io_uring_cqe_get_data(cqe);
+#else
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("async read is not supported")));
+#endif
+}
+
+int
 FileWrite(File file, char *buffer, int amount, off_t offset,
 		  uint32 wait_event_info)
 {
@@ -2797,6 +2906,10 @@ static void
 AtProcExit_Files(int code, Datum arg)
 {
 	CleanupTempFiles(false, true);
+
+#ifdef HAVE_LIBURING
+	io_uring_queue_exit(&ring);
+#endif
 }
 
 /*

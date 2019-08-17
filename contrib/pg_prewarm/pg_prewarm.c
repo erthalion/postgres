@@ -33,6 +33,7 @@ typedef enum
 {
 	PREWARM_PREFETCH,
 	PREWARM_READ,
+	PREWARM_ASYNC_READ,
 	PREWARM_BUFFER
 } PrewarmType;
 
@@ -84,6 +85,8 @@ pg_prewarm(PG_FUNCTION_ARGS)
 		ptype = PREWARM_PREFETCH;
 	else if (strcmp(ttype, "read") == 0)
 		ptype = PREWARM_READ;
+	else if (strcmp(ttype, "asyncread") == 0)
+		ptype = PREWARM_ASYNC_READ;
 	else if (strcmp(ttype, "buffer") == 0)
 		ptype = PREWARM_BUFFER;
 	else
@@ -181,6 +184,42 @@ pg_prewarm(PG_FUNCTION_ARGS)
 			smgrread(rel->rd_smgr, forkNumber, block, blockbuffer.data);
 			++blocks_done;
 		}
+	}
+	else if (ptype == PREWARM_ASYNC_READ)
+	{
+#ifdef HAVE_LIBURING
+		int chunk = 0, chunk_size = async_queue_depth - 1;
+		int64 start = 0, stop = 0;
+
+		while (stop <= last_block)
+		{
+			start = first_block + chunk * chunk_size;
+			stop = start + chunk_size;
+
+			for (block = start; block <= stop; ++block)
+			{
+				CHECK_FOR_INTERRUPTS();
+				smgrqueueread(rel->rd_smgr, forkNumber, block, blockbuffer.data);
+			}
+
+			smgrsubmitread(rel->rd_smgr, forkNumber, block);
+
+			for (block = start; block <= stop; ++block)
+			{
+				BlockNumber readBlock;
+
+				CHECK_FOR_INTERRUPTS();
+				readBlock = smgrwaitread(rel->rd_smgr, forkNumber, block);
+				++blocks_done;
+			}
+
+			chunk++;
+		}
+#else
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("async read is not supported by this build")));
+#endif
 	}
 	else if (ptype == PREWARM_BUFFER)
 	{

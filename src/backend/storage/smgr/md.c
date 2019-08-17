@@ -664,6 +664,70 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 }
 
 /*
+ *	mdqueueread() -- Queue a read for the specified block from a relation.
+ */
+void
+mdqueueread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+	   char *buffer)
+{
+	off_t		seekpos;
+	MdfdVec    *v;
+
+	v = _mdfd_getseg(reln, forknum, blocknum, false,
+					 EXTENSION_FAIL | EXTENSION_CREATE_RECOVERY);
+
+	seekpos = (off_t) BLCKSZ * (blocknum % ((BlockNumber) RELSEG_SIZE));
+
+	Assert(seekpos < (off_t) BLCKSZ * RELSEG_SIZE);
+
+	if (FileQueueRead(v->mdfd_vfd, buffer, BLCKSZ, seekpos, blocknum) < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not queue read for block %u in file \"%s\": %m",
+						blocknum, FilePathName(v->mdfd_vfd))));
+}
+
+/*
+ *	mdsubmitread() -- Submit all queued reads for the specified block from a
+ *	relation.
+ */
+void
+mdsubmitread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
+{
+	MdfdVec    *v;
+	v = _mdfd_getseg(reln, forknum, blocknum, false,
+					 EXTENSION_FAIL | EXTENSION_CREATE_RECOVERY);
+
+	if (FileSubmitRead() < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not submit reads for block %u in file \"%s\": %m",
+						blocknum, FilePathName(v->mdfd_vfd))));
+}
+
+/*
+ *	mdwaitread() -- Wait completion of a queued read for the specified block
+ *	from a relation.
+ */
+BlockNumber
+mdwaitread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
+{
+	MdfdVec    *v;
+	io_data    *data;
+	v = _mdfd_getseg(reln, forknum, blocknum, false,
+					 EXTENSION_FAIL | EXTENSION_CREATE_RECOVERY);
+
+	data = FileWaitRead();
+	if (data->returnCode < 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not wait read for block %u in file \"%s\": %m",
+						blocknum, FilePathName(v->mdfd_vfd))));
+	else
+		return (BlockNumber) data->id;
+}
+
+/*
  *	mdwrite() -- Write the supplied block at the appropriate location.
  *
  *		This is to be used only for updating already-existing blocks of a
