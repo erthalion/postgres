@@ -3723,8 +3723,8 @@ initGenerateData(PGconn *con)
 	double		elapsed_sec,
 				remaining_sec;
 	int			log_interval = 1;
-	char 		*copy = "copy pgbench_accounts from stdin";
-	char 		*copy_freeze = "copy pgbench_accounts from stdin freeze";
+	char 		*copy_sql = "copy pgbench_accounts from stdin";
+	char 		*copy_freeze_sql = "copy pgbench_accounts from stdin freeze";
 
 	fprintf(stderr, "generating data...\n");
 
@@ -3769,7 +3769,7 @@ initGenerateData(PGconn *con)
 	/*
 	 * accounts is big enough to be worth using COPY and tracking runtime
 	 */
-	res = PQexec(con, appendMemory(copy_freeze ? copy : copy_freeze));
+	res = PQexec(con, appendMemory(copy_freeze ? copy_freeze_sql : copy_sql));
 	if (PQresultStatus(res) != PGRES_COPY_IN)
 	{
 		fprintf(stderr, "%s", PQerrorMessage(con));
@@ -3877,7 +3877,7 @@ initCreatePKeys(PGconn *con)
 	{
 		char		buffer[256];
 
-		strlcpy(appendMemory(buffer), DDLINDEXes[i], sizeof(buffer));
+		strlcpy(buffer, appendMemory(DDLINDEXes[i]), sizeof(buffer));
 
 		if (index_tablespace != NULL)
 		{
