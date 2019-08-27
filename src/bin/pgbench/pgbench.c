@@ -695,8 +695,8 @@ is_an_int(const char *str)
 	return *ptr == '\0';
 }
 
-static char *
-appendMemory(char *sql)
+static const char *
+appendMemory(const char *sql)
 {
 	char *memory;
 
@@ -3723,8 +3723,8 @@ initGenerateData(PGconn *con)
 	double		elapsed_sec,
 				remaining_sec;
 	int			log_interval = 1;
-	char 		*copy_sql = "copy pgbench_accounts from stdin";
-	char 		*copy_freeze_sql = "copy pgbench_accounts from stdin freeze";
+	const char 	*copy_sql = "copy pgbench_accounts from stdin";
+	const char 	*copy_freeze_sql = "copy pgbench_accounts from stdin freeze";
 
 	fprintf(stderr, "generating data...\n");
 
