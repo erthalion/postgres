@@ -236,3 +236,18 @@ FETCH 5 FROM c;
 FETCH BACKWARD 5 FROM c;
 
 END;
+
+-- test tuples visibility
+CREATE TABLE distinct_visibility (a int, b int);
+INSERT INTO distinct_visibility (select a, b from generate_series(1,5) a, generate_series(1, 10000) b);
+CREATE INDEX ON distinct_visibility (a, b);
+ANALYZE distinct_visibility;
+
+SELECT DISTINCT ON (a) a, b FROM distinct_visibility ORDER BY a, b;
+DELETE FROM distinct_visibility WHERE a = 2 and b = 1;
+SELECT DISTINCT ON (a) a, b FROM distinct_visibility ORDER BY a, b;
+
+SELECT DISTINCT ON (a) a, b FROM distinct_visibility ORDER BY a DESC, b DESC;
+DELETE FROM distinct_visibility WHERE a = 2 and b = 10000;
+SELECT DISTINCT ON (a) a, b FROM distinct_visibility ORDER BY a DESC, b DESC;
+DROP TABLE distinct_visibility;
