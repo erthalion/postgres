@@ -86,7 +86,7 @@ INSERT INTO distinct_a (
     generate_series(1, 10000) hundred
 );
 CREATE INDEX ON distinct_a (a, b);
-ANALYZE a;
+ANALYZE distinct_a;
 
 -- test index skip scan with a condition on a non unique field
 SELECT DISTINCT ON (a) a, b FROM distinct_a WHERE b = 2;
@@ -251,3 +251,21 @@ SELECT DISTINCT ON (a) a, b FROM distinct_visibility ORDER BY a DESC, b DESC;
 DELETE FROM distinct_visibility WHERE a = 2 and b = 10000;
 SELECT DISTINCT ON (a) a, b FROM distinct_visibility ORDER BY a DESC, b DESC;
 DROP TABLE distinct_visibility;
+
+-- test page boundaries
+CREATE TABLE distinct_boundaries AS
+    SELECT a, b::int2 b, (b % 2)::int2 c FROM
+        generate_series(1, 5) a,
+        generate_series(1,366) b;
+
+CREATE INDEX ON distinct_boundaries (a, b, c);
+ANALYZE distinct_boundaries;
+
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT ON (a) a, b, c from distinct_boundaries
+WHERE b >= 1 and c = 0 ORDER BY a, b;
+
+SELECT DISTINCT ON (a) a, b, c from distinct_boundaries
+WHERE b >= 1 and c = 0 ORDER BY a, b;
+
+DROP TABLE distinct_boundaries;
