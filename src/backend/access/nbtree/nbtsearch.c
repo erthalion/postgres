@@ -1470,7 +1470,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		keyFound = _bt_readpage_internal(scan, dir, offnum, indexdir, true);
 		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
-		if (keyFound && so->currPos.lastItem - so->currPos.firstItem > 0)
+		if (keyFound)
 		{
 			/* set IndexTuple */
 			currItem = &so->currPos.items[so->currPos.itemIndex];
@@ -1636,8 +1636,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				offnum = OffsetNumberPrev(offnum);
 
 				/* Check if _bt_readpage_internal returns already found item */
-				if (_bt_readpage_internal(scan, dir, offnum, indexdir, true) ||
-					so->currPos.lastItem - so->currPos.firstItem == 0)
+				if (_bt_readpage_internal(scan, dir, offnum, indexdir, true))
 				{
 					IndexTuple itup;
 
