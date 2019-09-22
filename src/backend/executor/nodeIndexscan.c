@@ -133,6 +133,8 @@ IndexNext(IndexScanState *node)
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
 	 */
+	bool skipped = false;
+
 	if (node->iss_SkipPrefixSize > 0)
 	{
 		bool startscan = false;
@@ -151,24 +153,31 @@ IndexNext(IndexScanState *node)
 			}
 		}
 
-		if (node->iss_FirstTupleEmitted &&
-			!index_skip(scandesc, direction, indexscan->indexorderdir,
-						startscan, node->iss_SkipPrefixSize))
+		if (node->iss_FirstTupleEmitted)
 		{
-			/* Reached end of index. At this point currPos is invalidated,
-			 * and we need to reset iss_FirstTupleEmitted, since otherwise
-			 * after going backwards, reaching the end of index, and going
-			 * forward again we apply skip again. It would be incorrect and
-			 * lead to an extra skipped item. */
-			node->iss_FirstTupleEmitted = false;
-			return ExecClearTuple(slot);
+			if(!index_skip(scandesc, direction, indexscan->indexorderdir,
+						startscan, node->iss_SkipPrefixSize))
+			{
+				/* Reached end of index. At this point currPos is invalidated,
+				 * and we need to reset iss_FirstTupleEmitted, since otherwise
+				 * after going backwards, reaching the end of index, and going
+				 * forward again we apply skip again. It would be incorrect and
+				 * lead to an extra skipped item. */
+				node->iss_FirstTupleEmitted = false;
+				return ExecClearTuple(slot);
+			}
+			else
+				skipped = true;
 		}
 	}
 
 	/*
 	 * ok, now that we have what we need, fetch the next tuple.
 	 */
-	while (index_getnext_slot(scandesc, direction, slot))
+	if (skipped)
+		index_fetch_heap(scandesc, slot);
+
+	while (skipped || index_getnext_slot(scandesc, direction, slot))
 	{
 		CHECK_FOR_INTERRUPTS();
 

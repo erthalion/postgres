@@ -120,6 +120,8 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
 	 */
+	bool skipped = false;
+
 	if (node->ioss_SkipPrefixSize > 0)
 	{
 		bool startscan = false;
@@ -141,26 +143,34 @@ IndexOnlyNext(IndexOnlyScanState *node)
 			}
 		}
 
-		if (node->ioss_FirstTupleEmitted &&
-			!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
-						startscan, node->ioss_SkipPrefixSize))
+		if (node->ioss_FirstTupleEmitted)
 		{
-			/* Reached end of index. At this point currPos is invalidated,
-			 * and we need to reset ioss_FirstTupleEmitted, since otherwise
-			 * after going backwards, reaching the end of index, and going
-			 * forward again we apply skip again. It would be incorrect and
-			 * lead to an extra skipped item. */
-			node->ioss_FirstTupleEmitted = false;
-			return ExecClearTuple(slot);
+			if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
+						startscan, node->ioss_SkipPrefixSize))
+			{
+				/* Reached end of index. At this point currPos is invalidated,
+				 * and we need to reset ioss_FirstTupleEmitted, since otherwise
+				 * after going backwards, reaching the end of index, and going
+				 * forward again we apply skip again. It would be incorrect and
+				 * lead to an extra skipped item. */
+				node->ioss_FirstTupleEmitted = false;
+				return ExecClearTuple(slot);
+			}
+			else
+				skipped = true;
 		}
 	}
 
 	/*
 	 * OK, now that we have what we need, fetch the next tuple.
 	 */
-	while ((tid = index_getnext_tid(scandesc, direction)) != NULL)
+	if (skipped)
+		tid = &scandesc->xs_heaptid;
+
+	while (skipped || (tid = index_getnext_tid(scandesc, direction)) != NULL)
 	{
 		bool		tuple_from_heap = false;
+		skipped = false;
 
 		CHECK_FOR_INTERRUPTS();
 
