@@ -1412,7 +1412,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	OffsetNumber offnum;
 	BTScanPosItem *currItem;
 	Relation 	 indexRel = scan->indexRelation;
-	OffsetNumber startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
 
 	/* We want to return tuples, and we need a starting point */
 	Assert(scan->xs_want_itup);
@@ -1570,7 +1569,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			offnum = OffsetNumberPrev(offnum);
 		else
 		{
-			OffsetNumber nextOffset = startOffset;
+			OffsetNumber nextOffset, startOffset;
+			nextOffset = startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
 
 			while(nextOffset == startOffset)
 			{
@@ -1705,8 +1705,6 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 	BTPageOpaque opaque;
 	OffsetNumber minoff;
 	OffsetNumber maxoff;
-	IndexTuple 	 prevItup = NULL;
-	OffsetNumber prevOffnum = InvalidOffsetNumber;
 	int			itemIndex;
 	bool		continuescan;
 	int			indnatts;
@@ -1797,10 +1795,6 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 			if (!continuescan)
 				break;
 
-			/* Save previous tuple and offset */
-			prevItup = itup;
-			prevOffnum = offnum;
-
 			offnum = OffsetNumberNext(offnum);
 		}
 
@@ -1887,10 +1881,6 @@ _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 				so->currPos.moreLeft = false;
 				break;
 			}
-
-			/* Save previous tuple and offset */
-			prevItup = itup;
-			prevOffnum = offnum;
 
 			offnum = OffsetNumberPrev(offnum);
 		}
