@@ -123,47 +123,32 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	/*
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
+	 *
+	 * When fetching a cursor in the direction opposite to a general scan
+	 * direction, the result must be what normal fetching should have returned,
+	 * but in reversed order. In other words, return the last or first scanned
+	 * tuple in a DISTINCT set, depending on a cursor direction. Due to that we
+	 * skip also when the first tuple wasn't emitted yet, but the directions
+	 * are opposite.
 	 */
-
-	if (node->ioss_SkipPrefixSize > 0)
+	if (node->ioss_SkipPrefixSize > 0 &&
+		(node->ioss_FirstTupleEmitted || (direction * indexonlyscan->indexorderdir < 0)))
 	{
-		bool startscan = false;
-
-		/*
-		 * When fetching a cursor in the direction opposite to a general scan
-		 * direction, the result must be what normal fetching should have
-		 * returned, but in reversed order. In other words, return the last or
-		 * first scanned tuple in a DISTINCT set, depending on a cursor
-		 * direction. Skip to that tuple before returning the first tuple.
-		 */
-		if (direction * indexonlyscan->indexorderdir < 0 &&
-			!node->ioss_FirstTupleEmitted)
+		if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
+						!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
 		{
-			if (index_getnext_tid(scandesc, direction))
-			{
-				node->ioss_FirstTupleEmitted = true;
-				startscan = true;
-			}
+			/* Reached end of index. At this point currPos is invalidated,
+			 * and we need to reset ioss_FirstTupleEmitted, since otherwise
+			 * after going backwards, reaching the end of index, and going
+			 * forward again we apply skip again. It would be incorrect and
+			 * lead to an extra skipped item. */
+			node->ioss_FirstTupleEmitted = false;
+			return ExecClearTuple(slot);
 		}
-
-		if (node->ioss_FirstTupleEmitted)
+		else
 		{
-			if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
-							startscan, node->ioss_SkipPrefixSize))
-			{
-				/* Reached end of index. At this point currPos is invalidated,
-				 * and we need to reset ioss_FirstTupleEmitted, since otherwise
-				 * after going backwards, reaching the end of index, and going
-				 * forward again we apply skip again. It would be incorrect and
-				 * lead to an extra skipped item. */
-				node->ioss_FirstTupleEmitted = false;
-				return ExecClearTuple(slot);
-			}
-			else
-			{
-				skipped = true;
-				tid = &scandesc->xs_heaptid;
-			}
+			skipped = true;
+			tid = &scandesc->xs_heaptid;
 		}
 	}
 

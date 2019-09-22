@@ -136,43 +136,32 @@ IndexNext(IndexScanState *node)
 	/*
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
+	 *
+	 * When fetching a cursor in the direction opposite to a general scan
+	 * direction, the result must be what normal fetching should have returned,
+	 * but in reversed order. In other words, return the last or first scanned
+	 * tuple in a DISTINCT set, depending on a cursor direction. Due to that we
+	 * skip also when the first tuple wasn't emitted yet, but the directions
+	 * are opposite.
 	 */
-	if (node->iss_SkipPrefixSize > 0)
+	if (node->iss_SkipPrefixSize > 0 &&
+		(node->iss_FirstTupleEmitted || (direction * indexscan->indexorderdir < 0)))
 	{
-		bool startscan = false;
-
-		/*
-		 * If advancing direction is different from index direction, we must
-		 * skip right away, but _bt_skip requires a starting point.
-		 */
-		if (direction * indexscan->indexorderdir < 0 &&
-			!node->iss_FirstTupleEmitted)
+		if(!index_skip(scandesc, direction, indexscan->indexorderdir,
+					   !node->iss_FirstTupleEmitted, node->iss_SkipPrefixSize))
 		{
-			if (index_getnext_slot(scandesc, direction, slot))
-			{
-				node->iss_FirstTupleEmitted = true;
-				startscan = true;
-			}
+			/* Reached end of index. At this point currPos is invalidated,
+			 * and we need to reset iss_FirstTupleEmitted, since otherwise
+			 * after going backwards, reaching the end of index, and going
+			 * forward again we apply skip again. It would be incorrect and
+			 * lead to an extra skipped item. */
+			node->iss_FirstTupleEmitted = false;
+			return ExecClearTuple(slot);
 		}
-
-		if (node->iss_FirstTupleEmitted)
+		else
 		{
-			if(!index_skip(scandesc, direction, indexscan->indexorderdir,
-						startscan, node->iss_SkipPrefixSize))
-			{
-				/* Reached end of index. At this point currPos is invalidated,
-				 * and we need to reset iss_FirstTupleEmitted, since otherwise
-				 * after going backwards, reaching the end of index, and going
-				 * forward again we apply skip again. It would be incorrect and
-				 * lead to an extra skipped item. */
-				node->iss_FirstTupleEmitted = false;
-				return ExecClearTuple(slot);
-			}
-			else
-			{
-				skipped = true;
-				index_fetch_heap(scandesc, slot);
-			}
+			skipped = true;
+			index_fetch_heap(scandesc, slot);
 		}
 	}
 
