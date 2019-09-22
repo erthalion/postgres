@@ -28,18 +28,10 @@ static void _bt_drop_lock_and_maybe_pin(IndexScanDesc scan, BTScanPos sp);
 static OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf);
 static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir,
 						 OffsetNumber offnum);
-static bool _bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
-						 OffsetNumber offnum, ScanDirection indexdir,
-						 bool keepPrev);
 static void _bt_saveitem(BTScanOpaque so, int itemIndex,
 						 OffsetNumber offnum, IndexTuple itup);
 static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir);
-static bool _bt_steppage_internal(IndexScanDesc scan, ScanDirection dir,
-								  ScanDirection indexdir, bool keepPrev);
 static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno, ScanDirection dir);
-static bool _bt_readnextpage_internal(IndexScanDesc scan, BlockNumber blkno,
-									  ScanDirection dir, ScanDirection indexdir,
-									  bool keepPrev);
 static bool _bt_parallel_readpage(IndexScanDesc scan, BlockNumber blkno,
 								  ScanDirection dir);
 static Buffer _bt_walk_left(Relation rel, Buffer buf, Snapshot snapshot);
@@ -50,52 +42,6 @@ static inline void _bt_update_skip_scankeys(IndexScanDesc scan,
 static inline bool _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
 										Buffer buf, ScanDirection dir);
 
-
-static void
-print_itup(BlockNumber blk, IndexTuple left, IndexTuple right, Relation rel,
-                  char *extra)
-{
-		  bool          isnull[INDEX_MAX_KEYS];
-		  Datum         values[INDEX_MAX_KEYS];
-		  char     *lkey_desc = NULL;
-		  char     *rkey_desc;
-
-		  if (!IsCatalogRelation(rel))
-		  {
-						  TupleDesc     itupdesc = RelationGetDescr(rel);
-						  int                   natts;
-						  int                   indnkeyatts = rel->rd_index->indnkeyatts;
-
-						  natts = BTreeTupleGetNAtts(left, rel);
-						  itupdesc->natts = Min(indnkeyatts, natts);
-						  memset(&isnull, 0xFF, sizeof(isnull));
-						  index_deform_tuple(left, itupdesc, values, isnull);
-						  rel->rd_index->indnkeyatts = natts;
-
-						  lkey_desc = BuildIndexValueDescription(rel, values, isnull);
-						  if (lkey_desc && right)
-						  {
-										  natts = BTreeTupleGetNAtts(right, rel);
-										  itupdesc->natts = Min(indnkeyatts, natts);
-										  memset(&isnull, 0xFF, sizeof(isnull));
-										  index_deform_tuple(right, itupdesc, values, isnull);
-										  rel->rd_index->indnkeyatts = natts;
-										  rkey_desc = BuildIndexValueDescription(rel, values, isnull);
-										  elog(DEBUG1, "%s blk %u sk > %s, sk <= %s %s",
-															   RelationGetRelationName(rel), blk, lkey_desc, rkey_desc,
-															   extra);
-										  pfree(rkey_desc);
-						  }
-						  else
-										  elog(DEBUG1, "%s blk %u sk check %s %s",
-															   RelationGetRelationName(rel), blk, lkey_desc, extra);
-
-						  itupdesc->natts = IndexRelationGetNumberOfAttributes(rel);
-						  rel->rd_index->indnkeyatts = indnkeyatts;
-						  if (lkey_desc)
-										  pfree(lkey_desc);
-		  }
-}
 
 /*
  *	_bt_drop_lock_and_maybe_pin()
@@ -1455,8 +1401,6 @@ _bt_next(IndexScanDesc scan, ScanDirection dir)
  *
  * 		* Advancing backward and reading backward
  * 			simple scan with order by desc
- *
- * 		This function in conjunction with _bt_readpage_internal handles them all.
  */
 bool
 _bt_skip(IndexScanDesc scan, ScanDirection dir,
@@ -1473,8 +1417,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	/* We want to return tuples, and we need a starting point */
 	Assert(scan->xs_want_itup);
 	Assert(scan->xs_itup);
-	print_itup(BufferGetBlockNumber(so->currPos.buf), scan->xs_itup,
-									NULL, scan->indexRelation, "_bt_skip:start");
 
 	/*
 	 * If skipScanKey is NULL then we initialize it with _bt_mkscankey,
@@ -1550,20 +1492,16 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	_bt_initialize_more_data(so, dir);
 
 	/*
-	 * Simplest case, advance forward and read also forward. At this moment we
-	 * are at the next distinct key at the beginning of the series. Go back one
-	 * step and let _bt_readpage_internal figure out about index condition.
+	 * Simplest case is when both directions are forward, when we are already
+	 * at the next distinct key at the beginning of the series (so everything
+	 * else would be done in _bt_readpage)
+	 *
+	 * The case when both directions are backwards is also simple, but we need
+	 * to go one step back, since we need a last element from the previous
+	 * series.
 	 */
-	if (ScanDirectionIsForward(dir) && ScanDirectionIsForward(indexdir))
-	{
-		// do nothing, before
-		// offnum = OffsetNumberPrev(offnum);
-	}
-
-	else if (ScanDirectionIsBackward(dir) && ScanDirectionIsBackward(indexdir))
-	{
+	if (ScanDirectionIsBackward(dir) && ScanDirectionIsBackward(indexdir))
 		 offnum = OffsetNumberPrev(offnum);
-	}
 
 	/*
 	 * Andvance backward but read forward. At this moment we are at the next
@@ -1571,33 +1509,19 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	 * started, we can read forward without doing anything else. Otherwise find
 	 * previous distinct key and the beginning of it's series and read forward
 	 * from there. To do so, go back one step, perform binary search to find
-	 * the first item in the series and let _bt_readpage_internal do everything
-	 * else.
+	 * the first item in the series and let _bt_readpage do everything else.
 	 */
 	else if (ScanDirectionIsBackward(dir) && ScanDirectionIsForward(indexdir))
 	{
-		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-
-		Page page = BufferGetPage(so->currPos.buf);
-		OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
-		ItemId itemid = PageGetItemId(page, Min(offnum, maxoff));
-		IndexTuple itup_tmp = (IndexTuple) PageGetItem(page, itemid);
-		print_itup(BufferGetBlockNumber(so->currPos.buf), itup_tmp,
-										NULL, scan->indexRelation, "_bt_skip:after binsrch");
-
 		if (!scanstart)
 		{
 			_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 
 			/* One step back to find a previous value */
 			_bt_readpage(scan, dir, offnum);
-
 			if (_bt_next(scan, dir))
 			{
-				print_itup(BufferGetBlockNumber(so->currPos.buf), scan->xs_itup,
-												NULL, scan->indexRelation, "_bt_skip:after next");
-
-
 				_bt_update_skip_scankeys(scan, indexRel);
 
 				/* And now find the last item from the sequence for the current,
@@ -1625,8 +1549,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				return false;
 			}
 		}
-
-		/*offnum = OffsetNumberNext(offnum);*/
 	}
 
 	/*
@@ -1666,9 +1588,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				scan->xs_itup = (IndexTuple) PageGetItem(page, itemid);
 				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 
-				print_itup(BufferGetBlockNumber(so->currPos.buf), scan->xs_itup,
-												NULL, scan->indexRelation, "_bt_skip:in while");
-
 				_bt_update_skip_scankeys(scan, indexRel);
 
 				if (BTScanPosIsValid(so->currPos))
@@ -1701,16 +1620,13 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 
 				offnum = OffsetNumberPrev(offnum);
 
-				/* Check if _bt_readpage_internal returns already found item */
+				/* Check if _bt_readpage returns already found item */
 				if (_bt_readpage(scan, indexdir, offnum))
 				{
 					IndexTuple itup;
 
 					currItem = &so->currPos.items[so->currPos.lastItem];
 					itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
-					print_itup(BufferGetBlockNumber(so->currPos.buf), scan->xs_itup,
-													NULL, scan->indexRelation, "_bt_skip:check next");
-
 					nextOffset = ItemPointerGetOffsetNumber(&itup->t_tid);
 				}
 				else
@@ -1757,12 +1673,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	currItem = &so->currPos.items[so->currPos.itemIndex];
 	scan->xs_heaptid = currItem->heapTid;
 	if (scan->xs_want_itup)
-	{
 		scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
-		print_itup(BufferGetBlockNumber(so->currPos.buf), scan->xs_itup,
-									 	NULL, scan->indexRelation, "_bt_skip:end");
-
-	}
 
 	return true;
 }
@@ -1788,25 +1699,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
  */
 static bool
 _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
-{
-	return _bt_readpage_internal(scan, dir, offnum,
-								 NoMovementScanDirection, false);
-}
-
-/*
- *	_bt_readpage_internal() -- worker function for _bt_readpage
- *
- *	Besides regular readpage functionality this function allows to save the
- *	first item before those that we would normally save in _bt_readpage. This
- *	is used for _bt_skip.
- *
- *	For than caller needs to set keepPrev to true. Since the definition of
- *	"previous" in case of cursor depends also on the index direction, one needs
- *	to provide it as argument as well.
- */
-static bool
-_bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
-					  OffsetNumber offnum, ScanDirection indexdir, bool keepPrev)
 {
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	Page		page;
@@ -1871,7 +1763,7 @@ _bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
 	 */
 	Assert(BTScanPosIsPinned(so->currPos));
 
-	if (ScanDirectionIsForward(keepPrev ? indexdir : dir))
+	if (ScanDirectionIsForward(dir))
 	{
 		/* load items[] in ascending order */
 		itemIndex = 0;
@@ -1897,36 +1789,9 @@ _bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
 
 			if (_bt_checkkeys(scan, itup, indnatts, dir, &continuescan))
 			{
-				if (keepPrev)
-				{
-					/* tuple passes all scan key conditions, so remember it */
-					if (ScanDirectionIsBackward(dir) || itemIndex >= 2)
-					{
-						_bt_saveitem(so, itemIndex, offnum, itup);
-						itemIndex++;
-					}
-					else if (prevItup != NULL)
-					{
-						/*
-						 * Save the current item and the previous, even if the
-						 * latter does not pass scan key conditions
-						 */
-						_bt_saveitem(so, itemIndex, prevOffnum, prevItup);
-						itemIndex++;
-
-						_bt_saveitem(so, itemIndex, offnum, itup);
-						itemIndex++;
-					}
-				}
-				else
-				{
-					/* tuple passes all scan key conditions, so remember it */
-					_bt_saveitem(so, itemIndex, offnum, itup);
-					itemIndex++;
-					print_itup(BufferGetBlockNumber(so->currPos.buf), itup,
-													NULL, scan->indexRelation, "_bt_readpage:saveitem");
-
-				}
+				/* tuple passes all scan key conditions, so remember it */
+				_bt_saveitem(so, itemIndex, offnum, itup);
+				itemIndex++;
 			}
 			/* When !continuescan, there can't be any more matches, so stop */
 			if (!continuescan)
@@ -1963,20 +1828,10 @@ _bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
 		if (!continuescan)
 			so->currPos.moreRight = false;
 
-		/* If there are no items saved, but we have a previous one, save it */
-		if (keepPrev && itemIndex == 0 && prevItup != NULL )
-		{
-			_bt_saveitem(so, itemIndex, offnum, prevItup);
-			itemIndex++;
-		}
-
 		Assert(itemIndex <= MaxIndexTuplesPerPage);
 		so->currPos.firstItem = 0;
 		so->currPos.lastItem = itemIndex - 1;
-		if (keepPrev)
-			so->currPos.itemIndex = ScanDirectionIsForward(dir) ? 0 : 1;
-		else
-			so->currPos.itemIndex = 0;
+		so->currPos.itemIndex = 0;
 	}
 	else
 	{
@@ -2022,37 +1877,9 @@ _bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
 										 &continuescan);
 			if (passes_quals && tuple_alive)
 			{
-				if (keepPrev)
-				{
-					/* tuple passes all scan key conditions, so remember it */
-					if (ScanDirectionIsForward(dir) ||
-						MaxIndexTuplesPerPage - itemIndex >= 2)
-					{
-						itemIndex--;
-						_bt_saveitem(so, itemIndex, offnum, itup);
-					}
-					else if (prevItup != NULL)
-					{
-						/*
-						 * Save the current item and the previous, even if the
-						 * latter does not pass scan key conditions
-						 */
-						itemIndex--;
-						_bt_saveitem(so, itemIndex, prevOffnum, prevItup);
-
-						itemIndex--;
-						_bt_saveitem(so, itemIndex, offnum, itup);
-					}
-				}
-				else
-				{
-					/* tuple passes all scan key conditions, so remember it */
-					itemIndex--;
-					_bt_saveitem(so, itemIndex, offnum, itup);
-					print_itup(BufferGetBlockNumber(so->currPos.buf), itup,
-													NULL, scan->indexRelation, "_bt_readpage:saveitem");
-
-				}
+				/* tuple passes all scan key conditions, so remember it */
+				itemIndex--;
+				_bt_saveitem(so, itemIndex, offnum, itup);
 			}
 			if (!continuescan)
 			{
@@ -2068,27 +1895,13 @@ _bt_readpage_internal(IndexScanDesc scan, ScanDirection dir,
 			offnum = OffsetNumberPrev(offnum);
 		}
 
-		/* If there are no items saved, but we have a previous one, save it */
-		if (keepPrev && itemIndex == 0 && prevItup != NULL )
-		{
-			itemIndex--;
-			_bt_saveitem(so, itemIndex, prevOffnum, prevItup);
-		}
-
 		Assert(itemIndex >= 0);
 		so->currPos.firstItem = itemIndex;
 		so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
-		if (keepPrev)
-			so->currPos.itemIndex = MaxIndexTuplesPerPage -
-				(ScanDirectionIsForward(dir) ? 2 : 1);
-		else
-			so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
+		so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
 	}
 
-	if (keepPrev)
-		return (so->currPos.firstItem < so->currPos.lastItem);
-	else
-		return (so->currPos.firstItem <= so->currPos.lastItem);
+	return (so->currPos.firstItem <= so->currPos.lastItem);
 }
 
 /* Save an index item into so->currPos.items[itemIndex] */
@@ -2124,14 +1937,6 @@ _bt_saveitem(BTScanOpaque so, int itemIndex,
 static bool
 _bt_steppage(IndexScanDesc scan, ScanDirection dir)
 {
-	return _bt_steppage_internal(scan, dir, NoMovementScanDirection, false);
-}
-
-static bool
-_bt_steppage_internal(IndexScanDesc scan, ScanDirection dir,
-					  ScanDirection indexdir, bool keepPrev)
-{
-
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	BlockNumber blkno = InvalidBlockNumber;
 	bool		status = true;
@@ -2217,7 +2022,7 @@ _bt_steppage_internal(IndexScanDesc scan, ScanDirection dir,
 		}
 	}
 
-	if (!_bt_readnextpage_internal(scan, blkno, dir, indexdir, keepPrev))
+	if (!_bt_readnextpage(scan, blkno, dir))
 		return false;
 
 	/* Drop the lock, and maybe the pin, on the current page */
@@ -2239,16 +2044,6 @@ _bt_steppage_internal(IndexScanDesc scan, ScanDirection dir,
 static bool
 _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno, ScanDirection dir)
 {
-	return _bt_readnextpage_internal(scan, blkno, dir,
-									 NoMovementScanDirection, false);
-}
-
-static bool
-_bt_readnextpage_internal(IndexScanDesc scan, BlockNumber blkno,
-						  ScanDirection dir, ScanDirection indexdir,
-						  bool keepPrev)
-{
-
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	Relation	rel;
 	Page		page;
@@ -2284,8 +2079,7 @@ _bt_readnextpage_internal(IndexScanDesc scan, BlockNumber blkno,
 				PredicateLockPage(rel, blkno, scan->xs_snapshot);
 				/* see if there are any matches on this page */
 				/* note that this will clear moreRight if we can stop */
-				if (_bt_readpage_internal(scan, dir, P_FIRSTDATAKEY(opaque),
-										  indexdir, keepPrev))
+				if (_bt_readpage(scan, dir, P_FIRSTDATAKEY(opaque)))
 					break;
 			}
 			else if (scan->parallel_scan != NULL)
@@ -2387,8 +2181,7 @@ _bt_readnextpage_internal(IndexScanDesc scan, BlockNumber blkno,
 				PredicateLockPage(rel, BufferGetBlockNumber(so->currPos.buf), scan->xs_snapshot);
 				/* see if there are any matches on this page */
 				/* note that this will clear moreLeft if we can stop */
-				if (_bt_readpage_internal(scan, dir, PageGetMaxOffsetNumber(page),
-										  indexdir, keepPrev))
+				if (_bt_readpage(scan, dir, PageGetMaxOffsetNumber(page)))
 					break;
 			}
 			else if (scan->parallel_scan != NULL)

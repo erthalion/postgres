@@ -87,6 +87,10 @@ IndexNext(IndexScanState *node)
 	TupleTableSlot *slot;
 	IndexScan *indexscan = (IndexScan *) node->ss.ps.plan;
 
+	/* tells if the current position was reached via skipping. In this case
+	 * there is no nead for the index_getnext_tid */
+	bool skipped = false;
+
 	/*
 	 * extract necessary information from index scan node
 	 */
@@ -133,8 +137,6 @@ IndexNext(IndexScanState *node)
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
 	 */
-	bool skipped = false;
-
 	if (node->iss_SkipPrefixSize > 0)
 	{
 		bool startscan = false;
@@ -167,19 +169,20 @@ IndexNext(IndexScanState *node)
 				return ExecClearTuple(slot);
 			}
 			else
+			{
 				skipped = true;
+				index_fetch_heap(scandesc, slot);
+			}
 		}
 	}
 
 	/*
 	 * ok, now that we have what we need, fetch the next tuple.
 	 */
-	if (skipped)
-		index_fetch_heap(scandesc, slot);
-
 	while (skipped || index_getnext_slot(scandesc, direction, slot))
 	{
 		CHECK_FOR_INTERRUPTS();
+		skipped = false;
 
 		/*
 		 * If the index was lossy, we have to recheck the index quals using

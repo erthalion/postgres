@@ -67,6 +67,10 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	ItemPointer tid;
 	IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) node->ss.ps.plan;
 
+	/* tells if the current position was reached via skipping. In this case
+	 * there is no nead for the index_getnext_tid */
+	bool skipped = false;
+
 	/*
 	 * extract necessary information from index scan node
 	 */
@@ -120,7 +124,6 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * Check if we need to skip to the next key prefix, because we've been
 	 * asked to implement DISTINCT.
 	 */
-	bool skipped = false;
 
 	if (node->ioss_SkipPrefixSize > 0)
 	{
@@ -146,7 +149,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		if (node->ioss_FirstTupleEmitted)
 		{
 			if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
-						startscan, node->ioss_SkipPrefixSize))
+							startscan, node->ioss_SkipPrefixSize))
 			{
 				/* Reached end of index. At this point currPos is invalidated,
 				 * and we need to reset ioss_FirstTupleEmitted, since otherwise
@@ -157,22 +160,22 @@ IndexOnlyNext(IndexOnlyScanState *node)
 				return ExecClearTuple(slot);
 			}
 			else
+			{
 				skipped = true;
+				tid = &scandesc->xs_heaptid;
+			}
 		}
 	}
 
 	/*
 	 * OK, now that we have what we need, fetch the next tuple.
 	 */
-	if (skipped)
-		tid = &scandesc->xs_heaptid;
-
 	while (skipped || (tid = index_getnext_tid(scandesc, direction)) != NULL)
 	{
 		bool		tuple_from_heap = false;
-		skipped = false;
 
 		CHECK_FOR_INTERRUPTS();
+		skipped = false;
 
 		/*
 		 * We can skip the heap fetch if the TID references a heap page on
