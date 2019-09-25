@@ -145,7 +145,8 @@ IndexNext(IndexScanState *node)
 	 * are opposite.
 	 */
 	if (node->iss_SkipPrefixSize > 0 &&
-		(node->iss_FirstTupleEmitted || (direction * indexscan->indexorderdir < 0)))
+		(node->iss_FirstTupleEmitted ||
+		 ScanDirectionsAreOpposite(direction, indexscan->indexorderdir)))
 	{
 		if(!index_skip(scandesc, direction, indexscan->indexorderdir,
 					   !node->iss_FirstTupleEmitted, node->iss_SkipPrefixSize))

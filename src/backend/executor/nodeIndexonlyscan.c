@@ -132,7 +132,8 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * are opposite.
 	 */
 	if (node->ioss_SkipPrefixSize > 0 &&
-		(node->ioss_FirstTupleEmitted || (direction * indexonlyscan->indexorderdir < 0)))
+		(node->ioss_FirstTupleEmitted ||
+		 ScanDirectionsAreOpposite(direction, indexonlyscan->indexorderdir)))
 	{
 		if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
 						!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
