@@ -1452,15 +1452,14 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 
 		/* Now read the data */
 		keyFound = _bt_readpage(scan, dir, offnum);
-		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
+		LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 		if (keyFound)
 		{
 			/* set IndexTuple */
 			currItem = &so->currPos.items[so->currPos.itemIndex];
 			scan->xs_heaptid = currItem->heapTid;
-			if (scan->xs_want_itup)
-				scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+			scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
 			return true;
 		}
 	}
@@ -1514,11 +1513,12 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	{
 		if (!scanstart)
 		{
-			_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 
 			/* One step back to find a previous value */
 			_bt_readpage(scan, dir, offnum);
+
+			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 			if (_bt_next(scan, dir))
 			{
 				_bt_update_skip_scankeys(scan, indexRel);
@@ -1583,8 +1583,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
 				ItemId itemid = PageGetItemId(page, Min(offnum, maxoff));
 
-				_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
-
+				LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 				scan->xs_itup = (IndexTuple) PageGetItem(page, itemid);
 				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 
@@ -1608,7 +1607,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				 */
 				if (offnum == curOffnum)
 				{
-					_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+					LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 
 					BTScanPosUnpinIfPinned(so->currPos);
 					BTScanPosInvalidate(so->currPos)
@@ -1630,12 +1629,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					nextOffset = ItemPointerGetOffsetNumber(&itup->t_tid);
 				}
 				else
-				{
 					elog(ERROR, "Could not read closest index tuples: %d", offnum);
-					pfree(so->skipScanKey);
-					so->skipScanKey = NULL;
-					return false;
-				}
 
 				/*
 				 * If the nextOffset is the same as before, it means we are in
@@ -1666,14 +1660,13 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	else
 	{
 		/* Drop the lock, and maybe the pin, on the current page */
-		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+		LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 	}
 
 	/* And set IndexTuple */
 	currItem = &so->currPos.items[so->currPos.itemIndex];
 	scan->xs_heaptid = currItem->heapTid;
-	if (scan->xs_want_itup)
-		scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+	scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
 
 	return true;
 }
@@ -2593,6 +2586,10 @@ _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
 
 	low = P_FIRSTDATAKEY(opaque);
 	high = PageGetMaxOffsetNumber(page);
+
+	if (unlikely(high < low))
+		return false;
+
 	compare_offset = ScanDirectionIsForward(dir) ? high : low;
 
 	return _bt_compare(scan->indexRelation,
