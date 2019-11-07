@@ -663,7 +663,7 @@ typedef struct BTScanOpaqueData
 	int			markItemIndex;	/* itemIndex, or -1 if not valid */
 
 	/* Work space for _bt_skip */
-	BTScanInsert	skipScanKey;	/* used to control skipping */
+	BTScanInsert skipScanKey;	/* used to control skipping */
 
 	/* keep these last in struct for efficiency */
 	BTScanPosData currPos;		/* current position data */

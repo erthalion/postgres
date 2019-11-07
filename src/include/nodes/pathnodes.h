@@ -298,11 +298,11 @@ struct PlannerInfo
 	List	   *group_pathkeys; /* groupClause pathkeys, if any */
 	List	   *window_pathkeys;	/* pathkeys of bottom window, if any */
 	List	   *distinct_pathkeys;	/* distinctClause pathkeys, if any */
-	List	   *uniq_distinct_pathkeys;	/* unique, but potentially redundant
-										   distinctClause pathkeys, if any.
-										   Used for index skip scan, since
-										   redundant distinctClauses also must
-										   be considered */
+	List	   *uniq_distinct_pathkeys; /* unique, but potentially redundant
+										 * distinctClause pathkeys, if any.
+										 * Used for index skip scan, since
+										 * redundant distinctClauses also must
+										 * be considered */
 	List	   *sort_pathkeys;	/* sortClause pathkeys, if any */
 
 	List	   *part_schemes;	/* Canonicalised partition schemes used in the

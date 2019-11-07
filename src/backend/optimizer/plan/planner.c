@@ -4830,12 +4830,12 @@ create_distinct_paths(PlannerInfo *root,
 					((IndexPath *) path)->indexinfo->amcanskip &&
 					root->distinct_pathkeys != NIL)
 				{
-					ListCell   		*lc;
-					IndexOptInfo 	*index = NULL;
-					bool 			different_columns_order = false,
-									not_empty_qual = false;
-					int 			i = 0;
-					int 			distinctPrefixKeys;
+					ListCell   *lc;
+					IndexOptInfo *index = NULL;
+					bool		different_columns_order = false,
+								not_empty_qual = false;
+					int			i = 0;
+					int			distinctPrefixKeys;
 
 					Assert(path->pathtype == T_IndexOnlyScan ||
 						   path->pathtype == T_IndexScan);
@@ -4844,20 +4844,20 @@ create_distinct_paths(PlannerInfo *root,
 					distinctPrefixKeys = list_length(root->uniq_distinct_pathkeys);
 
 					/*
-					 * Normally we can think about distinctPrefixKeys as just a
-					 * number of distinct keys. But if lets say we have a
+					 * Normally we can think about distinctPrefixKeys as just
+					 * a number of distinct keys. But if lets say we have a
 					 * distinct key a, and the index contains b, a in exactly
-					 * this order. In such situation we need to use position of
-					 * a in the index as distinctPrefixKeys, otherwise skip
+					 * this order. In such situation we need to use position
+					 * of a in the index as distinctPrefixKeys, otherwise skip
 					 * will happen only by the first column.
 					 */
 					foreach(lc, root->uniq_distinct_pathkeys)
 					{
-						PathKey *pathKey = lfirst_node(PathKey, lc);
+						PathKey    *pathKey = lfirst_node(PathKey, lc);
 						EquivalenceMember *em =
-							lfirst_node(EquivalenceMember,
-										list_head(pathKey->pk_eclass->ec_members));
-						Var *var = (Var *) em->em_expr;
+						lfirst_node(EquivalenceMember,
+									list_head(pathKey->pk_eclass->ec_members));
+						Var		   *var = (Var *) em->em_expr;
 
 						Assert(i < index->ncolumns);
 
@@ -4876,20 +4876,20 @@ create_distinct_paths(PlannerInfo *root,
 					 * after ExecScanFetch, which means skip results could be
 					 * fitered out. Consider the following query:
 					 *
-					 * 		select distinct (a, b) a, b, c from t where  c < 100;
+					 * select distinct (a, b) a, b, c from t where  c < 100;
 					 *
-					 * Skip scan returns one tuple for one distinct set of (a, b)
-					 * with arbitrary one of c, so if the choosed c does not
-					 * match the qual and there is any c that matches the qual,
-					 * we miss that tuple.
+					 * Skip scan returns one tuple for one distinct set of (a,
+					 * b) with arbitrary one of c, so if the choosed c does
+					 * not match the qual and there is any c that matches the
+					 * qual, we miss that tuple.
 					 */
 					if (path->pathtype == T_IndexScan &&
 						parse->jointree != NULL &&
 						parse->jointree->quals != NULL &&
-						list_length((List*) parse->jointree->quals) != 0)
-							not_empty_qual = true;
+						list_length((List *) parse->jointree->quals) != 0)
+						not_empty_qual = true;
 
-					if (!different_columns_order &&	!not_empty_qual)
+					if (!different_columns_order && !not_empty_qual)
 					{
 						add_path(distinct_rel, (Path *)
 								 create_skipscan_unique_path(root,

@@ -40,7 +40,7 @@ static inline void _bt_initialize_more_data(BTScanOpaque so, ScanDirection dir);
 static inline void _bt_update_skip_scankeys(IndexScanDesc scan,
 											Relation indexRel);
 static inline bool _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
-										Buffer buf, ScanDirection dir);
+										   Buffer buf, ScanDirection dir);
 
 
 /*
@@ -1407,11 +1407,11 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		 ScanDirection indexdir, bool scanstart, int prefix)
 {
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
-	BTStack stack;
-	Buffer buf;
+	BTStack		stack;
+	Buffer		buf;
 	OffsetNumber offnum;
 	BTScanPosItem *currItem;
-	Relation 	 indexRel = scan->indexRelation;
+	Relation	indexRel = scan->indexRelation;
 
 	/* We want to return tuples, and we need a starting point */
 	Assert(scan->xs_want_itup);
@@ -1419,8 +1419,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 
 	/*
 	 * If skipScanKey is NULL then we initialize it with _bt_mkscankey,
-	 * otherwise we will just update the sk_flags / sk_argument elements
-	 * in order to eliminate repeated free/realloc.
+	 * otherwise we will just update the sk_flags / sk_argument elements in
+	 * order to eliminate repeated free/realloc.
 	 */
 	if (so->skipScanKey == NULL)
 	{
@@ -1438,7 +1438,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	if (BTScanPosIsValid(so->currPos) &&
 		_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
 	{
-		bool keyFound = false;
+		bool		keyFound = false;
 
 		LockBuffer(so->currPos.buf, BT_READ);
 		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, so->currPos.buf);
@@ -1499,15 +1499,16 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	 * series.
 	 */
 	if (ScanDirectionIsBackward(dir) && ScanDirectionIsBackward(indexdir))
-		 offnum = OffsetNumberPrev(offnum);
+		offnum = OffsetNumberPrev(offnum);
 
 	/*
 	 * Andvance backward but read forward. At this moment we are at the next
 	 * distinct key at the beginning of the series. In case if scan just
-	 * started, we can read forward without doing anything else. Otherwise find
-	 * previous distinct key and the beginning of it's series and read forward
-	 * from there. To do so, go back one step, perform binary search to find
-	 * the first item in the series and let _bt_readpage do everything else.
+	 * started, we can read forward without doing anything else. Otherwise
+	 * find previous distinct key and the beginning of it's series and read
+	 * forward from there. To do so, go back one step, perform binary search
+	 * to find the first item in the series and let _bt_readpage do everything
+	 * else.
 	 */
 	else if (ScanDirectionIsBackward(dir) && ScanDirectionIsForward(indexdir))
 	{
@@ -1523,9 +1524,11 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			{
 				_bt_update_skip_scankeys(scan, indexRel);
 
-				/* And now find the last item from the sequence for the current,
-				 * value with the intention do OffsetNumberNext. As a result we
-				 * end up on a first element from the sequence. */
+				/*
+				 * And now find the last item from the sequence for the
+				 * current, value with the intention do OffsetNumberNext. As a
+				 * result we end up on a first element from the sequence.
+				 */
 				if (_bt_scankey_within_page(scan, so->skipScanKey,
 											so->currPos.buf, dir))
 					offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
@@ -1553,9 +1556,9 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	/*
 	 * Andvance forward but read backward. At this moment we are at the next
 	 * distinct key at the beginning of the series. In case if scan just
-	 * started, we can go one step back and read forward without doing anything
-	 * else. Otherwise find the next distinct key and the beginning of it's
-	 * series, go one step back and read backward from there.
+	 * started, we can go one step back and read forward without doing
+	 * anything else. Otherwise find the next distinct key and the beginning
+	 * of it's series, go one step back and read backward from there.
 	 *
 	 * An interesting situation can happen if one of distinct keys do not pass
 	 * a corresponding index condition at all. In this case reading backward
@@ -1569,19 +1572,21 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			offnum = OffsetNumberPrev(offnum);
 		else
 		{
-			OffsetNumber nextOffset, startOffset;
+			OffsetNumber nextOffset,
+						startOffset;
+
 			nextOffset = startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
 
-			while(nextOffset == startOffset)
+			while (nextOffset == startOffset)
 			{
 				/*
 				 * Find a next index tuple to update scan key. It could be at
 				 * the end, so check for max offset
 				 */
 				OffsetNumber curOffnum = offnum;
-				Page page = BufferGetPage(so->currPos.buf);
+				Page		page = BufferGetPage(so->currPos.buf);
 				OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
-				ItemId itemid = PageGetItemId(page, Min(offnum, maxoff));
+				ItemId		itemid = PageGetItemId(page, Min(offnum, maxoff));
 
 				LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 				scan->xs_itup = (IndexTuple) PageGetItem(page, itemid);
@@ -1612,7 +1617,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					BTScanPosUnpinIfPinned(so->currPos);
 					BTScanPosInvalidate(so->currPos)
 
-					pfree(so->skipScanKey);
+						pfree(so->skipScanKey);
 					so->skipScanKey = NULL;
 					return false;
 				}
@@ -1622,7 +1627,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				/* Check if _bt_readpage returns already found item */
 				if (_bt_readpage(scan, indexdir, offnum))
 				{
-					IndexTuple itup;
+					IndexTuple	itup;
 
 					currItem = &so->currPos.items[so->currPos.lastItem];
 					itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
@@ -2550,22 +2555,23 @@ _bt_initialize_more_data(BTScanOpaque so, ScanDirection dir)
 static inline void
 _bt_update_skip_scankeys(IndexScanDesc scan, Relation indexRel)
 {
-	TupleDesc		itupdesc;
-	int				indnkeyatts, i;
-	BTScanOpaque 	so = (BTScanOpaque) scan->opaque;
-	ScanKey			scankeys = so->skipScanKey->scankeys;
+	TupleDesc	itupdesc;
+	int			indnkeyatts,
+				i;
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+	ScanKey		scankeys = so->skipScanKey->scankeys;
 
 	itupdesc = RelationGetDescr(indexRel);
 	indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRel);
 	for (i = 0; i < indnkeyatts; i++)
 	{
-		Datum datum;
-		bool null;
-		int flags;
+		Datum		datum;
+		bool		null;
+		int			flags;
 
 		datum = index_getattr(scan->xs_itup, i + 1, itupdesc, &null);
 		flags = (null ? SK_ISNULL : 0) |
-				(indexRel->rd_indoption[i] << SK_BT_INDOPTION_SHIFT);
+			(indexRel->rd_indoption[i] << SK_BT_INDOPTION_SHIFT);
 		scankeys[i].sk_flags = flags;
 		scankeys[i].sk_argument = datum;
 	}
@@ -2579,10 +2585,12 @@ static inline bool
 _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
 						Buffer buf, ScanDirection dir)
 {
-	OffsetNumber low, high, compare_offset;
-	Page page = BufferGetPage(buf);
+	OffsetNumber low,
+				high,
+				compare_offset;
+	Page		page = BufferGetPage(buf);
 	BTPageOpaque opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-	int 		 compare_value = ScanDirectionIsForward(dir) ? 0 : 1;
+	int			compare_value = ScanDirectionIsForward(dir) ? 0 : 1;
 
 	low = P_FIRSTDATAKEY(opaque);
 	high = PageGetMaxOffsetNumber(page);

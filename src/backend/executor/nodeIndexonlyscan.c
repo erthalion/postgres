@@ -67,9 +67,11 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	ItemPointer tid;
 	IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) node->ss.ps.plan;
 
-	/* tells if the current position was reached via skipping. In this case
-	 * there is no nead for the index_getnext_tid */
-	bool skipped = false;
+	/*
+	 * tells if the current position was reached via skipping. In this case
+	 * there is no nead for the index_getnext_tid
+	 */
+	bool		skipped = false;
 
 	/*
 	 * extract necessary information from index scan node
@@ -125,11 +127,11 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * asked to implement DISTINCT.
 	 *
 	 * When fetching a cursor in the direction opposite to a general scan
-	 * direction, the result must be what normal fetching should have returned,
-	 * but in reversed order. In other words, return the last or first scanned
-	 * tuple in a DISTINCT set, depending on a cursor direction. Due to that we
-	 * skip also when the first tuple wasn't emitted yet, but the directions
-	 * are opposite.
+	 * direction, the result must be what normal fetching should have
+	 * returned, but in reversed order. In other words, return the last or
+	 * first scanned tuple in a DISTINCT set, depending on a cursor direction.
+	 * Due to that we skip also when the first tuple wasn't emitted yet, but
+	 * the directions are opposite.
 	 */
 	if (node->ioss_SkipPrefixSize > 0 &&
 		(node->ioss_FirstTupleEmitted ||
@@ -138,11 +140,13 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
 						!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
 		{
-			/* Reached end of index. At this point currPos is invalidated,
-			 * and we need to reset ioss_FirstTupleEmitted, since otherwise
-			 * after going backwards, reaching the end of index, and going
-			 * forward again we apply skip again. It would be incorrect and
-			 * lead to an extra skipped item. */
+			/*
+			 * Reached end of index. At this point currPos is invalidated, and
+			 * we need to reset ioss_FirstTupleEmitted, since otherwise after
+			 * going backwards, reaching the end of index, and going forward
+			 * again we apply skip again. It would be incorrect and lead to an
+			 * extra skipped item.
+			 */
 			node->ioss_FirstTupleEmitted = false;
 			return ExecClearTuple(slot);
 		}

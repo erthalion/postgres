@@ -1377,7 +1377,7 @@ typedef struct IndexScanState
 	ExprContext *iss_RuntimeContext;
 	Relation	iss_RelationDesc;
 	struct IndexScanDescData *iss_ScanDesc;
-	int         iss_SkipPrefixSize;
+	int			iss_SkipPrefixSize;
 	bool		iss_FirstTupleEmitted;
 
 	/* These are needed for re-checking ORDER BY expr ordering */
@@ -1428,7 +1428,7 @@ typedef struct IndexOnlyScanState
 	struct IndexScanDescData *ioss_ScanDesc;
 	TupleTableSlot *ioss_TableSlot;
 	Buffer		ioss_VMBuffer;
-	int         ioss_SkipPrefixSize;
+	int			ioss_SkipPrefixSize;
 	bool		ioss_FirstTupleEmitted;
 	Size		ioss_PscanLen;
 } IndexOnlyScanState;

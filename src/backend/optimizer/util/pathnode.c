@@ -2919,7 +2919,7 @@ create_skipscan_unique_path(PlannerInfo *root,
 							int distinctPrefixKeys,
 							double numGroups)
 {
-	IndexPath *pathnode = makeNode(IndexPath);
+	IndexPath  *pathnode = makeNode(IndexPath);
 
 	Assert(IsA(basepath, IndexPath));
 

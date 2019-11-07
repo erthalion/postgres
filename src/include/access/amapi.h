@@ -232,7 +232,7 @@ typedef struct IndexAmRoutine
 	amendscan_function amendscan;
 	ammarkpos_function ammarkpos;	/* can be NULL */
 	amrestrpos_function amrestrpos; /* can be NULL */
-	amskip_function amskip;				/* can be NULL */
+	amskip_function amskip;		/* can be NULL */
 
 	/* interface functions to support parallel index scans */
 	amestimateparallelscan_function amestimateparallelscan; /* can be NULL */
