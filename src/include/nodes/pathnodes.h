@@ -866,6 +866,7 @@ struct IndexOptInfo
 	bool		amsearchnulls;	/* can AM search for NULL/NOT NULL entries? */
 	bool		amhasgettuple;	/* does AM have amgettuple interface? */
 	bool		amhasgetbitmap; /* does AM have amgetbitmap interface? */
+	bool		amcanskip;		/* can AM skip duplicate values? */
 	bool		amcanparallel;	/* does AM support parallel scan? */
 	/* Rather than include amapi.h here, we declare amcostestimate like this */
 	void		(*amcostestimate) ();	/* AM's cost estimator */
@@ -1227,6 +1228,9 @@ typedef struct Path
  * we need not recompute them when considering using the same index in a
  * bitmap index/heap scan (see BitmapHeapPath).  The costs of the IndexPath
  * itself represent the costs of an IndexScan or IndexOnlyScan plan type.
+ *
+ * 'indexskipprefix' represents the number of columns to consider for skip
+ * scans.
  *----------
  */
 typedef struct IndexPath
@@ -1239,6 +1243,7 @@ typedef struct IndexPath
 	ScanDirection indexscandir;
 	Cost		indextotalcost;
 	Selectivity indexselectivity;
+	int			indexskipprefix;
 } IndexPath;
 
 /*
