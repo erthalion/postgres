@@ -2564,6 +2564,7 @@ create_projection_path(PlannerInfo *root,
 	pathnode->path.pathkeys = subpath->pathkeys;
 
 	pathnode->subpath = subpath;
+	pathnode->path.uniquekeys = subpath->uniquekeys;
 
 	/*
 	 * We might not need a separate Result node.  If the input plan node type
@@ -2925,6 +2926,73 @@ create_upper_unique_path(PlannerInfo *root,
 	pathnode->path.total_cost = subpath->total_cost +
 		cpu_operator_cost * subpath->rows * numCols;
 	pathnode->path.rows = numGroups;
+
+	return pathnode;
+}
+
+/*
+ * create_skipscan_unique_path
+ *	  Creates a pathnode the same as an existing IndexPath except based on
+ *	  skipping duplicate values.  This may or may not be cheaper than using
+ *	  create_upper_unique_path.
+ *
+ * The input path must be an IndexPath for an index that supports amskip.
+ */
+IndexPath *
+create_skipscan_unique_path(PlannerInfo *root, IndexOptInfo *index,
+							Path *basepath)
+{
+	IndexPath 	*pathnode = makeNode(IndexPath);
+	int 		numDistinctRows;
+	int 		distinctPrefixKeys;
+	ListCell 	*lc;
+	List 	   	*exprs = NIL;
+
+
+	distinctPrefixKeys = list_length(root->query_uniquekeys);
+
+	Assert(IsA(basepath, IndexPath));
+
+	/* We don't want to modify basepath, so make a copy. */
+	memcpy(pathnode, basepath, sizeof(IndexPath));
+
+	/*
+	 * Normally we can think about distinctPrefixKeys as just
+	 * a number of distinct keys. But if lets say we have a
+	 * distinct key a, and the index contains b, a in exactly
+	 * this order. In such situation we need to use position
+	 * of a in the index as distinctPrefixKeys, otherwise skip
+	 * will happen only by the first column.
+	 */
+	foreach(lc, root->query_uniquekeys)
+	{
+		UniqueKey *uniquekey = (UniqueKey *) lfirst(lc);
+		EquivalenceMember *em =
+			lfirst_node(EquivalenceMember,
+						list_head(uniquekey->eq_clause->ec_members));
+		Var *var = (Var *) em->em_expr;
+
+		exprs = lappend(exprs, em->em_expr);
+
+		for (int i = 0; i < index->ncolumns; i++)
+		{
+			if (index->indexkeys[i] == var->varattno)
+			{
+				distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);
+				break;
+			}
+		}
+	}
+
+	Assert(distinctPrefixKeys > 0);
+	pathnode->indexskipprefix = distinctPrefixKeys;
+
+	numDistinctRows = estimate_num_groups(root, exprs,
+										  pathnode->path.rows,
+										  NULL);
+
+	pathnode->path.total_cost = pathnode->path.startup_cost * numDistinctRows;
+	pathnode->path.rows = numDistinctRows;
 
 	return pathnode;
 }

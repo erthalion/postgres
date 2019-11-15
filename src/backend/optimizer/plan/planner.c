@@ -4828,13 +4828,19 @@ create_distinct_paths(PlannerInfo *root,
 			Path	   *path = (Path *) lfirst(lc);
 
 			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
-			{
 				add_path(distinct_rel, (Path *)
 						 create_upper_unique_path(root, distinct_rel,
 												  path,
 												  list_length(root->distinct_pathkeys),
 												  numDistinctRows));
-			}
+		}
+
+		foreach(lc, input_rel->unique_pathlist)
+		{
+			Path	   *path = (Path *) lfirst(lc);
+
+			if (uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
+				add_path(distinct_rel, path);
 		}
 
 		/* For explicit-sort case, always use the more rigorous clause */
