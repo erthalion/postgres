@@ -4967,35 +4967,35 @@ select * from test_jsonb_subscript;
 -- append element to array with a gap filled with nulls
 update test_jsonb_subscript set test_json['a'][7] = '8'::jsonb;
 select * from test_jsonb_subscript;
- id |                test_json                 
-----+------------------------------------------
-  1 | {"a": [1, 2, 3, "4", 8]}
-  2 | {"a": [1, 2, 3, "4", 8], "key": "value"}
+ id |                         test_json                          
+----+------------------------------------------------------------
+  1 | {"a": [1, 2, 3, "4", null, null, null, 8]}
+  2 | {"a": [1, 2, 3, "4", null, null, null, 8], "key": "value"}
 (2 rows)
 
 -- replace element in array using negative subscript
 update test_jsonb_subscript set test_json['a'][-4] = '5'::jsonb;
 select * from test_jsonb_subscript;
- id |                test_json                 
-----+------------------------------------------
-  1 | {"a": [1, 5, 3, "4", 8]}
-  2 | {"a": [1, 5, 3, "4", 8], "key": "value"}
+ id |                        test_json                        
+----+---------------------------------------------------------
+  1 | {"a": [1, 2, 3, "4", 5, null, null, 8]}
+  2 | {"a": [1, 2, 3, "4", 5, null, null, 8], "key": "value"}
 (2 rows)
 
 -- prepend element to array using negative subscript with a gap filled with nulls
 update test_jsonb_subscript set test_json['a'][-10] = '6'::jsonb;
 select * from test_jsonb_subscript;
- id |                  test_json                  
-----+---------------------------------------------
-  1 | {"a": [6, 1, 5, 3, "4", 8]}
-  2 | {"a": [6, 1, 5, 3, "4", 8], "key": "value"}
+ id |                            test_json                             
+----+------------------------------------------------------------------
+  1 | {"a": [6, null, 1, 2, 3, "4", 5, null, null, 8]}
+  2 | {"a": [6, null, 1, 2, 3, "4", 5, null, null, 8], "key": "value"}
 (2 rows)
 
 -- use jsonb subscription in where clause
 select * from test_jsonb_subscript where test_json['key'] = '"value"';
- id |                  test_json                  
-----+---------------------------------------------
-  2 | {"a": [6, 1, 5, 3, "4", 8], "key": "value"}
+ id |                            test_json                             
+----+------------------------------------------------------------------
+  2 | {"a": [6, null, 1, 2, 3, "4", 5, null, null, 8], "key": "value"}
 (1 row)
 
 select * from test_jsonb_subscript where test_json['key_doesnt_exists'] = '"value"';
@@ -5013,10 +5013,10 @@ update test_jsonb_subscript set test_json[NULL] = 1;
 ERROR:  subscript in assignment must not be null
 update test_jsonb_subscript set test_json['another_key'] = NULL;
 select * from test_jsonb_subscript;
- id |                            test_json                             
-----+------------------------------------------------------------------
-  1 | {"a": [6, 1, 5, 3, "4", 8], "another_key": null}
-  2 | {"a": [6, 1, 5, 3, "4", 8], "key": "value", "another_key": null}
+ id |                                       test_json                                       
+----+---------------------------------------------------------------------------------------
+  1 | {"a": [6, null, 1, 2, 3, "4", 5, null, null, 8], "another_key": null}
+  2 | {"a": [6, null, 1, 2, 3, "4", 5, null, null, 8], "key": "value", "another_key": null}
 (2 rows)
 
 -- create a path
@@ -5045,30 +5045,30 @@ select * from test_jsonb_subscript;
 
 update test_jsonb_subscript set test_json['d'][0]['a'][3] = '4'::jsonb;
 select * from test_jsonb_subscript;
- id |                       test_json                        
-----+--------------------------------------------------------
-  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [4]}]}
+ id |                                test_json                                 
+----+--------------------------------------------------------------------------
+  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [null, null, null, 4]}]}
 (1 row)
 
 update test_jsonb_subscript set test_json['d'][0]['c'][-3] = '5'::jsonb;
 select * from test_jsonb_subscript;
- id |                            test_json                             
-----+------------------------------------------------------------------
-  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [4], "c": [5]}]}
+ id |                                           test_json                                            
+----+------------------------------------------------------------------------------------------------
+  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [null, null, null, 4], "c": [5, null, null]}]}
 (1 row)
 
 update test_jsonb_subscript set test_json['d'][0]['b']['x'] = '6'::jsonb;
 select * from test_jsonb_subscript;
- id |                                    test_json                                    
-----+---------------------------------------------------------------------------------
-  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [4], "b": {"x": 6}, "c": [5]}]}
+ id |                                                   test_json                                                   
+----+---------------------------------------------------------------------------------------------------------------
+  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [null, null, null, 4], "b": {"x": 6}, "c": [5, null, null]}]}
 (1 row)
 
 update test_jsonb_subscript set test_json['e']['y'] = '7'::jsonb;
 select * from test_jsonb_subscript;
- id |                                           test_json                                            
-----+------------------------------------------------------------------------------------------------
-  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [4], "b": {"x": 6}, "c": [5]}], "e": {"y": 7}}
+ id |                                                          test_json                                                           
+----+------------------------------------------------------------------------------------------------------------------------------
+  0 | {"a": 1, "b": [2], "c": [{"a": 3}], "d": [{"a": [null, null, null, 4], "b": {"x": 6}, "c": [5, null, null]}], "e": {"y": 7}}
 (1 row)
 
 -- updating of scalar's subscripts

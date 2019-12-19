@@ -1620,6 +1620,17 @@ jsonb_subscript_apply(JsonbValue *jbv, Datum subscriptVal, Oid subscriptTypid,
 	}
 }
 
+static void
+push_null_elements(JsonbParseState **ps, int num)
+{
+	JsonbValue	null;
+
+	null.type = jbvNull;
+
+	while (num-- > 0)
+		pushJsonbValue(ps, WJB_ELEM, &null);
+}
+
 /* Perfrom one subscript assignment step */
 static void
 jsonb_subscript_step_assignment(SubscriptingRefState *sbstate, Datum value,
@@ -1676,6 +1687,10 @@ jsonb_subscript_step_assignment(SubscriptingRefState *sbstate, Datum value,
 				JsonbIteratorNext(&astate->iter, &jbv, last) != WJB_END_ARRAY)
 				subscript[1].exists = true;
 		}
+
+		/* Fill the gap before the new element with nulls */
+		if (i < index)
+			push_null_elements(&astate->ps, index - i);
 	}
 	else
 	{
@@ -5318,8 +5333,15 @@ jsonb_subscript_assign(Datum containerSource, SubscriptingRefState *sbstate)
 		if (subscript[1].exists)
 			break;
 
-		if (subscript->is_array && subscript->array_index < 0 && subscript->exists)
-			break;	/* original elements are copied from the iterator */
+		if (subscript->is_array && subscript->array_index < 0)
+		{
+			/* Fill the gap between prepended element and 0th element */
+			if (subscript->array_index < -1)
+				push_null_elements(&astate->ps, -1 - subscript->array_index);
+
+			if (subscript->exists)
+				break;	/* original elements are copied from the iterator */
+		}
 
 		tok = subscript->is_array ? WJB_END_ARRAY : WJB_END_OBJECT;
 		res = pushJsonbValue(&astate->ps, tok, NULL);
