@@ -6729,7 +6729,7 @@ Datum
 array_subscript_handler(PG_FUNCTION_ARGS)
 {
 	SubscriptRoutines *sbsroutines = (SubscriptRoutines *)
-									 palloc(sizeof(SubscriptRoutines));
+									 palloc0(sizeof(SubscriptRoutines));
 
 	sbsroutines->prepare = array_subscript_prepare;
 	sbsroutines->validate = array_subscript_validate;
@@ -6863,7 +6863,7 @@ array_subscript_validate(bool isAssignment, SubscriptingRef *sbsref,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
 					 errmsg("array assignment requires type %s"
 							" but expression is of type %s",
-							format_type_be(sbsref->refelemtype),
+							format_type_be(typeneeded),
 							format_type_be(typesource)),
 				 errhint("You will need to rewrite or cast the expression."),
 					 parser_errposition(pstate, exprLocation(assignExpr))));

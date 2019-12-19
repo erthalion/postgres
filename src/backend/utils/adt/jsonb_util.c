@@ -468,9 +468,8 @@ getKeyJsonValueFromContainer(JsonbContainer *container,
  * Returns palloc()'d copy of the value, or NULL if it does not exist.
  */
 JsonbValue *
-getIthJsonbValueFromContainer(JsonbContainer *container, uint32 i)
+getIthJsonbValueFromContainer(JsonbContainer *container, uint32 i, JsonbValue *result)
 {
-	JsonbValue *result;
 	char	   *base_addr;
 	uint32		nelements;
 
@@ -483,7 +482,8 @@ getIthJsonbValueFromContainer(JsonbContainer *container, uint32 i)
 	if (i >= nelements)
 		return NULL;
 
-	result = palloc(sizeof(JsonbValue));
+	if (!result)
+		result = palloc(sizeof(JsonbValue));
 
 	fillJsonbValue(container, i, base_addr,
 				   getJsonbOffset(container, i),
