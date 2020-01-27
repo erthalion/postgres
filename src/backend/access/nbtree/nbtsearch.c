@@ -1430,39 +1430,62 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		so->skipScanKey->keysz = prefix;
 		so->skipScanKey->scantid = NULL;
 	}
+	so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 	_bt_update_skip_scankeys(scan, indexRel);
 
-	/* Check if the next unique key can be found within the current page */
-	if (BTScanPosIsValid(so->currPos) &&
-		_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
+	/* Check if the next unique key can be found within the current page.
+	 * Since we do not lock the current page between jumps, it's possible
+	 * that it was splitted since the last time we saw it. This is fine in
+	 * case of scanning forward, since page split to the right and we are
+	 * still on the left most page. In case of scanning backwards it's
+	 * possible to loose some pages and we need to remember the previous
+	 * page, and then follow the right link from the current page until we
+	 * find the original one.
+	 *
+	 * Since the whole idea of checking the current page is to protect
+	 * ourselves and make more performant statistic mismatch case when
+	 * there are too many distinct values for jumping, it's not clear if
+	 * the complexity of this solution in case of backward scan is
+	 * justified, so for now just avoid it.
+	 */
+	if (BufferIsValid(so->currPos.buf) && ScanDirectionIsForward(dir))
 	{
-		bool keyFound = false;
-
 		LockBuffer(so->currPos.buf, BT_READ);
-		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, so->currPos.buf);
 
-		/* Lock the page for SERIALIZABLE transactions */
-		PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
-						  scan->xs_snapshot);
-
-		/* We know in which direction to look */
-		_bt_initialize_more_data(so, dir);
-
-		/* Now read the data */
-		keyFound = _bt_readpage(scan, dir, offnum);
-
-		LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-		if (keyFound)
+		if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
 		{
-			/* set IndexTuple */
-			currItem = &so->currPos.items[so->currPos.itemIndex];
-			scan->xs_heaptid = currItem->heapTid;
-			scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
-			return true;
+			bool keyFound = false;
+
+			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, so->currPos.buf);
+
+			/* Lock the page for SERIALIZABLE transactions */
+			PredicateLockPage(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
+							  scan->xs_snapshot);
+
+			/* We know in which direction to look */
+			_bt_initialize_more_data(so, dir);
+
+			/* Now read the data */
+			keyFound = _bt_readpage(scan, dir, offnum);
+
+			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+			ReleaseBuffer(so->currPos.buf);
+			so->currPos.buf = InvalidBuffer;
+
+			if (keyFound)
+			{
+				/* set IndexTuple */
+				currItem = &so->currPos.items[so->currPos.itemIndex];
+				scan->xs_heaptid = currItem->heapTid;
+				scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+				return true;
+			}
 		}
+		else
+			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 	}
 
-	if (BTScanPosIsValid(so->currPos))
+	if (BufferIsValid(so->currPos.buf))
 	{
 		ReleaseBuffer(so->currPos.buf);
 		so->currPos.buf = InvalidBuffer;
@@ -1520,6 +1543,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 			if (_bt_next(scan, dir))
 			{
+				LockBuffer(so->currPos.buf, BT_READ);
 				_bt_update_skip_scankeys(scan, indexRel);
 
 				/*
@@ -1527,13 +1551,16 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				 * current, value with the intention do OffsetNumberNext. As a
 				 * result we end up on a first element from the sequence.
 				 */
-				if (_bt_scankey_within_page(scan, so->skipScanKey,
-											so->currPos.buf, dir))
+				if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
 					offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 				else
 				{
-					ReleaseBuffer(so->currPos.buf);
-					so->currPos.buf = InvalidBuffer;
+					if (BufferIsValid(so->currPos.buf))
+					{
+						LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+						ReleaseBuffer(so->currPos.buf);
+						so->currPos.buf = InvalidBuffer;
+					}
 
 					stack = _bt_search(scan->indexRelation, so->skipScanKey,
 									   &buf, BT_READ, scan->xs_snapshot);
@@ -1573,6 +1600,23 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			OffsetNumber nextOffset,
 						startOffset;
 
+			IndexTuple startItup = CopyIndexTuple(scan->xs_itup);
+			Page page = BufferGetPage(so->currPos.buf);
+
+			/* We are at the end and need to return */
+			if ((offnum > PageGetMaxOffsetNumber(page)) &
+				(so->currPos.nextPage == P_NONE))
+			{
+				LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+
+				BTScanPosUnpinIfPinned(so->currPos);
+				BTScanPosInvalidate(so->currPos)
+
+				pfree(so->skipScanKey);
+				so->skipScanKey = NULL;
+				return false;
+			}
+
 			nextOffset = startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
 
 			while (nextOffset == startOffset)
@@ -1583,18 +1627,19 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				 * Find a next index tuple to update scan key. It could be at
 				 * the end, so check for max offset
 				 */
-				OffsetNumber curOffnum = offnum;
-				Page page = BufferGetPage(so->currPos.buf);
 				OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
 				ItemId itemid = PageGetItemId(page, Min(offnum, maxoff));
 
+				CHECK_FOR_INTERRUPTS();
+
+				page = BufferGetPage(so->currPos.buf);
 				scan->xs_itup = (IndexTuple) PageGetItem(page, itemid);
 				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 
 				_bt_update_skip_scankeys(scan, indexRel);
 				LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 
-				if (BTScanPosIsValid(so->currPos))
+				if (BufferIsValid(so->currPos.buf))
 				{
 					ReleaseBuffer(so->currPos.buf);
 					so->currPos.buf = InvalidBuffer;
@@ -1605,23 +1650,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				_bt_freestack(stack);
 				so->currPos.buf = buf;
 				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-
-				/*
-				 * Jump to the next key returned the same offset, which means
-				 * we are at the end and need to return
-				 */
-				if (offnum == curOffnum)
-				{
-					LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-
-					BTScanPosUnpinIfPinned(so->currPos);
-					BTScanPosInvalidate(so->currPos)
-
-					pfree(so->skipScanKey);
-					so->skipScanKey = NULL;
-					return false;
-				}
-
 				offnum = OffsetNumberPrev(offnum);
 
 				/* Check if _bt_readpage returns already found item */
@@ -1646,12 +1674,48 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				nextOffset = ItemPointerGetOffsetNumber(&itup->t_tid);
 
 				/*
-				 * If the nextOffset is the same as before, it means we are in
-				 * the loop, return offnum to the original position and jump
-				 * further
+				 * To check if we returned the same tuple, try to find a
+				 * startItup on the current page. For that we need to update
+				 * scankey to match the whole tuple and set nextkey to return
+				 * an exact tuple, not the next one. If the nextOffset is the
+				 * same as before, it means we are in the loop, return offnum
+				 * to the original position and jump further
 				 */
-				if (nextOffset == startOffset)
-					offnum = OffsetNumberNext(offnum);
+				scan->xs_itup = startItup;
+				_bt_update_skip_scankeys(scan, indexRel);
+
+				so->skipScanKey->keysz = IndexRelationGetNumberOfKeyAttributes(indexRel);
+				so->skipScanKey->nextkey = false;
+
+				if (_bt_scankey_within_page(scan, so->skipScanKey,
+											so->currPos.buf, dir))
+				{
+					startOffset = _bt_binsrch(scan->indexRelation,
+											  so->skipScanKey,
+											  so->currPos.buf);
+
+					page = BufferGetPage(so->currPos.buf);
+					maxoff = PageGetMaxOffsetNumber(page);
+
+					if (nextOffset == startOffset)
+						offnum = OffsetNumberNext(offnum);
+
+					if ((offnum > maxoff) & (so->currPos.nextPage == P_NONE))
+					{
+						LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+
+						BTScanPosUnpinIfPinned(so->currPos);
+						BTScanPosInvalidate(so->currPos)
+
+						pfree(so->skipScanKey);
+						so->skipScanKey = NULL;
+						return false;
+					}
+				}
+
+				/* Return original scankey options */
+				so->skipScanKey->keysz = prefix;
+				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 			}
 		}
 	}
@@ -2594,12 +2658,9 @@ static inline bool
 _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
 						Buffer buf, ScanDirection dir)
 {
-	OffsetNumber low,
-				high,
-				compare_offset;
+	OffsetNumber low, high;
 	Page page = BufferGetPage(buf);
 	BTPageOpaque opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-	int 		 compare_value = ScanDirectionIsForward(dir) ? 0 : 1;
 
 	low = P_FIRSTDATAKEY(opaque);
 	high = PageGetMaxOffsetNumber(page);
@@ -2607,8 +2668,6 @@ _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
 	if (unlikely(high < low))
 		return false;
 
-	compare_offset = ScanDirectionIsForward(dir) ? high : low;
-
-	return _bt_compare(scan->indexRelation,
-					   key, page, compare_offset) > compare_value;
+	return (_bt_compare(scan->indexRelation, key, page, low) > 0 &&
+			_bt_compare(scan->indexRelation, key, page, high) < 1);
 }
