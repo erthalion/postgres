@@ -259,3 +259,65 @@ SELECT DISTINCT ON (a) a, b, c from distinct_boundaries
 WHERE b >= 1 and c = 0 ORDER BY a, b;
 
 DROP TABLE distinct_boundaries;
+
+-- test tuple killing
+
+-- DESC ordering
+CREATE TABLE distinct_killed AS
+    SELECT a, b, b % 2 AS c, 10 AS d
+        FROM generate_series(1, 5) a,
+             generate_series(1,1000) b;
+
+CREATE INDEX ON distinct_killed (a, b, c, d);
+
+DELETE FROM distinct_killed where a = 3;
+
+BEGIN;
+    DECLARE c SCROLL CURSOR FOR
+    SELECT DISTINCT ON (a) a,b,c,d
+    FROM distinct_killed ORDER BY a DESC, b DESC;
+    FETCH FORWARD ALL FROM c;
+    FETCH BACKWARD ALL FROM c;
+COMMIT;
+
+DROP TABLE distinct_killed;
+
+-- regular ordering
+CREATE TABLE distinct_killed AS
+    SELECT a, b, b % 2 AS c, 10 AS d
+        FROM generate_series(1, 5) a,
+             generate_series(1,1000) b;
+
+CREATE INDEX ON distinct_killed (a, b, c, d);
+
+DELETE FROM distinct_killed where a = 3;
+
+BEGIN;
+    DECLARE c SCROLL CURSOR FOR
+    SELECT DISTINCT ON (a) a,b,c,d
+    FROM distinct_killed ORDER BY a, b;
+    FETCH FORWARD ALL FROM c;
+    FETCH BACKWARD ALL FROM c;
+COMMIT;
+
+DROP TABLE distinct_killed;
+
+-- partial delete
+CREATE TABLE distinct_killed AS
+    SELECT a, b, b % 2 AS c, 10 AS d
+        FROM generate_series(1, 5) a,
+             generate_series(1,1000) b;
+
+CREATE INDEX ON distinct_killed (a, b, c, d);
+
+DELETE FROM distinct_killed WHERE a = 3 AND b <= 999;
+
+BEGIN;
+    DECLARE c SCROLL CURSOR FOR
+    SELECT DISTINCT ON (a) a,b,c,d
+    FROM distinct_killed ORDER BY a DESC, b DESC;
+    FETCH FORWARD ALL FROM c;
+    FETCH BACKWARD ALL FROM c;
+COMMIT;
+
+DROP TABLE distinct_killed;
