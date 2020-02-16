@@ -41,6 +41,7 @@
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
 #include "storage/predicate.h"
+#include "storage/itemptr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -62,9 +63,11 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	EState	   *estate;
 	ExprContext *econtext;
 	ScanDirection direction;
+	ScanDirection effective;
 	IndexScanDesc scandesc;
 	TupleTableSlot *slot;
 	ItemPointer tid;
+	ItemPointerData startTid;
 	IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) node->ss.ps.plan;
 
 	/*
@@ -121,6 +124,10 @@ IndexOnlyNext(IndexOnlyScanState *node)
 						 node->ioss_OrderByKeys,
 						 node->ioss_NumOrderByKeys);
 	}
+	else
+	{
+		ItemPointerCopy(&scandesc->xs_heaptid, &startTid);
+	}
 
 	/*
 	 * Check if we need to skip to the next key prefix, because we've been
@@ -157,14 +164,59 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		}
 	}
 
+	if (skipped)
+		effective = indexonlyscan->indexorderdir;
+	else
+		effective = direction;
+
 	/*
 	 * OK, now that we have what we need, fetch the next tuple.
 	 */
-	while (skipped || (tid = index_getnext_tid(scandesc, direction)) != NULL)
+	while (skipped || (tid = index_getnext_tid(scandesc, effective)) != NULL)
 	{
 		bool		tuple_from_heap = false;
 
 		CHECK_FOR_INTERRUPTS();
+
+		if (ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
+		{
+			elog(LOG, "Found the same");
+			if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
+							!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
+			{
+				/*
+				 * Reached end of index. At this point currPos is invalidated, and
+				 * we need to reset ioss_FirstTupleEmitted, since otherwise after
+				 * going backwards, reaching the end of index, and going forward
+				 * again we apply skip again. It would be incorrect and lead to an
+				 * extra skipped item.
+				 */
+				node->ioss_FirstTupleEmitted = false;
+				return ExecClearTuple(slot);
+			}
+			else
+			{
+				if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
+								!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
+				{
+					/*
+					 * Reached end of index. At this point currPos is invalidated, and
+					 * we need to reset ioss_FirstTupleEmitted, since otherwise after
+					 * going backwards, reaching the end of index, and going forward
+					 * again we apply skip again. It would be incorrect and lead to an
+					 * extra skipped item.
+					 */
+					node->ioss_FirstTupleEmitted = false;
+					return ExecClearTuple(slot);
+				}
+				else
+				{
+					skipped = true;
+					tid = &scandesc->xs_heaptid;
+				}
+			}
+		}
+
 		skipped = false;
 
 		/*
