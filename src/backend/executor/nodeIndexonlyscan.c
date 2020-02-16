@@ -178,7 +178,8 @@ IndexOnlyNext(IndexOnlyScanState *node)
 
 		CHECK_FOR_INTERRUPTS();
 
-		if (ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
+		if ((effective == BackwardScanDirection && effective != direction) &&
+			ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
 		{
 			elog(LOG, "Found the same");
 			if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
