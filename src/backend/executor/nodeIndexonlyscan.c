@@ -63,7 +63,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	EState	   *estate;
 	ExprContext *econtext;
 	ScanDirection direction;
-	ScanDirection effective;
+	ScanDirection readDirection;
 	IndexScanDesc scandesc;
 	TupleTableSlot *slot;
 	ItemPointer tid;
@@ -167,21 +167,18 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		}
 	}
 
-	if (skipped)
-		effective = indexonlyscan->indexorderdir;
-	else
-		effective = direction;
+	readDirection = skipped ? indexonlyscan->indexorderdir : direction;
 
 	/*
 	 * OK, now that we have what we need, fetch the next tuple.
 	 */
-	while (skipped || (tid = index_getnext_tid(scandesc, effective)) != NULL)
+	while (skipped || (tid = index_getnext_tid(scandesc, readDirection)) != NULL)
 	{
 		bool		tuple_from_heap = false;
 
 		CHECK_FOR_INTERRUPTS();
 
-		if ((effective != direction) &&
+		if ((readDirection != direction) &&
 			ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
 		{
 			int i;
@@ -189,15 +186,16 @@ IndexOnlyNext(IndexOnlyScanState *node)
 
 			for (i = 0; i < skipAttempts; i++)
 			{
-				if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
-								!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
+				if (!index_skip(scandesc, direction,
+								indexonlyscan->indexorderdir,
+								!node->ioss_FirstTupleEmitted,
+								node->ioss_SkipPrefixSize))
 				{
 					node->ioss_FirstTupleEmitted = false;
 					return ExecClearTuple(slot);
 				}
 			}
 
-			skipped = true;
 			tid = &scandesc->xs_heaptid;
 		}
 

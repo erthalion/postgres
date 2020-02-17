@@ -1539,9 +1539,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		}
 		else
 		{
-			if (so->numKilled > 0)
-				_bt_killitems(scan);
-
 			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 		}
 	}
@@ -1596,6 +1593,9 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	{
 		if (!scanstart)
 		{
+			/* Reading forward means we expect to see more data on the right */
+			so->currPos.moreRight = true;
+
 			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 
 			/* One step back to find a previous value */
@@ -1618,6 +1618,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				{
 					if (BufferIsValid(so->currPos.buf))
 					{
+						/* Before leaving current page, deal with any killed items */
 						if (so->numKilled > 0)
 							_bt_killitems(scan);
 
@@ -1689,12 +1690,14 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 
 			nextOffset = startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
 
+			/* Reading backwards means we expect to see more data on the left */
+			so->currPos.moreLeft = true;
+
 			while (nextOffset == startOffset)
 			{
 				IndexTuple itup;
-				ItemId          iid;
+				ItemId     iid;
 				CHECK_FOR_INTERRUPTS();
-
 
 				/*
 				 * Find a next index tuple to update scan key. It could be at
@@ -1730,6 +1733,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				_bt_update_skip_scankeys(scan, indexRel);
 				if (BufferIsValid(so->currPos.buf))
 				{
+					/* Before leaving current page, deal with any killed items */
 					if (so->numKilled > 0)
 						_bt_killitems(scan);
 
@@ -1753,7 +1757,6 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 						   NULL, scan->indexRelation,
 						   "_bt_skip:after jump");
 
-				so->currPos.moreLeft = true;
 				if (!_bt_readpage(scan, indexdir, offnum))
 				{
 					/*
