@@ -1861,6 +1861,9 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			   NULL, scan->indexRelation,
 			   "_bt_skip:result");
 
+	so->currPos.moreLeft = true;
+	so->currPos.moreRight = true;
+
 	return true;
 }
 
