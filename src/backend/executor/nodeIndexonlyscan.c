@@ -76,6 +76,8 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 */
 	bool skipped = false;
 
+	int skipAttempts = 0;
+
 	/*
 	 * extract necessary information from index scan node
 	 */
@@ -159,6 +161,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		}
 		else
 		{
+			skipAttempts = 1;
 			skipped = true;
 			tid = &scandesc->xs_heaptid;
 		}
@@ -181,41 +184,21 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		if ((effective != direction) &&
 			ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
 		{
-			elog(LOG, "Found the same");
-			if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
-							!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
-			{
-				/*
-				 * Reached end of index. At this point currPos is invalidated, and
-				 * we need to reset ioss_FirstTupleEmitted, since otherwise after
-				 * going backwards, reaching the end of index, and going forward
-				 * again we apply skip again. It would be incorrect and lead to an
-				 * extra skipped item.
-				 */
-				node->ioss_FirstTupleEmitted = false;
-				return ExecClearTuple(slot);
-			}
-			else
+			int i;
+			skipAttempts += 1;
+
+			for (i = 0; i < skipAttempts; i++)
 			{
 				if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
 								!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
 				{
-					/*
-					 * Reached end of index. At this point currPos is invalidated, and
-					 * we need to reset ioss_FirstTupleEmitted, since otherwise after
-					 * going backwards, reaching the end of index, and going forward
-					 * again we apply skip again. It would be incorrect and lead to an
-					 * extra skipped item.
-					 */
 					node->ioss_FirstTupleEmitted = false;
 					return ExecClearTuple(slot);
 				}
-				else
-				{
-					skipped = true;
-					tid = &scandesc->xs_heaptid;
-				}
 			}
+
+			skipped = true;
+			tid = &scandesc->xs_heaptid;
 		}
 
 		skipped = false;
