@@ -71,11 +71,17 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) node->ss.ps.plan;
 
 	/*
-	 * tells if the current position was reached via skipping. In this case
+	 * Tells if the current position was reached via skipping. In this case
 	 * there is no nead for the index_getnext_tid
 	 */
 	bool skipped = false;
 
+	/*
+	 * Index only scan must be aware that in case of skipping we can return to
+	 * the starting point due to visibility checks. In this situation we need
+	 * to jump further, and number of skipping attempts tell us how far do we
+	 * need to do so.
+	 */
 	int skipAttempts = 0;
 
 	/*
@@ -178,6 +184,12 @@ IndexOnlyNext(IndexOnlyScanState *node)
 
 		CHECK_FOR_INTERRUPTS();
 
+		/*
+		 * While doing index only skip scan with advancing and reading in
+		 * different directions we can return to the same position where we
+		 * started after visibility check. Recognize such situations and skip
+		 * more.
+		 */
 		if ((readDirection != direction) &&
 			ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
 		{
