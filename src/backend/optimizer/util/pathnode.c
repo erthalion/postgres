@@ -1021,7 +1021,6 @@ create_index_path(PlannerInfo *root,
 	pathnode->path.parallel_safe = rel->consider_parallel;
 	pathnode->path.parallel_workers = 0;
 	pathnode->path.pathkeys = pathkeys;
-	pathnode->path.uniquekeys = uniquekeys;
 
 	pathnode->indexinfo = index;
 	pathnode->indexclauses = indexclauses;
@@ -1030,6 +1029,54 @@ create_index_path(PlannerInfo *root,
 	pathnode->indexscandir = indexscandir;
 
 	cost_index(pathnode, root, loop_count, partial_path);
+
+	if (uniquekeys != NULL)
+	{
+		int 		numDistinctRows;
+		int 		distinctPrefixKeys;
+		ListCell 	*lc;
+		List 	   	*exprs = NIL;
+
+		pathnode->path.uniquekeys = uniquekeys;
+		distinctPrefixKeys = list_length(root->query_uniquekeys);
+
+		/*
+		 * Normally we can think about distinctPrefixKeys as just
+		 * a number of distinct keys. But if lets say we have a
+		 * distinct key a, and the index contains b, a in exactly
+		 * this order. In such situation we need to use position
+		 * of a in the index as distinctPrefixKeys, otherwise skip
+		 * will happen only by the first column.
+		 */
+		foreach(lc, root->query_uniquekeys)
+		{
+			UniqueKey *uniquekey = (UniqueKey *) lfirst(lc);
+			EquivalenceMember *em =
+				lfirst_node(EquivalenceMember,
+							list_head(uniquekey->eq_clause->ec_members));
+			Var *var = (Var *) em->em_expr;
+
+			exprs = lappend(exprs, em->em_expr);
+
+			for (int i = 0; i < index->ncolumns; i++)
+			{
+				if (index->indexkeys[i] == var->varattno)
+				{
+					distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);
+					break;
+				}
+			}
+		}
+
+		pathnode->indexskipprefix = distinctPrefixKeys;
+
+		numDistinctRows = estimate_num_groups(root, exprs,
+											  pathnode->path.rows,
+											  NULL);
+
+		pathnode->path.total_cost = pathnode->path.startup_cost * numDistinctRows;
+		pathnode->path.rows = numDistinctRows;
+	}
 
 	return pathnode;
 }
@@ -2550,6 +2597,7 @@ create_projection_path(PlannerInfo *root,
 	pathnode->path.pathkeys = subpath->pathkeys;
 
 	pathnode->subpath = subpath;
+	pathnode->path.uniquekeys = subpath->uniquekeys;
 
 	/*
 	 * We might not need a separate Result node.  If the input plan node type

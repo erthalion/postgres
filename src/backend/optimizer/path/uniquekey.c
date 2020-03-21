@@ -76,7 +76,8 @@ uniquekeys_contained_in(List *keys1, List *keys2)
 			if (uniquekey1->eq_clause == uniquekey2->eq_clause)
 			{
 				found = true;
-				break;
+				return true;
+				/*break;*/
 			}
 		}
 

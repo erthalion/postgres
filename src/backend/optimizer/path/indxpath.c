@@ -1038,7 +1038,9 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	if (index_clauses != NIL || useful_pathkeys != NIL || useful_predicate ||
 		index_only_scan)
 	{
-		if (has_useful_uniquekeys(root))
+		if (has_useful_uniquekeys(root) &&
+			enable_indexskipscan &&
+			index->amcanskip)
 			useful_uniquekeys = get_uniquekeys_for_index(root, useful_pathkeys);
 
 		ipath = create_index_path(root, index,
@@ -1100,7 +1102,9 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 													index_pathkeys);
 		if (useful_pathkeys != NIL)
 		{
-			if (has_useful_uniquekeys(root))
+			if (has_useful_uniquekeys(root) &&
+				enable_indexskipscan &&
+				index->amcanskip)
 				useful_uniquekeys = get_uniquekeys_for_index(root, useful_pathkeys);
 
 			ipath = create_index_path(root, index,
@@ -3397,7 +3401,7 @@ get_uniquekeys_for_index(PlannerInfo *root, List *pathkeys)
 			unique_key = makeNode(UniqueKey);
 			unique_key->eq_clause = ec;
 
-			lappend(uniquekeys, unique_key);
+			uniquekeys = lappend(uniquekeys, unique_key);
 		}
 
 		if (uniquekeys_contained_in(root->canon_uniquekeys, uniquekeys))

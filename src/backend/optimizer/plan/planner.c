@@ -4827,7 +4827,11 @@ create_distinct_paths(PlannerInfo *root,
 		{
 			Path	   *path = (Path *) lfirst(lc);
 
-			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
+			if (uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
+			{
+				add_path(distinct_rel, path);
+			}
+			else if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
 			{
 				add_path(distinct_rel, (Path *)
 						 create_upper_unique_path(root, distinct_rel,
@@ -4836,51 +4840,9 @@ create_distinct_paths(PlannerInfo *root,
 												  numDistinctRows));
 
 				/* Consider index skip scan as well */
-				if (enable_indexskipscan &&
-					IsA(path, IndexPath) &&
-					((IndexPath *) path)->indexinfo->amcanskip &&
-					root->distinct_pathkeys != NIL)
+				if (path->uniquekeys != NULL)
 				{
-					ListCell   		*lc;
-					IndexOptInfo 	*index = NULL;
-					bool 			different_columns_order = false,
-									not_empty_qual = false;
-					int 			i = 0;
-					int 			distinctPrefixKeys;
-
-					Assert(path->pathtype == T_IndexOnlyScan ||
-						   path->pathtype == T_IndexScan);
-
-					index = ((IndexPath *) path)->indexinfo;
-					distinctPrefixKeys = list_length(root->query_uniquekeys);
-
-					/*
-					 * Normally we can think about distinctPrefixKeys as just
-					 * a number of distinct keys. But if lets say we have a
-					 * distinct key a, and the index contains b, a in exactly
-					 * this order. In such situation we need to use position
-					 * of a in the index as distinctPrefixKeys, otherwise skip
-					 * will happen only by the first column.
-					 */
-					foreach(lc, root->query_uniquekeys)
-					{
-						UniqueKey *uniquekey = (UniqueKey *) lfirst(lc);
-						EquivalenceMember *em =
-							lfirst_node(EquivalenceMember,
-										list_head(uniquekey->eq_clause->ec_members));
-						Var *var = (Var *) em->em_expr;
-
-						Assert(i < index->ncolumns);
-
-						for (i = 0; i < index->ncolumns; i++)
-						{
-							if (index->indexkeys[i] == var->varattno)
-							{
-								distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);
-								break;
-							}
-						}
-					}
+					bool 			not_empty_qual = false;
 
 					/*
 					 * XXX: In case of index scan quals evaluation happens
@@ -4900,14 +4862,14 @@ create_distinct_paths(PlannerInfo *root,
 						list_length((List *) parse->jointree->quals) != 0)
 							not_empty_qual = true;
 
-					if (!different_columns_order &&	!not_empty_qual)
+					if (!not_empty_qual)
 					{
-						add_path(distinct_rel, (Path *)
-								 create_skipscan_unique_path(root,
-															 distinct_rel,
-															 path,
-															 distinctPrefixKeys,
-															 numDistinctRows));
+						/*add_path(distinct_rel, (Path *)*/
+								 /*create_skipscan_unique_path(root,*/
+															 /*distinct_rel,*/
+															 /*path,*/
+															 /*distinctPrefixKeys,*/
+															 /*numDistinctRows));*/
 					}
 				}
 			}
