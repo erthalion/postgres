@@ -1030,7 +1030,7 @@ create_index_path(PlannerInfo *root,
 
 	cost_index(pathnode, root, loop_count, partial_path);
 
-	if (uniquekeys != NULL)
+	if (uniquekeys != NULL && enable_indexskipscan && index->amcanskip)
 	{
 		int 		numDistinctRows;
 		int 		distinctPrefixKeys;
@@ -1074,6 +1074,7 @@ create_index_path(PlannerInfo *root,
 											  pathnode->path.rows,
 											  NULL);
 
+		/*pathnode->path.total_cost = pathnode->path.total_cost * (numDistinctRows / pathnode->path.rows) + pathnode->path.startup_cost + 40;*/
 		pathnode->path.total_cost = pathnode->path.startup_cost * numDistinctRows;
 		pathnode->path.rows = numDistinctRows;
 	}

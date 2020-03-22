@@ -4827,7 +4827,8 @@ create_distinct_paths(PlannerInfo *root,
 		{
 			Path	   *path = (Path *) lfirst(lc);
 
-			if (uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
+			if (path->uniquekeys != NULL &&
+				uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
 			{
 				add_path(distinct_rel, path);
 			}

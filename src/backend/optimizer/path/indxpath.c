@@ -1038,9 +1038,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	if (index_clauses != NIL || useful_pathkeys != NIL || useful_predicate ||
 		index_only_scan)
 	{
-		if (has_useful_uniquekeys(root) &&
-			enable_indexskipscan &&
-			index->amcanskip)
+		if (has_useful_uniquekeys(root))
 			useful_uniquekeys = get_uniquekeys_for_index(root, useful_pathkeys);
 
 		ipath = create_index_path(root, index,
