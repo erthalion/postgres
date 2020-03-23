@@ -56,14 +56,6 @@ uniquekeys_contained_in(List *keys1, List *keys2)
 	ListCell   *key1,
 			   *key2;
 
-	/*
-	 * Fall out quickly if we are passed two identical lists.  This mostly
-	 * catches the case where both are NIL, but that's common enough to
-	 * warrant the test.
-	 */
-	if (keys1 == keys2)
-		return true;
-
 	foreach(key2, keys2)
 	{
 		bool found = false;

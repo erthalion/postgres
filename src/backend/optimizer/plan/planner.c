@@ -4881,11 +4881,8 @@ create_distinct_paths(PlannerInfo *root,
 		{
 			Path	   *path = (Path *) lfirst(lc);
 
-			if (path->uniquekeys != NULL &&
-				uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
-			{
+			if (uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
 				add_path(distinct_rel, path);
-			}
 		}
 
 		/* For explicit-sort case, always use the more rigorous clause */

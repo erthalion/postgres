@@ -885,6 +885,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	bool		pathkeys_possibly_useful;
 	bool		index_is_ordered;
 	bool		index_only_scan;
+	bool		not_empty_qual;
 	int			indexcol;
 
 	/*
@@ -1034,6 +1035,10 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	index_only_scan = (scantype != ST_BITMAPSCAN &&
 					   check_index_only(rel, index));
 
+	not_empty_qual = (root->parse->jointree != NULL &&
+					  root->parse->jointree->quals != NULL &&
+					  list_length((List *) root->parse->jointree->quals) != 0);
+
 	/*
 	 * 4. Generate an indexscan path if there are relevant restriction clauses
 	 * in the current clauses, OR the index ordering is potentially useful for
@@ -1061,8 +1066,13 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 								  false);
 		result = lappend(result, ipath);
 
-		if (useful_uniquekeys != NULL && enable_indexskipscan && index->amcanskip)
-			result = lappend(result, create_skipscan_unique_path(root, index, (Path *) ipath));
+		if (useful_uniquekeys != NULL &&
+			enable_indexskipscan &&
+			index->amcanskip)
+		{
+			if (index_only_scan || !not_empty_qual)
+				result = lappend(result, create_skipscan_unique_path(root, index, (Path *) ipath));
+		}
 
 		/*
 		 * If appropriate, consider parallel index scan.  We don't allow
@@ -1124,8 +1134,13 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 									  false);
 			result = lappend(result, ipath);
 
-			if (useful_uniquekeys != NULL && enable_indexskipscan && index->amcanskip)
-				result = lappend(result, create_skipscan_unique_path(root, index, (Path *) ipath));
+			if (useful_uniquekeys != NULL &&
+				enable_indexskipscan &&
+				index->amcanskip)
+			{
+				if (index_only_scan || !not_empty_qual)
+					result = lappend(result, create_skipscan_unique_path(root, index, (Path *) ipath));
+			}
 
 
 			/* If appropriate, consider parallel index scan */
