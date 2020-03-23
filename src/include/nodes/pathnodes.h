@@ -661,6 +661,7 @@ typedef struct RelOptInfo
 	List	   *pathlist;		/* Path structures */
 	List	   *ppilist;		/* ParamPathInfos used in pathlist */
 	List	   *partial_pathlist;	/* partial Paths */
+	List	   *unique_pathlist;	/* unique Paths */
 	struct Path *cheapest_startup_path;
 	struct Path *cheapest_total_path;
 	struct Path *cheapest_unique_path;

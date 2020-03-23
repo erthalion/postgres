@@ -791,13 +791,18 @@ get_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	{
 		IndexPath  *ipath = (IndexPath *) lfirst(lc);
 
-		if (index->amhasgettuple)
-			add_path(rel, (Path *) ipath);
+		if (ipath->indexskipprefix != 0)
+			add_unique_path(rel, (Path *) ipath);
+		else
+		{
+			if (index->amhasgettuple)
+				add_path(rel, (Path *) ipath);
 
-		if (index->amhasgetbitmap &&
-			(ipath->path.pathkeys == NIL ||
-			 ipath->indexselectivity < 1.0))
-			*bitindexpaths = lappend(*bitindexpaths, ipath);
+			if (index->amhasgetbitmap &&
+				(ipath->path.pathkeys == NIL ||
+				 ipath->indexselectivity < 1.0))
+				*bitindexpaths = lappend(*bitindexpaths, ipath);
+		}
 	}
 
 	/*
@@ -1056,6 +1061,9 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 								  false);
 		result = lappend(result, ipath);
 
+		if (useful_uniquekeys != NULL && enable_indexskipscan && index->amcanskip)
+			result = lappend(result, create_skipscan_unique_path(root, index, (Path *) ipath));
+
 		/*
 		 * If appropriate, consider parallel index scan.  We don't allow
 		 * parallel index scan for bitmap index scans.
@@ -1100,9 +1108,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 													index_pathkeys);
 		if (useful_pathkeys != NIL)
 		{
-			if (has_useful_uniquekeys(root) &&
-				enable_indexskipscan &&
-				index->amcanskip)
+			if (has_useful_uniquekeys(root))
 				useful_uniquekeys = get_uniquekeys_for_index(root, useful_pathkeys);
 
 			ipath = create_index_path(root, index,
@@ -1117,6 +1123,10 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 									  loop_count,
 									  false);
 			result = lappend(result, ipath);
+
+			if (useful_uniquekeys != NULL && enable_indexskipscan && index->amcanskip)
+				result = lappend(result, create_skipscan_unique_path(root, index, (Path *) ipath));
+
 
 			/* If appropriate, consider parallel index scan */
 			if (index->amcanparallel &&

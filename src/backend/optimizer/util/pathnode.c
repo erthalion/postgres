@@ -915,6 +915,210 @@ add_partial_path_precheck(RelOptInfo *parent_rel, Cost total_cost,
 	return true;
 }
 
+void
+add_unique_path(RelOptInfo *parent_rel, Path *new_path)
+{
+	bool		accept_new = true;	/* unless we find a superior old path */
+	int			insert_at = 0;	/* where to insert new item */
+	List	   *new_path_pathkeys;
+	ListCell   *p1;
+
+	/*
+	 * This is a convenient place to check for query cancel --- no part of the
+	 * planner goes very long without calling add_path().
+	 */
+	CHECK_FOR_INTERRUPTS();
+
+	/* Pretend parameterized paths have no pathkeys, per comment above */
+	new_path_pathkeys = new_path->param_info ? NIL : new_path->pathkeys;
+
+	/*
+	 * Loop to check proposed new path against old paths.  Note it is possible
+	 * for more than one old path to be tossed out because new_path dominates
+	 * it.
+	 */
+	foreach(p1, parent_rel->unique_pathlist)
+	{
+		Path	   *old_path = (Path *) lfirst(p1);
+		bool		remove_old = false; /* unless new proves superior */
+		PathCostComparison costcmp;
+		PathKeysComparison keyscmp;
+		BMS_Comparison outercmp;
+
+		/*
+		 * Do a fuzzy cost comparison with standard fuzziness limit.
+		 */
+		costcmp = compare_path_costs_fuzzily(new_path, old_path,
+											 STD_FUZZ_FACTOR);
+
+		/*
+		 * If the two paths compare differently for startup and total cost,
+		 * then we want to keep both, and we can skip comparing pathkeys and
+		 * required_outer rels.  If they compare the same, proceed with the
+		 * other comparisons.  Row count is checked last.  (We make the tests
+		 * in this order because the cost comparison is most likely to turn
+		 * out "different", and the pathkeys comparison next most likely.  As
+		 * explained above, row count very seldom makes a difference, so even
+		 * though it's cheap to compare there's not much point in checking it
+		 * earlier.)
+		 */
+		if (costcmp != COSTS_DIFFERENT)
+		{
+			/* Similarly check to see if either dominates on pathkeys */
+			List	   *old_path_pathkeys;
+
+			old_path_pathkeys = old_path->param_info ? NIL : old_path->pathkeys;
+			keyscmp = compare_pathkeys(new_path_pathkeys,
+									   old_path_pathkeys);
+			if (keyscmp != PATHKEYS_DIFFERENT)
+			{
+				switch (costcmp)
+				{
+					case COSTS_EQUAL:
+						outercmp = bms_subset_compare(PATH_REQ_OUTER(new_path),
+													  PATH_REQ_OUTER(old_path));
+						if (keyscmp == PATHKEYS_BETTER1)
+						{
+							if ((outercmp == BMS_EQUAL ||
+								 outercmp == BMS_SUBSET1) &&
+								new_path->rows <= old_path->rows &&
+								new_path->parallel_safe >= old_path->parallel_safe)
+								remove_old = true;	/* new dominates old */
+						}
+						else if (keyscmp == PATHKEYS_BETTER2)
+						{
+							if ((outercmp == BMS_EQUAL ||
+								 outercmp == BMS_SUBSET2) &&
+								new_path->rows >= old_path->rows &&
+								new_path->parallel_safe <= old_path->parallel_safe)
+								accept_new = false; /* old dominates new */
+						}
+						else	/* keyscmp == PATHKEYS_EQUAL */
+						{
+							if (outercmp == BMS_EQUAL)
+							{
+								/*
+								 * Same pathkeys and outer rels, and fuzzily
+								 * the same cost, so keep just one; to decide
+								 * which, first check parallel-safety, then
+								 * rows, then do a fuzzy cost comparison with
+								 * very small fuzz limit.  (We used to do an
+								 * exact cost comparison, but that results in
+								 * annoying platform-specific plan variations
+								 * due to roundoff in the cost estimates.)	If
+								 * things are still tied, arbitrarily keep
+								 * only the old path.  Notice that we will
+								 * keep only the old path even if the
+								 * less-fuzzy comparison decides the startup
+								 * and total costs compare differently.
+								 */
+								if (new_path->parallel_safe >
+									old_path->parallel_safe)
+									remove_old = true;	/* new dominates old */
+								else if (new_path->parallel_safe <
+										 old_path->parallel_safe)
+									accept_new = false; /* old dominates new */
+								else if (new_path->rows < old_path->rows)
+									remove_old = true;	/* new dominates old */
+								else if (new_path->rows > old_path->rows)
+									accept_new = false; /* old dominates new */
+								else if (compare_path_costs_fuzzily(new_path,
+																	old_path,
+																	1.0000000001) == COSTS_BETTER1)
+									remove_old = true;	/* new dominates old */
+								else
+									accept_new = false; /* old equals or
+														 * dominates new */
+							}
+							else if (outercmp == BMS_SUBSET1 &&
+									 new_path->rows <= old_path->rows &&
+									 new_path->parallel_safe >= old_path->parallel_safe)
+								remove_old = true;	/* new dominates old */
+							else if (outercmp == BMS_SUBSET2 &&
+									 new_path->rows >= old_path->rows &&
+									 new_path->parallel_safe <= old_path->parallel_safe)
+								accept_new = false; /* old dominates new */
+							/* else different parameterizations, keep both */
+						}
+						break;
+					case COSTS_BETTER1:
+						if (keyscmp != PATHKEYS_BETTER2)
+						{
+							outercmp = bms_subset_compare(PATH_REQ_OUTER(new_path),
+														  PATH_REQ_OUTER(old_path));
+							if ((outercmp == BMS_EQUAL ||
+								 outercmp == BMS_SUBSET1) &&
+								new_path->rows <= old_path->rows &&
+								new_path->parallel_safe >= old_path->parallel_safe)
+								remove_old = true;	/* new dominates old */
+						}
+						break;
+					case COSTS_BETTER2:
+						if (keyscmp != PATHKEYS_BETTER1)
+						{
+							outercmp = bms_subset_compare(PATH_REQ_OUTER(new_path),
+														  PATH_REQ_OUTER(old_path));
+							if ((outercmp == BMS_EQUAL ||
+								 outercmp == BMS_SUBSET2) &&
+								new_path->rows >= old_path->rows &&
+								new_path->parallel_safe <= old_path->parallel_safe)
+								accept_new = false; /* old dominates new */
+						}
+						break;
+					case COSTS_DIFFERENT:
+
+						/*
+						 * can't get here, but keep this case to keep compiler
+						 * quiet
+						 */
+						break;
+				}
+			}
+		}
+
+		/*
+		 * Remove current element from pathlist if dominated by new.
+		 */
+		if (remove_old)
+		{
+			parent_rel->unique_pathlist =
+				foreach_delete_current(parent_rel->unique_pathlist, p1);
+
+			/*
+			 * Delete the data pointed-to by the deleted cell, if possible
+			 */
+			if (!IsA(old_path, IndexPath))
+				pfree(old_path);
+		}
+		else
+		{
+			/* new belongs after this old path if it has cost >= old's */
+			if (new_path->total_cost >= old_path->total_cost)
+				insert_at = foreach_current_index(p1) + 1;
+		}
+
+		/*
+		 * If we found an old path that dominates new_path, we can quit
+		 * scanning the pathlist; we will not add new_path, and we assume
+		 * new_path cannot dominate any other elements of the pathlist.
+		 */
+		if (!accept_new)
+			break;
+	}
+
+	if (accept_new)
+	{
+		/* Accept the new path: insert it at proper place in pathlist */
+		parent_rel->unique_pathlist =
+			list_insert_nth(parent_rel->unique_pathlist, insert_at, new_path);
+	}
+	else
+	{
+		/* Reject and recycle the new path */
+		if (!IsA(new_path, IndexPath))
+			pfree(new_path);
+	}
+}
 
 /*****************************************************************************
  *		PATH NODE CREATION ROUTINES
@@ -1021,6 +1225,7 @@ create_index_path(PlannerInfo *root,
 	pathnode->path.parallel_safe = rel->consider_parallel;
 	pathnode->path.parallel_workers = 0;
 	pathnode->path.pathkeys = pathkeys;
+	pathnode->path.uniquekeys = uniquekeys;
 
 	pathnode->indexinfo = index;
 	pathnode->indexclauses = indexclauses;
@@ -1030,15 +1235,15 @@ create_index_path(PlannerInfo *root,
 
 	cost_index(pathnode, root, loop_count, partial_path);
 
-	if (uniquekeys != NULL && enable_indexskipscan && index->amcanskip)
-	{
-		int 		numDistinctRows;
-		int 		distinctPrefixKeys;
-		ListCell 	*lc;
-		List 	   	*exprs = NIL;
+	/*if (uniquekeys != NULL && enable_indexskipscan && index->amcanskip)*/
+	/*{*/
+		/*int 		numDistinctRows;*/
+		/*int 		distinctPrefixKeys;*/
+		/*ListCell 	*lc;*/
+		/*List 	   	*exprs = NIL;*/
 
-		pathnode->path.uniquekeys = uniquekeys;
-		distinctPrefixKeys = list_length(root->query_uniquekeys);
+		/*[>pathnode->path.uniquekeys = uniquekeys;<]*/
+		/*distinctPrefixKeys = list_length(root->query_uniquekeys);*/
 
 		/*
 		 * Normally we can think about distinctPrefixKeys as just
@@ -1048,36 +1253,36 @@ create_index_path(PlannerInfo *root,
 		 * of a in the index as distinctPrefixKeys, otherwise skip
 		 * will happen only by the first column.
 		 */
-		foreach(lc, root->query_uniquekeys)
-		{
-			UniqueKey *uniquekey = (UniqueKey *) lfirst(lc);
-			EquivalenceMember *em =
-				lfirst_node(EquivalenceMember,
-							list_head(uniquekey->eq_clause->ec_members));
-			Var *var = (Var *) em->em_expr;
+		/*foreach(lc, root->query_uniquekeys)*/
+		/*{*/
+			/*UniqueKey *uniquekey = (UniqueKey *) lfirst(lc);*/
+			/*EquivalenceMember *em =*/
+				/*lfirst_node(EquivalenceMember,*/
+							/*list_head(uniquekey->eq_clause->ec_members));*/
+			/*Var *var = (Var *) em->em_expr;*/
 
-			exprs = lappend(exprs, em->em_expr);
+			/*exprs = lappend(exprs, em->em_expr);*/
 
-			for (int i = 0; i < index->ncolumns; i++)
-			{
-				if (index->indexkeys[i] == var->varattno)
-				{
-					distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);
-					break;
-				}
-			}
-		}
+			/*for (int i = 0; i < index->ncolumns; i++)*/
+			/*{*/
+				/*if (index->indexkeys[i] == var->varattno)*/
+				/*{*/
+					/*distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);*/
+					/*break;*/
+				/*}*/
+			/*}*/
+		/*}*/
 
-		pathnode->indexskipprefix = distinctPrefixKeys;
+		/*pathnode->indexskipprefix = distinctPrefixKeys;*/
 
-		numDistinctRows = estimate_num_groups(root, exprs,
-											  pathnode->path.rows,
-											  NULL);
+		/*numDistinctRows = estimate_num_groups(root, exprs,*/
+											  /*pathnode->path.rows,*/
+											  /*NULL);*/
 
-		/*pathnode->path.total_cost = pathnode->path.total_cost * (numDistinctRows / pathnode->path.rows) + pathnode->path.startup_cost + 40;*/
-		pathnode->path.total_cost = pathnode->path.startup_cost * numDistinctRows;
-		pathnode->path.rows = numDistinctRows;
-	}
+		/*[>pathnode->path.total_cost = pathnode->path.total_cost * (numDistinctRows / pathnode->path.rows) + pathnode->path.startup_cost + 40;<]*/
+		/*pathnode->path.total_cost = pathnode->path.startup_cost * numDistinctRows;*/
+		/*pathnode->path.rows = numDistinctRows;*/
+	/*}*/
 
 	return pathnode;
 }
@@ -2973,32 +3178,61 @@ create_upper_unique_path(PlannerInfo *root,
  * The input path must be an IndexPath for an index that supports amskip.
  */
 IndexPath *
-create_skipscan_unique_path(PlannerInfo *root,
-							RelOptInfo *rel,
-							Path *basepath,
-							int distinctPrefixKeys,
-							double numGroups)
+create_skipscan_unique_path(PlannerInfo *root, IndexOptInfo *index,
+							Path *basepath)
 {
-	IndexPath *pathnode = makeNode(IndexPath);
+	IndexPath 	*pathnode = makeNode(IndexPath);
+	int 		numDistinctRows;
+	int 		distinctPrefixKeys;
+	ListCell 	*lc;
+	List 	   	*exprs = NIL;
+
+
+	distinctPrefixKeys = list_length(root->query_uniquekeys);
 
 	Assert(IsA(basepath, IndexPath));
 
 	/* We don't want to modify basepath, so make a copy. */
 	memcpy(pathnode, basepath, sizeof(IndexPath));
 
-	/* The size of the prefix we'll use for skipping. */
-	Assert(pathnode->indexinfo->amcanskip);
+	/*
+	 * Normally we can think about distinctPrefixKeys as just
+	 * a number of distinct keys. But if lets say we have a
+	 * distinct key a, and the index contains b, a in exactly
+	 * this order. In such situation we need to use position
+	 * of a in the index as distinctPrefixKeys, otherwise skip
+	 * will happen only by the first column.
+	 */
+	foreach(lc, root->query_uniquekeys)
+	{
+		UniqueKey *uniquekey = (UniqueKey *) lfirst(lc);
+		EquivalenceMember *em =
+			lfirst_node(EquivalenceMember,
+						list_head(uniquekey->eq_clause->ec_members));
+		Var *var = (Var *) em->em_expr;
+
+		exprs = lappend(exprs, em->em_expr);
+
+		for (int i = 0; i < index->ncolumns; i++)
+		{
+			if (index->indexkeys[i] == var->varattno)
+			{
+				distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);
+				break;
+			}
+		}
+	}
+
 	Assert(distinctPrefixKeys > 0);
 	pathnode->indexskipprefix = distinctPrefixKeys;
 
-	/*
-	 * The cost to skip to each distinct value should be roughly the same as
-	 * the cost of finding the first key times the number of distinct values
-	 * we expect to find.
-	 */
-	pathnode->path.startup_cost = basepath->startup_cost;
-	pathnode->path.total_cost = basepath->startup_cost * numGroups;
-	pathnode->path.rows = numGroups;
+	numDistinctRows = estimate_num_groups(root, exprs,
+										  pathnode->path.rows,
+										  NULL);
+
+	/*pathnode->path.total_cost = pathnode->path.total_cost * (numDistinctRows / pathnode->path.rows) + pathnode->path.startup_cost + 40;*/
+	pathnode->path.total_cost = pathnode->path.startup_cost * numDistinctRows;
+	pathnode->path.rows = numDistinctRows;
 
 	return pathnode;
 }

@@ -34,6 +34,7 @@ extern void add_partial_path(RelOptInfo *parent_rel, Path *new_path);
 extern bool add_partial_path_precheck(RelOptInfo *parent_rel,
 									  Cost total_cost, List *pathkeys);
 
+extern void add_unique_path(RelOptInfo *parent_rel, Path *new_path);
 extern Path *create_seqscan_path(PlannerInfo *root, RelOptInfo *rel,
 								 Relids required_outer, int parallel_workers);
 extern Path *create_samplescan_path(PlannerInfo *root, RelOptInfo *rel,
@@ -202,10 +203,8 @@ extern UpperUniquePath *create_upper_unique_path(PlannerInfo *root,
 												 int numCols,
 												 double numGroups);
 extern IndexPath *create_skipscan_unique_path(PlannerInfo *root,
-											  RelOptInfo *rel,
-											  Path *subpath,
-											  int numCols,
-											  double numGroups);
+											  IndexOptInfo *index,
+											  Path *subpath);
 extern AggPath *create_agg_path(PlannerInfo *root,
 								RelOptInfo *rel,
 								Path *subpath,

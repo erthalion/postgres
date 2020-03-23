@@ -4827,12 +4827,13 @@ create_distinct_paths(PlannerInfo *root,
 		{
 			Path	   *path = (Path *) lfirst(lc);
 
-			if (path->uniquekeys != NULL &&
-				uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
-			{
-				add_path(distinct_rel, path);
-			}
-			else if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
+			/*if (path->uniquekeys != NULL &&*/
+				/*uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))*/
+			/*{*/
+				/*add_path(distinct_rel, path);*/
+			/*}*/
+			/*else if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))*/
+			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
 			{
 				add_path(distinct_rel, (Path *)
 						 create_upper_unique_path(root, distinct_rel,
@@ -4873,6 +4874,17 @@ create_distinct_paths(PlannerInfo *root,
 															 /*numDistinctRows));*/
 					}
 				}
+			}
+		}
+
+		foreach(lc, input_rel->unique_pathlist)
+		{
+			Path	   *path = (Path *) lfirst(lc);
+
+			if (path->uniquekeys != NULL &&
+				uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))
+			{
+				add_path(distinct_rel, path);
 			}
 		}
 
@@ -7142,6 +7154,26 @@ apply_scanjoin_target_to_paths(PlannerInfo *root,
 
 	/* Likewise adjust the targets for any partial paths. */
 	foreach(lc, rel->partial_pathlist)
+	{
+		Path	   *subpath = (Path *) lfirst(lc);
+
+		/* Shouldn't have any parameterized paths anymore */
+		Assert(subpath->param_info == NULL);
+
+		if (tlist_same_exprs)
+			subpath->pathtarget->sortgrouprefs =
+				scanjoin_target->sortgrouprefs;
+		else
+		{
+			Path	   *newpath;
+
+			newpath = (Path *) create_projection_path(root, rel, subpath,
+													  scanjoin_target);
+			lfirst(lc) = newpath;
+		}
+	}
+
+	foreach(lc, rel->unique_pathlist)
 	{
 		Path	   *subpath = (Path *) lfirst(lc);
 
