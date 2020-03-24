@@ -4827,54 +4827,12 @@ create_distinct_paths(PlannerInfo *root,
 		{
 			Path	   *path = (Path *) lfirst(lc);
 
-			/*if (path->uniquekeys != NULL &&*/
-				/*uniquekeys_contained_in(needed_pathkeys, path->uniquekeys))*/
-			/*{*/
-				/*add_path(distinct_rel, path);*/
-			/*}*/
-			/*else if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))*/
 			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
-			{
 				add_path(distinct_rel, (Path *)
 						 create_upper_unique_path(root, distinct_rel,
 												  path,
 												  list_length(root->distinct_pathkeys),
 												  numDistinctRows));
-
-				/* Consider index skip scan as well */
-				if (path->uniquekeys != NULL)
-				{
-					bool 			not_empty_qual = false;
-
-					/*
-					 * XXX: In case of index scan quals evaluation happens
-					 * after ExecScanFetch, which means skip results could be
-					 * fitered out. Consider the following query:
-					 *
-					 * 		select distinct (a, b) a, b, c from t where  c < 100;
-					 *
-					 * Skip scan returns one tuple for one distinct set of (a,
-					 * b) with arbitrary one of c, so if the choosed c does
-					 * not match the qual and there is any c that matches the
-					 * qual, we miss that tuple.
-					 */
-					if (path->pathtype == T_IndexScan &&
-						parse->jointree != NULL &&
-						parse->jointree->quals != NULL &&
-						list_length((List *) parse->jointree->quals) != 0)
-							not_empty_qual = true;
-
-					if (!not_empty_qual)
-					{
-						/*add_path(distinct_rel, (Path *)*/
-								 /*create_skipscan_unique_path(root,*/
-															 /*distinct_rel,*/
-															 /*path,*/
-															 /*distinctPrefixKeys,*/
-															 /*numDistinctRows));*/
-					}
-				}
-			}
 		}
 
 		foreach(lc, input_rel->unique_pathlist)
