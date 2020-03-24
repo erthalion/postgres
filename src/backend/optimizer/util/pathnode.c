@@ -361,9 +361,9 @@ set_cheapest(RelOptInfo *parent_rel)
 }
 
 /*
- * add_path
+ * add_path_to
  *	  Consider a potential implementation path for the specified parent rel,
- *	  and add it to the rel's pathlist if it is worthy of consideration.
+ *	  and add it to the specified pathlist if it is worthy of consideration.
  *	  A path is worthy if it has a better sort order (better pathkeys) or
  *	  cheaper cost (on either dimension), or generates fewer rows, than any
  *	  existing path that has the same or superset parameterization rels.
@@ -416,10 +416,10 @@ set_cheapest(RelOptInfo *parent_rel)
  * 'parent_rel' is the relation entry to which the path corresponds.
  * 'new_path' is a potential path for parent_rel.
  *
- * Returns nothing, but modifies parent_rel->pathlist.
+ * Returns modified pathlist.
  */
-void
-add_path(RelOptInfo *parent_rel, Path *new_path)
+static List *
+add_path_to(RelOptInfo *parent_rel, List *pathlist, Path *new_path)
 {
 	bool		accept_new = true;	/* unless we find a superior old path */
 	int			insert_at = 0;	/* where to insert new item */
@@ -440,7 +440,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 	 * for more than one old path to be tossed out because new_path dominates
 	 * it.
 	 */
-	foreach(p1, parent_rel->pathlist)
+	foreach(p1, pathlist)
 	{
 		Path	   *old_path = (Path *) lfirst(p1);
 		bool		remove_old = false; /* unless new proves superior */
@@ -584,8 +584,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 		 */
 		if (remove_old)
 		{
-			parent_rel->pathlist = foreach_delete_current(parent_rel->pathlist,
-														  p1);
+			pathlist = foreach_delete_current(pathlist, p1);
 
 			/*
 			 * Delete the data pointed-to by the deleted cell, if possible
@@ -612,8 +611,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 	if (accept_new)
 	{
 		/* Accept the new path: insert it at proper place in pathlist */
-		parent_rel->pathlist =
-			list_insert_nth(parent_rel->pathlist, insert_at, new_path);
+		pathlist = list_insert_nth(pathlist, insert_at, new_path);
 	}
 	else
 	{
@@ -621,6 +619,15 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
 		if (!IsA(new_path, IndexPath))
 			pfree(new_path);
 	}
+
+	return pathlist;
+}
+
+void
+add_path(RelOptInfo *parent_rel, Path *new_path)
+{
+	parent_rel->pathlist = add_path_to(parent_rel,
+									   parent_rel->pathlist, new_path);
 }
 
 /*
@@ -915,6 +922,13 @@ add_partial_path_precheck(RelOptInfo *parent_rel, Cost total_cost,
 	return true;
 }
 
+void
+add_unique_path(RelOptInfo *parent_rel, Path *new_path)
+{
+	parent_rel->unique_pathlist = add_path_to(parent_rel,
+											  parent_rel->unique_pathlist,
+											  new_path);
+}
 
 /*****************************************************************************
  *		PATH NODE CREATION ROUTINES
@@ -940,6 +954,7 @@ create_seqscan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = parallel_workers;
 	pathnode->pathkeys = NIL;	/* seqscan has unordered result */
+	pathnode->uniquekeys = NIL;
 
 	cost_seqscan(pathnode, root, rel, pathnode->param_info);
 
@@ -964,6 +979,7 @@ create_samplescan_path(PlannerInfo *root, RelOptInfo *rel, Relids required_outer
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* samplescan has unordered result */
+	pathnode->uniquekeys = NIL;
 
 	cost_samplescan(pathnode, root, rel, pathnode->param_info);
 
@@ -1000,6 +1016,7 @@ create_index_path(PlannerInfo *root,
 				  List *indexorderbys,
 				  List *indexorderbycols,
 				  List *pathkeys,
+				  List *uniquekeys,
 				  ScanDirection indexscandir,
 				  bool indexonly,
 				  Relids required_outer,
@@ -1018,6 +1035,7 @@ create_index_path(PlannerInfo *root,
 	pathnode->path.parallel_safe = rel->consider_parallel;
 	pathnode->path.parallel_workers = 0;
 	pathnode->path.pathkeys = pathkeys;
+	pathnode->path.uniquekeys = uniquekeys;
 
 	pathnode->indexinfo = index;
 	pathnode->indexclauses = indexclauses;
@@ -1061,6 +1079,7 @@ create_bitmap_heap_path(PlannerInfo *root,
 	pathnode->path.parallel_safe = rel->consider_parallel;
 	pathnode->path.parallel_workers = parallel_degree;
 	pathnode->path.pathkeys = NIL;	/* always unordered */
+	pathnode->path.uniquekeys = NIL;
 
 	pathnode->bitmapqual = bitmapqual;
 
@@ -1922,6 +1941,7 @@ create_functionscan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = pathkeys;
+	pathnode->uniquekeys = NIL;
 
 	cost_functionscan(pathnode, root, rel, pathnode->param_info);
 
@@ -1948,6 +1968,7 @@ create_tablefuncscan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* result is always unordered */
+	pathnode->uniquekeys = NIL;
 
 	cost_tablefuncscan(pathnode, root, rel, pathnode->param_info);
 
@@ -1974,6 +1995,7 @@ create_valuesscan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* result is always unordered */
+	pathnode->uniquekeys = NIL;
 
 	cost_valuesscan(pathnode, root, rel, pathnode->param_info);
 
@@ -1999,6 +2021,7 @@ create_ctescan_path(PlannerInfo *root, RelOptInfo *rel, Relids required_outer)
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* XXX for now, result is always unordered */
+	pathnode->uniquekeys = NIL;
 
 	cost_ctescan(pathnode, root, rel, pathnode->param_info);
 
@@ -2025,6 +2048,7 @@ create_namedtuplestorescan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* result is always unordered */
+	pathnode->uniquekeys = NIL;
 
 	cost_namedtuplestorescan(pathnode, root, rel, pathnode->param_info);
 
@@ -2051,6 +2075,7 @@ create_resultscan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* result is always unordered */
+	pathnode->uniquekeys = NIL;
 
 	cost_resultscan(pathnode, root, rel, pathnode->param_info);
 
@@ -2077,6 +2102,7 @@ create_worktablescan_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->parallel_safe = rel->consider_parallel;
 	pathnode->parallel_workers = 0;
 	pathnode->pathkeys = NIL;	/* result is always unordered */
+	pathnode->uniquekeys = NIL;
 
 	/* Cost is the same as for a regular CTE scan */
 	cost_ctescan(pathnode, root, rel, pathnode->param_info);

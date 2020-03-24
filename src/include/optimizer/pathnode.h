@@ -34,6 +34,7 @@ extern void add_partial_path(RelOptInfo *parent_rel, Path *new_path);
 extern bool add_partial_path_precheck(RelOptInfo *parent_rel,
 									  Cost total_cost, List *pathkeys);
 
+extern void add_unique_path(RelOptInfo *parent_rel, Path *new_path);
 extern Path *create_seqscan_path(PlannerInfo *root, RelOptInfo *rel,
 								 Relids required_outer, int parallel_workers);
 extern Path *create_samplescan_path(PlannerInfo *root, RelOptInfo *rel,
@@ -44,6 +45,7 @@ extern IndexPath *create_index_path(PlannerInfo *root,
 									List *indexorderbys,
 									List *indexorderbycols,
 									List *pathkeys,
+									List *uniquekeys,
 									ScanDirection indexscandir,
 									bool indexonly,
 									Relids required_outer,
