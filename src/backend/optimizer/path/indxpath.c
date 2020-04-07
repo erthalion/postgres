@@ -890,7 +890,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	bool		pathkeys_possibly_useful;
 	bool		index_is_ordered;
 	bool		index_only_scan;
-	bool		not_empty_qual;
+	bool		not_empty_qual = false;
 	bool		can_skip;
 	int			indexcol;
 
@@ -1046,11 +1046,50 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 
 	/*
 	 * In case of index scan (not index-only scan) skip scan is not supported
-	 * when there are qual conditions present. Check if they are.
+	 * when there are qual conditions, which are not covered by index.
 	 */
-	not_empty_qual = (root->parse->jointree != NULL &&
-					  root->parse->jointree->quals != NULL &&
-					  list_length((List *) root->parse->jointree->quals) != 0);
+	if (root->parse->jointree != NULL)
+	{
+		ListCell *lc;
+
+		foreach(lc, (List *)root->parse->jointree->quals)
+		{
+			Node *expr, *qual = (Node *) lfirst(lc);
+			Var *var;
+			bool found = false;
+
+			if (!is_opclause(qual))
+			{
+				not_empty_qual = true;
+				break;
+			}
+
+			expr = get_leftop(qual);
+
+			if (!IsA(expr, Var))
+			{
+				not_empty_qual = true;
+				break;
+			}
+
+			var = (Var *) expr;
+
+			for (int i = 0; i < index->ncolumns; i++)
+			{
+				if (index->indexkeys[i] == var->varattno)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+			{
+				not_empty_qual = true;
+				break;
+			}
+		}
+	}
 
 	/*
 	 * 4. Generate an indexscan path if there are relevant restriction clauses
@@ -1080,8 +1119,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 		result = lappend(result, ipath);
 
 		/* Consider index skip scan as well */
-		if (useful_uniquekeys != NULL && can_skip &&
-			(index_only_scan || !not_empty_qual))
+		if (useful_uniquekeys != NULL && can_skip && !not_empty_qual)
 			result = lappend(result,
 							 create_skipscan_unique_path(root, index,
 								 						 (Path *) ipath));
@@ -1147,8 +1185,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 			result = lappend(result, ipath);
 
 			/* Consider index skip scan as well */
-			if (useful_uniquekeys != NULL && can_skip &&
-				(index_only_scan || !not_empty_qual))
+			if (useful_uniquekeys != NULL && can_skip && !not_empty_qual)
 				result = lappend(result,
 								 create_skipscan_unique_path(root, index,
 															 (Path *) ipath));
