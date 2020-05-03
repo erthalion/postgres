@@ -730,6 +730,7 @@ typedef struct RelOptInfo
 	QualCost	baserestrictcost;	/* cost of evaluating the above */
 	Index		baserestrict_min_security;	/* min security_level found in
 											 * baserestrictinfo */
+	List	   *uniquekeys;		/* List of UniqueKey */
 	List	   *joininfo;		/* RestrictInfo structures for join clauses
 								 * involving this rel */
 	bool		has_eclass_joins;	/* T means joininfo is incomplete */
@@ -1046,6 +1047,31 @@ typedef struct PathKey
 	bool		pk_nulls_first; /* do NULLs come before normal values? */
 } PathKey;
 
+
+/*
+ * UniqueKey
+ *
+ * Represents the unique properties held by a RelOptInfo.
+ *
+ * exprs is a list of exprs which is unique on current RelOptInfo.
+ * multi_nullvals: true means multi null values may exists in these exprs, so the
+ * uniqueness is not guaranteed in this case. This field is necessary for
+ * remove_useless_join & reduce_unique_semijoins where we don't mind these
+ * duplicated NULL values. It is set to true for 2 cases. One is a unique key
+ * from a unique index but the related column is nullable. The other one is for
+ * outer join. see populate_joinrel_uniquekeys for detail.
+ * onerow means the related relation return 1 row only. Like filter with unique
+ * index, aggregate without group node, join 2 1-row relations. An optimization
+ * is if the onerow is set to true, we will set not record every expr as a UniqueKey,
+ * we store exprs as a NIL instead.
+ */
+typedef struct UniqueKey
+{
+	NodeTag		type;
+	List	   *exprs;
+	bool		multi_nullvals;
+	bool		onerow;
+} UniqueKey;
 
 /*
  * PathTarget

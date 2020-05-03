@@ -786,6 +786,9 @@ set_plain_rel_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 
 	/* Consider TID scans */
 	create_tidscan_paths(root, rel);
+
+	/* Set UniqueKeys for this relation */
+	populate_baserel_uniquekeys(root, rel, rel->indexlist);
 }
 
 /*
@@ -1276,6 +1279,8 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 
 	/* Add paths to the append relation. */
 	add_paths_to_append_rel(root, rel, live_childrels);
+	if (IS_PARTITIONED_REL(rel))
+		populate_partitionedrel_uniquekeys(root, rel, live_childrels);
 }
 
 
@@ -2348,6 +2353,8 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 				 create_subqueryscan_path(root, rel, subpath,
 										  pathkeys, required_outer));
 	}
+
+	convert_subquery_uniquekeys(root, rel, sub_final_rel);
 
 	/* If outer rel allows parallelism, do same for partial paths. */
 	if (rel->consider_parallel && bms_is_empty(required_outer))

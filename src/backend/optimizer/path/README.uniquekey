@@ -1,0 +1,71 @@
+1. What is UniqueKey?
+We can think UniqueKey is a set of exprs for a RelOptInfo, which we are insure
+that doesn't yields same result among all the rows. The simplest UniqueKey
+format is primary key.
+
+However we define the UnqiueKey as below.
+
+typedef struct UniqueKey
+{
+	NodeTag	type;
+	List	*exprs;
+	bool	multi_nullvals;
+	bool	onerow;
+} UniqueKey;
+
+mutli_nuvals is used to track if the exprs allows multi nullvals. For a unique
+index without its column marked as not null, it allows mulit_nullvals.
+
+onerow is also a kind of UniqueKey which means the RelOptInfo will have 1 row at
+most. it has a stronger semantic than others. like SELECT uk FROM t; uk is
+normal unique key and may have different values.
+SELECT colx FROM t WHERE uk = const.  colx is unique AND we have only 1 value. This
+field can used for innerrel_is_unique. and also be used as an optimization for
+this case. We don't need to maintain multi UniqueKey, we just maintain one with
+onerow = true and exprs = NIL.
+
+onerow is set to true only for 2 cases right now. 1) SELECT .. FROM t WHERE uk =
+1; 2). SELECT aggref(xx) from t; // Without group by.
+
+The UniqueKey can be used at the following cases at least:
+1. remove_useless_joins.
+2. reduce_semianti_joins
+3. remove distinct node if distinct clause is unique.
+4. remove aggnode if group by clause is unique.
+5. Aggregation Push Down without 2 phase aggregation if the join can't
+   duplicated the aggregated rows. (work in progress feature)
+
+
+2. How is it maintained?
+
+We have a set of populate_xxx_unqiuekeys functions to maintain the uniquekey on
+various cases. xxx includes baserel, joinrel, partitionedrel, distinctrel,
+groupedrel, unionrel. and we also need to convert the uniquekey from subquery
+to outer relation, which is what convert_subquery_uniquekeys does.
+
+The most error-prone part is joinrel, we simplified the rules like below:
+1. If the relation's UniqueKey can't be duplicated after join,  then is will be
+   still valid for the join rel. The function we used here is
+   innerrel_keeps_unique. The basic idea is innerrel.any_col = outer.uk.
+
+2. If the UnqiueKey can't keep valid via the rule 1, the combination of the
+   UniqueKey from both sides are valid for sure.  We can prove this as: if the
+   unique exprs from rel1 is duplicated by rel2, the duplicated rows must
+   contains different unique exprs from rel2.
+
+
+More considerations about onerow:
+1. If relation with one row and it can't be duplicated, it is still possible
+   contains mulit_nullvas after outer join.
+2. If the either UniqueKey can be duplicated after join, the can get one row
+   only when both side is one row AND there is no outer join.
+3. Whenever the onerow UniqueKey is not a valid any more, we need to convert one
+   row UniqueKey to normal unique key since we don't store exprs for one-row
+   relation. get_exprs_from_uniquekeys will be used here.
+
+
+More considerations about multi_nullvals after join:
+1. If the original UnqiueKey has multi_nullvals, the final UniqueKey will have
+   mulit_nullvals in any case.
+2. If a unique key doesn't allow mulit_nullvals, after some outer join, it
+   allows some outer join.
