@@ -2385,6 +2385,8 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
 		add_path(final_rel, path);
 	}
 
+	simple_copy_uniquekeys(current_rel, final_rel);
+
 	/*
 	 * Generate partial paths for final_rel, too, if outer query levels might
 	 * be able to make use of them.
@@ -3895,6 +3897,8 @@ create_grouping_paths(PlannerInfo *root,
 	}
 
 	set_cheapest(grouped_rel);
+
+	populate_grouprel_uniquekeys(root, grouped_rel, input_rel);
 	return grouped_rel;
 }
 
@@ -4615,7 +4619,7 @@ create_window_paths(PlannerInfo *root,
 
 	/* Now choose the best path(s) */
 	set_cheapest(window_rel);
-
+	simple_copy_uniquekeys(input_rel, window_rel);
 	return window_rel;
 }
 
@@ -4929,7 +4933,7 @@ create_distinct_paths(PlannerInfo *root,
 
 	/* Now choose the best path(s) */
 	set_cheapest(distinct_rel);
-
+	populate_distinctrel_uniquekeys(root, input_rel, distinct_rel);
 	return distinct_rel;
 }
 
@@ -5189,6 +5193,8 @@ create_ordered_paths(PlannerInfo *root,
 	 * need us to do it.
 	 */
 	Assert(ordered_rel->pathlist != NIL);
+
+	simple_copy_uniquekeys(input_rel, ordered_rel);
 
 	return ordered_rel;
 }
@@ -6066,6 +6072,9 @@ adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel,
 	/* If no SRFs appear at this plan level, nothing to do */
 	if (list_length(targets) == 1)
 		return;
+
+	/* UniqueKey is not valid after handling the SRF. */
+	rel->uniquekeys = NIL;
 
 	/*
 	 * Stack SRF-evaluation nodes atop each path for the rel.
