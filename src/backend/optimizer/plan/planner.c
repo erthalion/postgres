@@ -6517,9 +6517,9 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				 * prevent group pathkey rreordering, just check the same
 				 * order paths pathkeys and group pathkeys
 				 */
-				is_sorted = pathkeys_contained_in(group_pathkeys,
-												  path->pathkeys,
-												  &presorted_keys);
+				is_sorted = pathkeys_count_contained_in(group_pathkeys,
+												        path->pathkeys,
+												        &presorted_keys);
 			}
 			else
 			{
@@ -6678,9 +6678,16 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 			foreach(lc, partially_grouped_rel->pathlist)
 			{
 				Path	   *path = (Path *) lfirst(lc);
+				Path	   *path_original = path;
 				List	   *group_pathkeys = root->group_pathkeys,
 						   *group_clauses = parse->groupClause;
+				bool		is_sorted;
+				int			presorted_keys;
 				int			n_preordered_groups;
+
+				is_sorted = pathkeys_count_contained_in(root->group_pathkeys,
+														path->pathkeys,
+														&presorted_keys);
 
 				n_preordered_groups = group_keys_reorder_by_pathkeys(path->pathkeys,
 																	 &group_pathkeys,
@@ -6694,12 +6701,14 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				{
 					if (path != partially_grouped_rel->cheapest_total_path)
 						continue;
+
 					get_cheapest_group_keys_order(root,
 												  path->rows,
 												  extra->targetList,
 												  &group_pathkeys,
 												  &group_clauses,
 												  n_preordered_groups);
+
 					path = (Path *) create_sort_path(root,
 													 grouped_rel,
 													 path,
@@ -7133,6 +7142,7 @@ create_partial_grouping_paths(PlannerInfo *root,
 			List	   *group_pathkeys = root->group_pathkeys,
 					   *group_clauses = parse->groupClause;
 			int			n_preordered_groups;
+			int			presorted_keys;
 
 			n_preordered_groups = group_keys_reorder_by_pathkeys(path->pathkeys,
 																 &group_pathkeys,

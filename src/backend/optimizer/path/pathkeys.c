@@ -602,7 +602,8 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 	/*
 	 * Collect information about pathkey for subsequent usage
 	 */
-	for_each_cell(cell, list_nth_cell(*group_pathkeys, n_preordered))
+	for_each_cell(cell, *group_pathkeys,
+				  list_nth_cell(*group_pathkeys, n_preordered))
 	{
 		PathKey			*pathkey = (PathKey *) lfirst(cell);
 
