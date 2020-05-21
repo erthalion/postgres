@@ -679,6 +679,7 @@ typedef struct RelOptInfo
 	List	   *pathlist;		/* Path structures */
 	List	   *ppilist;		/* ParamPathInfos used in pathlist */
 	List	   *partial_pathlist;	/* partial Paths */
+    List       *unique_pathlist;    /* unique Paths */
 	struct Path *cheapest_startup_path;
 	struct Path *cheapest_total_path;
 	struct Path *cheapest_unique_path;
@@ -1186,6 +1187,8 @@ typedef struct Path
 
 	List	   *pathkeys;		/* sort ordering of path's output */
 	/* pathkeys is a List of PathKey nodes; see above */
+
+	List	   *uniquekeys;	/* the unique keys, or NIL if none */
 } Path;
 
 /* Macro for extracting a path's parameterization relids; beware double eval */

@@ -1734,7 +1734,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 
 				BTScanPosUnpinIfPinned(so->currPos);
-				BTScanPosInvalidate(so->currPos)
+				BTScanPosInvalidate(so->currPos);
 
 				pfree(so->skipScanKey);
 				so->skipScanKey = NULL;
@@ -1853,7 +1853,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 						LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 
 						BTScanPosUnpinIfPinned(so->currPos);
-						BTScanPosInvalidate(so->currPos)
+						BTScanPosInvalidate(so->currPos);
 
 						pfree(so->skipScanKey);
 						so->skipScanKey = NULL;

@@ -1117,10 +1117,19 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 		result = lappend(result, ipath);
 
 		/* Consider index skip scan as well */
-		if (useful_uniquekeys != NULL && can_skip && !not_empty_qual)
-			result = lappend(result,
-							 create_skipscan_unique_path(root, index,
-								 						 (Path *) ipath));
+		if (rel->uniquekeys != NULL && can_skip && !not_empty_qual)
+		{
+			ListCell   *lc;
+
+			foreach(lc, rel->uniquekeys)
+			{
+				UniqueKey *ukey = lfirst_node(UniqueKey, lc);
+				result = lappend(result,
+								 create_skipscan_unique_path(root, index,
+															 (Path *) ipath,
+															 ukey->exprs));
+			}
+		}
 
 		/*
 		 * If appropriate, consider parallel index scan.  We don't allow
@@ -1178,10 +1187,19 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 			result = lappend(result, ipath);
 
 			/* Consider index skip scan as well */
-			if (useful_uniquekeys != NULL && can_skip && !not_empty_qual)
-				result = lappend(result,
-								 create_skipscan_unique_path(root, index,
-															 (Path *) ipath));
+			if (rel->uniquekeys != NULL && can_skip && !not_empty_qual)
+			{
+				ListCell   *lc;
+
+				foreach(lc, rel->uniquekeys)
+				{
+					UniqueKey *ukey = lfirst_node(UniqueKey, lc);
+					result = lappend(result,
+									 create_skipscan_unique_path(root, index,
+																 (Path *) ipath,
+																 ukey->exprs));
+				}
+			}
 
 			/* If appropriate, consider parallel index scan */
 			if (index->amcanparallel &&
