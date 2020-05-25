@@ -19,7 +19,7 @@
 
 BufferDescPadded *BufferDescriptors;
 char	   *BufferBlocks;
-LWLockMinimallyPadded *BufferIOLWLockArray = NULL;
+ConditionVariableMinimallyPadded *BufferIOCVArray = NULL;
 WritebackContext BackendWritebackContext;
 CkptSortItem *CkptBufferIds;
 
@@ -68,7 +68,7 @@ InitBufferPool(void)
 {
 	bool		foundBufs,
 				foundDescs,
-				foundIOLocks,
+				foundIOCV,
 				foundBufCkpt;
 
 	/* Align descriptors to a cacheline boundary. */
@@ -82,12 +82,11 @@ InitBufferPool(void)
 						NBuffers * (Size) BLCKSZ, &foundBufs);
 
 	/* Align lwlocks to cacheline boundary */
-	BufferIOLWLockArray = (LWLockMinimallyPadded *)
-		ShmemInitStruct("Buffer IO Locks",
-						NBuffers * (Size) sizeof(LWLockMinimallyPadded),
-						&foundIOLocks);
+	BufferIOCVArray = (ConditionVariableMinimallyPadded *)
+		ShmemInitStruct("Buffer IO Condition Variables",
+			  NBuffers * (Size) sizeof(ConditionVariableMinimallyPadded),
+									   &foundIOCV);
 
-	LWLockRegisterTranche(LWTRANCHE_BUFFER_IO_IN_PROGRESS, "buffer_io");
 	LWLockRegisterTranche(LWTRANCHE_BUFFER_CONTENT, "buffer_content");
 
 	/*
@@ -101,10 +100,10 @@ InitBufferPool(void)
 		ShmemInitStruct("Checkpoint BufferIds",
 						NBuffers * sizeof(CkptSortItem), &foundBufCkpt);
 
-	if (foundDescs || foundBufs || foundIOLocks || foundBufCkpt)
+	if (foundDescs || foundBufs || foundIOCV || foundBufCkpt)
 	{
 		/* should find all of these, or none of them */
-		Assert(foundDescs && foundBufs && foundIOLocks && foundBufCkpt);
+		Assert(foundDescs && foundBufs && foundIOCV && foundBufCkpt);
 		/* note: this path is only taken in EXEC_BACKEND case */
 	}
 	else
@@ -134,8 +133,7 @@ InitBufferPool(void)
 			LWLockInitialize(BufferDescriptorGetContentLock(buf),
 							 LWTRANCHE_BUFFER_CONTENT);
 
-			LWLockInitialize(BufferDescriptorGetIOLock(buf),
-							 LWTRANCHE_BUFFER_IO_IN_PROGRESS);
+			ConditionVariableInit(BufferDescriptorGetIOCV(buf));
 		}
 
 		/* Correct last entry of linked list */
