@@ -50,3 +50,4 @@ OldSnapshotTimeMapLock				42
 LogicalRepWorkerLock				43
 CLogTruncationLock					44
 SharedAIOLock					45
+WALSyncLock						46
