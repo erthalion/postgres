@@ -35,6 +35,7 @@
 #include "common/username.h"
 #include "port/atomics.h"
 #include "postmaster/postmaster.h"
+#include "storage/aio.h"
 #include "storage/s_lock.h"
 #include "storage/spin.h"
 #include "tcop/tcopprot.h"
