@@ -49,5 +49,7 @@ MultiXactTruncationLock				41
 OldSnapshotTimeMapLock				42
 LogicalRepWorkerLock				43
 CLogTruncationLock					44
-SharedAIOLock					45
-WALSyncLock						46
+SharedAIOCtlLock					45
+SharedAIOSubmissionLock					46
+SharedAIOCompletionLock					47
+WALSyncLock						48
