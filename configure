@@ -12838,6 +12838,8 @@ fi
  else
     pkg_failed=untried
 fi
+
+pkg_failed=no
 if test -n "$LIBURING_LIBS"; then
     pkg_cv_LIBURING_LIBS="$LIBURING_LIBS"
  elif test -n "$PKG_CONFIG"; then
