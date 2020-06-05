@@ -171,6 +171,8 @@ struct PgAioInProgress
 
 	PgAioInProgress *merge_with;
 
+	instr_time enqueued;
+
 	/*
 	 * NB: Note that fds in here may *not* be relied upon for re-issuing
 	 * requests (e.g. for partial reads/writes) - the fd might be from another
@@ -236,6 +238,17 @@ struct PgAioBounceBuffer
 		dlist_node node;
 	} d;
 };
+
+typedef struct PgAioStats
+{
+	uint64 issued_total_count;
+	uint64 retry_total_count;
+
+	int64 queue_waiting_samples;
+	int64 queue_depth_samples;
+	int64 mean_waiting_time;
+	int64 mean_depth;
+} PgAioStats;
 
 /*
  * XXX: Really want a proclist like structure that works with integer
@@ -313,15 +326,8 @@ typedef struct PgAioPerBackend
 	 */
 	slock_t foreign_completed_lock;
 	uint32 foreign_completed_count;
-	dlist_head foreign_completed;
-
-	/*
-	 * Stats.
-	 */
-	uint64 issued_total_count;
 	uint64 foreign_completed_total_count;
-	uint64 retry_total_count;
-
+	dlist_head foreign_completed;
 } PgAioPerBackend;
 
 typedef struct PgAioCtl
@@ -412,12 +418,15 @@ int max_aio_in_progress = 32768; /* XXX: Multiple of MaxBackends instead? */
 int max_aio_in_flight = 4096;
 int max_aio_bounce_buffers = 1024;
 
+int track_queue_threshold = 10;
+
 /* global list of in-progress IO */
 static PgAioCtl *aio_ctl;
 
 /* current backend's per-backend-state */
 static PgAioPerBackend *my_aio;
 static int my_aio_id;
+static PgAioStats *stats;
 
 /* FIXME: move into PgAioPerBackend / subsume into ->reaped */
 static dlist_head local_recycle_requests;
@@ -452,6 +461,14 @@ AioCtlBackendShmemSize(void)
 }
 
 static Size
+AioCtlStatsShmemSize(void)
+{
+	uint32		TotalProcs = MaxBackends + NUM_AUXILIARY_PROCS;
+
+	return mul_size(TotalProcs, sizeof(PgAioStats));
+}
+
+static Size
 AioBounceShmemSize(void)
 {
 	return add_size(BLCKSZ /* alignment padding */,
@@ -461,8 +478,14 @@ AioBounceShmemSize(void)
 Size
 AioShmemSize(void)
 {
-	return add_size(add_size(AioCtlShmemSize(), AioBounceShmemSize()),
-					AioCtlBackendShmemSize());
+	Size		sz = 0;
+
+	sz = add_size(sz, AioCtlShmemSize());
+	sz = add_size(sz, AioBounceShmemSize());
+	sz = add_size(sz, AioCtlBackendShmemSize());
+	sz = add_size(sz, AioCtlStatsShmemSize());
+
+	return sz;
 }
 
 void
@@ -495,6 +518,10 @@ AioShmemInit(void)
 		aio_ctl->backend_state = (PgAioPerBackend *)
 			ShmemInitStruct("PgAioBackend", AioCtlBackendShmemSize(), &found);
 		memset(aio_ctl->backend_state, 0, AioCtlBackendShmemSize());
+
+		aio_ctl->stats = (PgAioStats *)
+			ShmemInitStruct("PgAioStats", AioCtlStatsShmemSize(), &found);
+		memset(aio_ctl->stats, 0, AioCtlStatsShmemSize());
 
 		for (int procno = 0; procno < TotalProcs; procno++)
 		{
@@ -603,6 +630,7 @@ pgaio_postmaster_child_init(void)
 
 	my_aio_id = MyProc->pgprocno;
 	my_aio = &aio_ctl->backend_state[my_aio_id];
+	stats = &aio_ctl->stats[my_aio_id];
 
 	dlist_init(&local_recycle_requests);
 
@@ -1178,6 +1206,7 @@ pgaio_submit_pending(bool drain)
 	struct io_uring_sqe *sqe[PGAIO_SUBMIT_BATCH_SIZE];
 	int total_submitted = 0;
 	uint32 orig_total;
+	uint64 start_samples = 0;
 
 	if (!aio_ctl || !my_aio)
 		return;
@@ -1188,6 +1217,7 @@ pgaio_submit_pending(bool drain)
 		return;
 	}
 
+	start_samples = stats->queue_waiting_samples;
 	orig_total = my_aio->pending_count;
 
 #define COMBINE_ENABLED
@@ -1199,6 +1229,17 @@ pgaio_submit_pending(bool drain)
 			errhidecontext(true));
 	pgaio_print_list(&my_aio->pending, NULL, offsetof(PgAioInProgress, system_node));
 #endif
+	if (my_aio->pending_count > track_queue_threshold)
+	{
+		stats->queue_depth_samples++;
+		if (stats->queue_depth_samples == 1)
+			stats->mean_depth = my_aio->pending_count;
+		else
+			stats->mean_depth +=
+				(my_aio->pending_count - stats->mean_depth) /
+				stats->queue_depth_samples;
+	}
+
 	if (my_aio->pending_count > 1)
 		pgaio_combine_pending();
 
@@ -1216,6 +1257,7 @@ pgaio_submit_pending(bool drain)
 		int nsubmit = Min(my_aio->pending_count, PGAIO_SUBMIT_BATCH_SIZE);
 		int inflight_add = 0;
 		struct iovec *iovs = pgaio_uring_submit_iovecs;
+		instr_time dequeued;
 
 		Assert(nsubmit != 0 && nsubmit <= my_aio->pending_count);
 		LWLockAcquire(SharedAIOSubmissionLock, LW_EXCLUSIVE);
@@ -1243,6 +1285,25 @@ pgaio_submit_pending(bool drain)
 			my_aio->pending_count--;
 			nios++;
 			total_submitted++;
+
+			if (io->enqueued != 0)
+			{
+				INSTR_TIME_SET_CURRENT(dequeued);
+				INSTR_TIME_SUBTRACT(dequeued, io->enqueued);
+
+				stats->queue_waiting_samples++;
+				if (stats->queue_waiting_samples == 1)
+					stats->mean_waiting_time = INSTR_TIME_GET_MICROSEC(dequeued);
+				else
+				{
+					int64 waiting_time = INSTR_TIME_GET_MICROSEC(dequeued);
+					stats->mean_waiting_time +=
+						(waiting_time - stats->mean_waiting_time ) /
+						stats->queue_waiting_samples;
+				}
+
+				io->enqueued = 0;
+			}
 		}
 
 		if (nios > 0)
@@ -1250,7 +1311,7 @@ pgaio_submit_pending(bool drain)
 			int ret;
 
 			pg_atomic_add_fetch_u32(&my_aio->inflight, inflight_add);
-			my_aio->issued_total_count++;
+			stats->issued_total_count++;
 
 	again:
 			pgstat_report_wait_start(WAIT_EVENT_AIO_SUBMIT);
@@ -1274,6 +1335,13 @@ pgaio_submit_pending(bool drain)
 
 #ifdef PGAIO_VERBOSE
 	elog(DEBUG3, "submitted %d (orig %d)", total_submitted, orig_total);
+
+	if (start_samples != stats->queue_waiting_samples)
+	{
+		elog(DEBUG3, "mean waiting time %lu[%lu], queue depth %lu[%lu]",
+			 stats->mean_waiting_time, stats->queue_waiting_samples,
+			 stats->mean_depth, stats->queue_depth_samples);
+	}
 #endif
 
 	pgaio_backpressure(&aio_ctl->shared_ring, "submit_pending");
@@ -1775,7 +1843,7 @@ pgaio_io_retry(PgAioInProgress *io)
 
 	dlist_push_tail(&my_aio->pending, &io->io_node);
 	my_aio->pending_count++;
-	my_aio->retry_total_count++;
+	stats->retry_total_count++;
 
 	pgaio_submit_pending(true);
 }
