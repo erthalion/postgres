@@ -1528,6 +1528,9 @@ again:
 				ConditionVariablePrepareToSleep(&io->cv);
 
 			flags = *(volatile PgAioIPFlags*) &io->flags;
+			if (flags & PGAIOIP_PENDING)
+				pgaio_submit_pending(false);
+
 			if (!(flags & done_flags))
 				ConditionVariableSleep(&io->cv, WAIT_EVENT_AIO_IO_COMPLETE_ONE);
 
