@@ -3010,7 +3010,7 @@ create_skipscan_unique_path(PlannerInfo *root, IndexOptInfo *index,
 		Expr *unique_expr = (Expr *) lfirst(lc);
 		Var *var = (Var *) unique_expr;
 
-		exprs = lappend(exprs, unique_exprs);
+		exprs = lappend(exprs, unique_expr);
 
 		for (int i = 0; i < index->ncolumns; i++)
 		{

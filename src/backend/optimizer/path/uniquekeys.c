@@ -615,18 +615,32 @@ relation_is_onerow(RelOptInfo *rel)
  *		the same values in each of 'exprs'.  Otherwise returns false.
  */
 bool
-relation_has_uniquekeys_for(PlannerInfo *root, RelOptInfo *rel,
-							List *exprs, bool allow_multinulls)
+relation_has_uniquekeys_for(PlannerInfo *root, List *pathkeys,
+							bool allow_multinulls)
 {
 	ListCell *lc;
+	List *exprs = NIL;
 
 	/* For UniqueKey->onerow case, the uniquekey->exprs is empty as well
 	 * so we can't rely on list_is_subset to handle this special cases
 	 */
-	if (exprs == NIL)
+	if (pathkeys == NIL)
 		return false;
 
-	foreach(lc, rel->uniquekeys)
+	foreach(lc, pathkeys)
+	{
+		PathKey    *pathkey = (PathKey *) lfirst(lc);
+		EquivalenceClass *ec = pathkey->pk_eclass;
+ 		ListCell   *k;
+
+ 		foreach(k, ec->ec_members)
+ 		{
+ 			EquivalenceMember *mem = (EquivalenceMember *) lfirst(k);
+			exprs = lappend(exprs, mem->em_expr);
+ 		}
+	}
+
+	foreach(lc, root->query_uniquekeys)
 	{
 		UniqueKey *ukey = lfirst_node(UniqueKey, lc);
 		if (ukey->multi_nullvals && !allow_multinulls)
@@ -1132,4 +1146,35 @@ add_combined_uniquekey(RelOptInfo *joinrel,
 		}
 	}
 	return false;
+}
+
+List*
+build_uniquekeys(PlannerInfo *root, List *sortclauses)
+{
+	List *result = NIL;
+	List *sortkeys;
+	ListCell *l;
+
+	sortkeys = make_pathkeys_for_uniquekeys(root,
+											sortclauses,
+											root->processed_tlist);
+
+	/* Create a uniquekey and add it to the list */
+	foreach(l, sortkeys)
+	{
+		PathKey    *pathkey = (PathKey *) lfirst(l);
+		EquivalenceClass *ec = pathkey->pk_eclass;
+ 		ListCell   *k;
+		List *exprs = NIL;
+
+ 		foreach(k, ec->ec_members)
+ 		{
+ 			EquivalenceMember *mem = (EquivalenceMember *) lfirst(k);
+			exprs = lappend(exprs, mem->em_expr);
+ 		}
+
+		result = lappend(result, makeUniqueKey(exprs, false, false));
+	}
+
+	return result;
 }

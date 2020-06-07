@@ -297,6 +297,7 @@ struct PlannerInfo
 
 	List	   *query_pathkeys; /* desired pathkeys for query_planner() */
 
+ 	List	   *query_uniquekeys; /* unique keys required for the query */
 	List	   *group_pathkeys; /* groupClause pathkeys, if any */
 	List	   *window_pathkeys;	/* pathkeys of bottom window, if any */
 	List	   *distinct_pathkeys;	/* distinctClause pathkeys, if any */
