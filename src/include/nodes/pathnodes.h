@@ -1230,6 +1230,9 @@ typedef struct Path
  * we need not recompute them when considering using the same index in a
  * bitmap index/heap scan (see BitmapHeapPath).  The costs of the IndexPath
  * itself represent the costs of an IndexScan or IndexOnlyScan plan type.
+ *
+ * 'indexskipprefix' represents the number of columns to consider for skip
+ * scans.
  *----------
  */
 typedef struct IndexPath
@@ -1242,6 +1245,7 @@ typedef struct IndexPath
 	ScanDirection indexscandir;
 	Cost		indextotalcost;
 	Selectivity indexselectivity;
+	int			indexskipprefix;
 } IndexPath;
 
 /*
