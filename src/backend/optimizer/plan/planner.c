@@ -3668,7 +3668,12 @@ standard_qp_callback(PlannerInfo *root, void *extra)
 		root->query_uniquekeys = build_uniquekeys(root, parse->distinctClause);
 	}
 	else if (root->sort_pathkeys)
+	{
 		root->query_pathkeys = root->sort_pathkeys;
+
+ 		if (root->distinct_pathkeys)
+ 			root->query_uniquekeys = build_uniquekeys(root, parse->distinctClause);
+	}
 	else
 		root->query_pathkeys = NIL;
 }

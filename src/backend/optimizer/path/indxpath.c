@@ -1187,11 +1187,11 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 			result = lappend(result, ipath);
 
 			/* Consider index skip scan as well */
-			if (rel->uniquekeys != NULL && can_skip && !not_empty_qual)
+			if (root->query_uniquekeys != NULL && can_skip && !not_empty_qual)
 			{
 				ListCell   *lc;
 
-				foreach(lc, rel->uniquekeys)
+				foreach(lc, root->query_uniquekeys)
 				{
 					UniqueKey *ukey = lfirst_node(UniqueKey, lc);
 					result = lappend(result,
