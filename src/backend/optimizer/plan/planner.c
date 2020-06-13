@@ -6523,7 +6523,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 			}
 			else
 			{
-				n_preordered_groups =
+				presorted_keys = n_preordered_groups =
 						group_keys_reorder_by_pathkeys(path->pathkeys,
 													   &group_pathkeys,
 													   &group_clauses);
@@ -6614,12 +6614,12 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 			 * We should have already excluded pathkeys of length 1 because
 			 * then presorted_keys > 0 would imply is_sorted was true.
 			 */
-			Assert(list_length(root->group_pathkeys) != 1);
+			Assert(list_length(group_pathkeys) != 1);
 
 			path = (Path *) create_incremental_sort_path(root,
 														 grouped_rel,
 														 path,
-														 root->group_pathkeys,
+														 group_pathkeys,
 														 presorted_keys,
 														 -1.0);
 
@@ -6641,9 +6641,9 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 										 grouped_rel,
 										 path,
 										 grouped_rel->reltarget,
-										 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+										 group_clauses ? AGG_SORTED : AGG_PLAIN,
 										 AGGSPLIT_SIMPLE,
-										 parse->groupClause,
+										 group_clauses,
 										 havingQual,
 										 agg_costs,
 										 dNumGroups));
@@ -6658,7 +6658,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 						 create_group_path(root,
 										   grouped_rel,
 										   path,
-										   parse->groupClause,
+										   group_clauses,
 										   havingQual,
 										   dNumGroups));
 			}
