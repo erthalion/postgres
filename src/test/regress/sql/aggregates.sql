@@ -1012,9 +1012,10 @@ ANALYZE btg;
 
 -- GROUP BY optimization by reorder columns by frequency
 
-SET enable_hashagg=off;
-SET max_parallel_workers= 0;
+SET enable_hashagg = off;
+SET max_parallel_workers = 0;
 SET max_parallel_workers_per_gather = 0;
+SET enable_indexscan = off;
 
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY p, v;
@@ -1064,8 +1065,9 @@ SELECT count(*) FROM btg GROUP BY s, v;
 -- GROUP BY optimization by reorder columns by index scan
 
 CREATE INDEX ON btg(p, v);
-SET enable_seqscan=off;
-SET enable_bitmapscan=off;
+RESET enable_indexscan;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
 VACUUM btg;
 
 EXPLAIN (COSTS off)

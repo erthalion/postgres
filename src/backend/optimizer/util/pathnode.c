@@ -2847,6 +2847,49 @@ create_sort_path(PlannerInfo *root,
 	return pathnode;
 }
 
+SortPath *
+create_sort_reordered_path(PlannerInfo *root,
+				 RelOptInfo *rel,
+				 Path *subpath,
+				 List *pathkeys,
+				 double *est_num_groups,
+				 double limit_tuples)
+{
+	SortPath   *pathnode = makeNode(SortPath);
+
+	pathnode->path.pathtype = T_Sort;
+	pathnode->path.parent = rel;
+	/* Sort doesn't project, so use source path's pathtarget */
+	pathnode->path.pathtarget = subpath->pathtarget;
+	/* For now, assume we are above any joins, so no parameterization */
+	pathnode->path.param_info = NULL;
+	pathnode->path.parallel_aware = false;
+	pathnode->path.parallel_safe = rel->consider_parallel &&
+		subpath->parallel_safe;
+	pathnode->path.parallel_workers = subpath->parallel_workers;
+	pathnode->path.pathkeys = pathkeys;
+
+	pathnode->subpath = subpath;
+
+	if (est_num_groups != NULL)
+		cost_reordered_groupby(&pathnode->path, root, pathkeys,
+				  subpath->total_cost,
+				  subpath->rows,
+				  subpath->pathtarget->width,
+				  est_num_groups,
+				  0.0,				/* XXX comparison_cost shouldn't be 0? */
+				  work_mem, limit_tuples);
+	else
+		cost_sort(&pathnode->path, root, pathkeys,
+				  subpath->total_cost,
+				  subpath->rows,
+				  subpath->pathtarget->width,
+				  0.0,				/* XXX comparison_cost shouldn't be 0? */
+				  work_mem, limit_tuples);
+
+	return pathnode;
+}
+
 /*
  * create_group_path
  *	  Creates a pathnode that represents performing grouping of presorted input

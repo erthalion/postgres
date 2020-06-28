@@ -1913,6 +1913,26 @@ cost_incremental_sort(Path *path,
 	path->total_cost = startup_cost + run_cost;
 }
 
+void
+cost_reordered_groupby(Path *path, PlannerInfo *root,
+		  List *pathkeys, Cost input_cost, double tuples,
+		  int width, double *est_num_groups,
+		  Cost comparison_cost, int sort_mem,
+		  double limit_tuples)
+{
+	Cost		startup_cost;
+	Cost		run_cost;
+
+	cost_tuplesort(&startup_cost, &run_cost,
+				   tuples, width * (1 - est_num_groups[0]/tuples),
+				   -2.0 * cpu_operator_cost + (2.0 * cpu_operator_cost * (1 - est_num_groups[0]/tuples)),
+				   sort_mem, limit_tuples);
+
+	path->rows = tuples;
+	path->startup_cost = startup_cost;
+	path->total_cost = startup_cost + run_cost;
+}
+
 /*
  * cost_sort
  *	  Determines and returns the cost of sorting a relation, including
