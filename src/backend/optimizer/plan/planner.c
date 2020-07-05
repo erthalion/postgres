@@ -6602,16 +6602,19 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 			if (enable_groupby_reorder)
 			{
 				double	   *est_num_groups = NULL;
+				double 	   *widths = NULL;
 
 				if (!is_sorted)
 				{
 					/* Sort the cheapest-total path if it isn't already sorted */
 					if (!parse->groupingSets)
-						est_num_groups = get_cheapest_group_keys_order(root,
+						get_cheapest_group_keys_order(root,
 													  path->rows,
 													  extra->targetList,
 													  &group_pathkeys,
 													  &group_clauses,
+													  &est_num_groups,
+													  &widths,
 													  n_preordered_groups,
 													  work_mem);
 				}
@@ -6620,6 +6623,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 												 path,
 												 group_pathkeys,
 												 est_num_groups,
+												 widths,
 												 -1.0);
 
 				/* Now decide what to stick atop it */

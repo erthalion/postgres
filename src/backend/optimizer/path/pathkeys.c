@@ -560,11 +560,13 @@ get_func_cost(PlannerInfo *root, Oid funcid)
  * speedup sorting. Returns newly allocated lists, old ones stay untouched.
  * n_preordered defines a head of list which order should be prevented.
  */
-double *
+void
 get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 							  List *target_list,
 							  List **group_pathkeys,
 							  List **group_clauses,
+							  double **est_num_groups,
+							  double **widths,
 							  int n_preordered, int sort_mem)
 {
 	struct
@@ -581,25 +583,25 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 	List		   *pathkeyExprList = NIL,
 				   *new_group_pathkeys = NIL,
 				   *new_group_clauses = NIL;
-	double 			*num_groups = NULL;
 	ListCell	   *cell;
 	int				i = 0, n_keys_to_est;
 
 	if (!enable_groupby_reorder)
-		return NULL;
+		return;
 
 	if (nkeys < 2)
-		return NULL; /* nothing to do */
+		return; /* nothing to do */
 
 	/*
 	 * Nothing to do here, since reordering of group clauses to match ORDER BY
 	 * already performed in preprocess_groupclause
 	 */
 	if (n_preordered == 0 && root->sort_pathkeys)
-		return NULL;
+		return;
 
 	keys = palloc(nkeys * sizeof(*keys));
-	num_groups = palloc(nkeys * sizeof(double));
+	*est_num_groups = palloc0(nkeys * sizeof(double));
+	*widths = palloc0(nkeys * sizeof(int));
 
 	/*
 	 * Collect information about pathkey for subsequent usage
@@ -638,8 +640,8 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 		 */
 		for(i = n_keys_to_est - 1; i < nkeys; i++)
 		{
-			double est_num_groups;
-			double width;
+			double num_groups;
+			int width;
 			Cost comparison_cost = 1.0;
 
 			PathKey *pathkey = keys[i].pathkey;
@@ -647,7 +649,7 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 									linitial(pathkey->pk_eclass->ec_members);
 
 			lfirst(tail_cell) = keys[i].pathkeyExpr;
-			est_num_groups = estimate_num_groups(root, pathkeyExprList,
+			num_groups = estimate_num_groups(root, pathkeyExprList,
 												 nrows, NULL);
 
 			width = get_width_cost_multiplier(root, (Expr *) keys[i].pathkeyExpr);
@@ -663,17 +665,18 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 				comparison_cost = get_func_cost(root, get_opcode(sortop));
 			}
 
-			keys[i].est_num_groups = est_num_groups;
+			keys[i].est_num_groups = num_groups;
 			keys[i].width = width;
 			keys[i].comparison_cost = comparison_cost;
 
-			/*ereport(LOG, (errmsg("est_num_groups: %lf", est_num_groups)));*/
-			est_num_groups /= width;
-			est_num_groups /= comparison_cost;
+			/*ereport(LOG, (errmsg("num_groups: %lf", num_groups)));*/
+			/*num_groups /= (1.0 / width);*/
+			num_groups /= width;
+			num_groups /= comparison_cost;
 
-			if (est_num_groups > best_est_num_groups)
+			if (num_groups > best_est_num_groups)
 			{
-				best_est_num_groups = est_num_groups;
+				best_est_num_groups = num_groups;
 				best_i = i;
 			}
 		}
@@ -709,7 +712,8 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 		{
 			pathkey = keys[i - n_preordered].pathkey;
 			sgc = keys[i - n_preordered].sgc;
-			num_groups[i - n_preordered] = keys[i - n_preordered].est_num_groups;
+			(*est_num_groups)[i - n_preordered] = keys[i - n_preordered].est_num_groups;
+			(*widths)[i - n_preordered] = keys[i - n_preordered].width;
 		}
 
 		new_group_pathkeys = lappend(new_group_pathkeys, pathkey);
@@ -725,8 +729,6 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 
 	*group_pathkeys = new_group_pathkeys;
 	*group_clauses = new_group_clauses;
-
-	return num_groups;
 }
 
 /*

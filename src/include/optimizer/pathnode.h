@@ -200,6 +200,7 @@ extern SortPath *create_sort_reordered_path(PlannerInfo *root,
 								  Path *subpath,
 								  List *pathkeys,
 								  double *est_num_groups,
+								  int *widths,
 								  double limit_tuples);
 extern GroupPath *create_group_path(PlannerInfo *root,
 									RelOptInfo *rel,

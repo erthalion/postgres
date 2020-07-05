@@ -2853,6 +2853,7 @@ create_sort_reordered_path(PlannerInfo *root,
 				 Path *subpath,
 				 List *pathkeys,
 				 double *est_num_groups,
+				 int *widths,
 				 double limit_tuples)
 {
 	SortPath   *pathnode = makeNode(SortPath);
@@ -2877,6 +2878,7 @@ create_sort_reordered_path(PlannerInfo *root,
 				  subpath->rows,
 				  subpath->pathtarget->width,
 				  est_num_groups,
+				  widths,
 				  0.0,				/* XXX comparison_cost shouldn't be 0? */
 				  work_mem, limit_tuples);
 	else

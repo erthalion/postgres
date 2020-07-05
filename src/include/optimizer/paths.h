@@ -193,11 +193,13 @@ extern bool pathkeys_count_contained_in(List *keys1, List *keys2, int *n_common)
 extern int group_keys_reorder_by_pathkeys(List *pathkeys,
 										  List **group_pathkeys,
 										  List **group_clauses);
-extern double * get_cheapest_group_keys_order(PlannerInfo *root,
+extern void get_cheapest_group_keys_order(PlannerInfo *root,
 										  double nrows,
 										  List *target_list,
 										  List **group_pathkeys,
 										  List **group_clauses,
+										  double **est_num_groups,
+										  double **widths,
 										  int	n_preordered,
 										  int sort_mem);
 extern Path *get_cheapest_path_for_pathkeys(List *paths, List *pathkeys,
