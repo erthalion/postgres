@@ -656,6 +656,16 @@ FROM distinct_a WHERE a = 1 ORDER BY a;
                Index Cond: (a = 1)
 (5 rows)
 
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT *
+FROM distinct_a;
+          QUERY PLAN          
+------------------------------
+ HashAggregate
+   Group Key: a, b, c
+   ->  Seq Scan on distinct_a
+(3 rows)
+
 -- check colums order
 SELECT DISTINCT a FROM distinct_a WHERE b = 2 AND c = 10;
  a 
