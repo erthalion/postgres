@@ -1042,53 +1042,109 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	/* Check if an index skip scan is possible. */
 	can_skip = enable_indexskipscan & index->amcanskip;
 
-	/*
-	 * Skip scan is not supported when there are qual conditions, which are not
-	 * covered by index. The reason for that is that those conditions are
-	 * evaluated later, already after skipping was applied.
-	 *
-	 * TODO: This implementation is too restrictive, and doesn't allow e.g.
-	 * index expressions. For that we need to examine index_clauses too.
-	 */
-	if (can_skip && root->parse->jointree != NULL)
+	if (can_skip)
 	{
-		ListCell *lc;
-
-		foreach(lc, (List *)root->parse->jointree->quals)
+		/*
+		 * Skip scan is not supported when there are qual conditions, which are not
+		 * covered by index. The reason for that is that those conditions are
+		 * evaluated later, already after skipping was applied.
+		 *
+		 * TODO: This implementation is too restrictive, and doesn't allow e.g.
+		 * index expressions. For that we need to examine index_clauses too.
+		 */
+		if (root->parse->jointree != NULL)
 		{
-			Node *expr, *qual = (Node *) lfirst(lc);
-			Var *var;
-			bool found = false;
+			ListCell *lc;
 
-			if (!is_opclause(qual))
+			foreach(lc, (List *)root->parse->jointree->quals)
 			{
-				not_empty_qual = true;
-				break;
-			}
+				Node *expr, *qual = (Node *) lfirst(lc);
+				Var *var;
+				bool found = false;
 
-			expr = get_leftop(qual);
-
-			if (!IsA(expr, Var))
-			{
-				not_empty_qual = true;
-				break;
-			}
-
-			var = (Var *) expr;
-
-			for (int i = 0; i < index->ncolumns; i++)
-			{
-				if (index->indexkeys[i] == var->varattno)
+				if (!is_opclause(qual))
 				{
-					found = true;
+					not_empty_qual = true;
+					break;
+				}
+
+				expr = get_leftop(qual);
+
+				if (!IsA(expr, Var))
+				{
+					not_empty_qual = true;
+					break;
+				}
+
+				var = (Var *) expr;
+
+				for (int i = 0; i < index->ncolumns; i++)
+				{
+					if (index->indexkeys[i] == var->varattno)
+					{
+						found = true;
+						break;
+					}
+				}
+
+				if (!found)
+				{
+					not_empty_qual = true;
 					break;
 				}
 			}
+		}
 
-			if (!found)
+		if (!index_only_scan && root->query_uniquekeys != NULL)
+		{
+			ListCell *lc;
+
+			foreach(lc, root->query_uniquekeys)
 			{
-				not_empty_qual = true;
-				break;
+				UniqueKey *uniqueKey = (UniqueKey *) lfirst(lc);
+				ListCell *lc1;
+
+				foreach(lc1, uniqueKey->exprs)
+				{
+					Expr *expr = (Expr *) lfirst(lc1);
+					bool found = false;
+
+					if (!IsA(expr, Var))
+					{
+						ListCell *lc2;
+
+						foreach(lc2, index->indexprs)
+						{
+							if(equal(lfirst(lc1), lfirst(lc2)))
+							{
+								found = true;
+								break;
+							}
+						}
+					}
+					else
+					{
+						Var *var = (Var *) expr;
+
+						for (int i = 0; i < index->ncolumns; i++)
+						{
+							if (index->indexkeys[i] == var->varattno)
+							{
+								found = true;
+								break;
+							}
+						}
+					}
+
+					if (!found)
+					{
+						can_skip = false;
+						break;
+					}
+				}
+
+				if (!can_skip)
+					break;
 			}
 		}
 	}

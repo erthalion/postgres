@@ -267,6 +267,9 @@ FROM distinct_a ORDER BY a;
 EXPLAIN (COSTS OFF)
 SELECT DISTINCT ON (a) a, b, c
 FROM distinct_a WHERE a = 1 ORDER BY a;
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT *
+FROM distinct_a;
 
 -- check colums order
 SELECT DISTINCT a FROM distinct_a WHERE b = 2 AND c = 10;
