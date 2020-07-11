@@ -1810,7 +1810,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				}
 
 				currItem = &so->currPos.items[so->currPos.lastItem];
-				itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+				itup = CopyIndexTuple((IndexTuple) (so->currTuples + currItem->tupleOffset));
 				nextOffset = ItemPointerGetOffsetNumber(&itup->t_tid);
 
 				/*
@@ -1831,6 +1831,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 											so->currPos.buf, dir))
 				{
 					OffsetNumber maxoff;
+					IndexTuple verifiedItup;
 					startOffset = _bt_binsrch(scan->indexRelation,
 											  so->skipScanKey,
 											  so->currPos.buf);
@@ -1838,11 +1839,25 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					page = BufferGetPage(so->currPos.buf);
 					maxoff = PageGetMaxOffsetNumber(page);
 
-					if (nextOffset <= startOffset)
+					/* Now read the data */
+					if (_bt_readpage(scan, ForwardScanDirection, startOffset))
 					{
-						offnum = jumpOffset;
-						nextOffset = startOffset;
+						currItem = &so->currPos.items[so->currPos.itemIndex];
+						verifiedItup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+
+						int compare = ItemPointerCompare(&itup->t_tid, &verifiedItup->t_tid);
+						if(compare <= 0)
+						{
+							offnum = jumpOffset;
+							nextOffset = startOffset;
+						}
 					}
+
+					/*if (nextOffset <= startOffset)*/
+					/*{*/
+						/*offnum = jumpOffset;*/
+						/*nextOffset = startOffset;*/
+					/*}*/
 
 					if ((offnum > maxoff) & (so->currPos.nextPage == P_NONE))
 					{
