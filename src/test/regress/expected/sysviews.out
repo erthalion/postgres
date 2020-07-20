@@ -74,7 +74,7 @@ select name, setting from pg_settings where name like 'enable%';
 --------------------------------+---------
  enable_bitmapscan              | on
  enable_gathermerge             | on
- enable_groupby_reorder         | on
+ enable_groupby_reorder         | off
  enable_groupingsets_hash_disk  | off
  enable_hashagg                 | on
  enable_hashagg_disk            | on

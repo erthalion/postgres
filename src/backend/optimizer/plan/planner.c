@@ -6511,7 +6511,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 					   *group_clauses = parse->groupClause;
 			int			n_preordered_groups = 0;
 
-			if (parse->groupingSets)
+			if (parse->groupingSets || !enable_groupby_reorder)
 			{
 				/*
 				 * prevent group pathkey rreordering, just check the same
@@ -6766,15 +6766,17 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 														path->pathkeys,
 														&presorted_keys);
 
-				n_preordered_groups = group_keys_reorder_by_pathkeys(path->pathkeys,
-																	 &group_pathkeys,
-																	 &group_clauses);
+				if (enable_groupby_reorder)
+					n_preordered_groups = group_keys_reorder_by_pathkeys(path->pathkeys,
+																		 &group_pathkeys,
+																		 &group_clauses);
 
 				/*
 				 * Insert a Sort node, if required.  But there's no point in
 				 * sorting anything but the cheapest path.
 				 */
-				if (n_preordered_groups != list_length(group_pathkeys))
+				/*if (n_preordered_groups != list_length(group_pathkeys))*/
+				if(!is_sorted)
 				{
 					if (path != partially_grouped_rel->cheapest_total_path)
 						continue;

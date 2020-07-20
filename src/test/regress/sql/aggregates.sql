@@ -1012,6 +1012,7 @@ ANALYZE btg;
 
 -- GROUP BY optimization by reorder columns by frequency
 
+SET enable_groupby_reorder = on;
 SET enable_hashagg = off;
 SET max_parallel_workers = 0;
 SET max_parallel_workers_per_gather = 0;
@@ -1099,6 +1100,7 @@ RESET max_parallel_workers;
 RESET max_parallel_workers_per_gather;
 RESET enable_seqscan;
 RESET enable_bitmapscan;
+RESET enable_groupby_reorder;
 
 -- test coverage for aggregate combine/serial/deserial functions
 BEGIN ISOLATION LEVEL REPEATABLE READ;

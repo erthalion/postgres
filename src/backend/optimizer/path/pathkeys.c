@@ -42,7 +42,7 @@ static Var *find_var_for_subquery_tle(RelOptInfo *rel, TargetEntry *tle);
 static bool right_merge_direction(PlannerInfo *root, PathKey *pathkey);
 
 
-bool		enable_groupby_reorder = true;
+bool		enable_groupby_reorder = false;
 /****************************************************************************
  *		PATHKEY CONSTRUCTION AND REDUNDANCY TESTING
  ****************************************************************************/
@@ -601,7 +601,7 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 
 	keys = palloc(nkeys * sizeof(*keys));
 	*est_num_groups = palloc0(nkeys * sizeof(double));
-	*widths = palloc0(nkeys * sizeof(int));
+	*widths = palloc0(nkeys * sizeof(double));
 
 	/*
 	 * Collect information about pathkey for subsequent usage

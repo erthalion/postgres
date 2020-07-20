@@ -1138,7 +1138,7 @@ static struct config_bool ConfigureNamesBool[] =
 			NULL
 		},
 		&enable_groupby_reorder,
-		true,
+		false,
 		NULL, NULL, NULL
 	},
 	{
