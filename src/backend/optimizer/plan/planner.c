@@ -6604,20 +6604,18 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				double	   *est_num_groups = NULL;
 				double 	   *widths = NULL;
 
-				if (!is_sorted)
-				{
-					/* Sort the cheapest-total path if it isn't already sorted */
-					if (!parse->groupingSets)
-						get_cheapest_group_keys_order(root,
-													  path->rows,
-													  extra->targetList,
-													  &group_pathkeys,
-													  &group_clauses,
-													  &est_num_groups,
-													  &widths,
-													  n_preordered_groups,
-													  work_mem);
-				}
+				/* Sort the cheapest-total path if it isn't already sorted */
+				if (!parse->groupingSets)
+					get_cheapest_group_keys_order(root,
+												  path->rows,
+												  extra->targetList,
+												  &group_pathkeys,
+												  &group_clauses,
+												  &est_num_groups,
+												  &widths,
+												  0,
+												  work_mem);
+
 				path = (Path *) create_sort_reordered_path(root,
 												 grouped_rel,
 												 path,

@@ -725,7 +725,11 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 	pfree(keys);
 
 	/* Just append the rest GROUP BY clauses */
-	new_group_clauses = list_concat_unique_ptr(new_group_clauses, *group_clauses);
+	for_each_cell(cell, *group_clauses, list_nth_cell(*group_clauses, n_preordered))
+	{
+		if (!list_member_ptr(new_group_clauses, lfirst(cell)))
+			new_group_clauses = lappend_int(new_group_clauses, lfirst_int(cell));
+	}
 
 	*group_pathkeys = new_group_pathkeys;
 	*group_clauses = new_group_clauses;
