@@ -1716,35 +1716,16 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			offnum = OffsetNumberPrev(offnum);
 		else
 		{
-			OffsetNumber nextOffset,
-						startOffset,
-						jumpOffset;
-
-			IndexTuple startItup = CopyIndexTuple(scan->xs_itup);
-			Page page = BufferGetPage(so->currPos.buf);
-
-			/* We are at the end and need to return */
-			if ((offnum > PageGetMaxOffsetNumber(page)) &
-				(so->currPos.nextPage == P_NONE))
-			{
-				LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-
-				BTScanPosUnpinIfPinned(so->currPos);
-				BTScanPosInvalidate(so->currPos);
-
-				pfree(so->skipScanKey);
-				so->skipScanKey = NULL;
-				return false;
-			}
-
-			nextOffset = startOffset = ItemPointerGetOffsetNumber(&scan->xs_itup->t_tid);
+			IndexTuple 	startItup = CopyIndexTuple(scan->xs_itup);
+			bool 		nextFound = false;
 
 			/* Reading backwards means we expect to see more data on the left */
 			so->currPos.moreLeft = true;
 
-			while (nextOffset == startOffset)
+			while (!nextFound)
 			{
 				IndexTuple itup;
+				OffsetNumber jumpOffset;
 				CHECK_FOR_INTERRUPTS();
 
 				/*
@@ -1789,7 +1770,14 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 								   &buf, BT_READ, scan->xs_snapshot);
 				_bt_freestack(stack);
 				so->currPos.buf = buf;
-				jumpOffset = offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+
+				/*
+				 * We need to remember the original offset after the jump,
+				 * since in case of looping this would be the next starting
+				 * point
+				 */
+				jumpOffset = offnum = _bt_binsrch(scan->indexRelation,
+												  so->skipScanKey, buf);
 				offnum = OffsetNumberPrev(offnum);
 
 				if (!_bt_readpage(scan, indexdir, offnum))
@@ -1810,16 +1798,21 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				}
 
 				currItem = &so->currPos.items[so->currPos.lastItem];
-				itup = CopyIndexTuple((IndexTuple) (so->currTuples + currItem->tupleOffset));
-				nextOffset = ItemPointerGetOffsetNumber(&itup->t_tid);
+				itup = CopyIndexTuple((IndexTuple)
+						(so->currTuples + currItem->tupleOffset));
 
 				/*
 				 * To check if we returned the same tuple, try to find a
 				 * startItup on the current page. For that we need to update
 				 * scankey to match the whole tuple and set nextkey to return
-				 * an exact tuple, not the next one. If the nextOffset is the
-				 * same as before, it means we are in the loop, return offnum
-				 * to the original position and jump further
+				 * an exact tuple, not the next one. If the tuple we found in
+				 * this way is equal to what we wanted to return, it means we
+				 * are in the loop, return offnum to the original position and
+				 * jump further
+				 *
+				 * Note that to compare tids we need to keep the leaf pinned,
+				 * otherwise there is a danger of vacuum cleaning up relevant
+				 * tuples.
 				 */
 				scan->xs_itup = startItup;
 				_bt_update_skip_scankeys(scan, indexRel);
@@ -1830,13 +1823,13 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 				if (_bt_scankey_within_page(scan, so->skipScanKey,
 											so->currPos.buf, dir))
 				{
-					OffsetNumber maxoff;
+					OffsetNumber maxoff, startOffset;
 					IndexTuple verifiedItup;
+					Page page = BufferGetPage(so->currPos.buf);
 					startOffset = _bt_binsrch(scan->indexRelation,
 											  so->skipScanKey,
 											  so->currPos.buf);
 
-					page = BufferGetPage(so->currPos.buf);
 					maxoff = PageGetMaxOffsetNumber(page);
 
 					/* Now read the data */
@@ -1845,19 +1838,12 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 						currItem = &so->currPos.items[so->currPos.itemIndex];
 						verifiedItup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
 
-						int compare = ItemPointerCompare(&itup->t_tid, &verifiedItup->t_tid);
-						if(compare <= 0)
-						{
+						if (ItemPointerEquals(&itup->t_tid,
+											  &verifiedItup->t_tid))
 							offnum = jumpOffset;
-							nextOffset = startOffset;
-						}
+						else
+							nextFound = true;
 					}
-
-					/*if (nextOffset <= startOffset)*/
-					/*{*/
-						/*offnum = jumpOffset;*/
-						/*nextOffset = startOffset;*/
-					/*}*/
 
 					if ((offnum > maxoff) & (so->currPos.nextPage == P_NONE))
 					{
@@ -1871,6 +1857,12 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 						return false;
 					}
 				}
+				else
+					/*
+					 * If startItup could be not found within the current page,
+					 * assume we found something new
+					 */
+					nextFound = true;
 
 				/* Return original scankey options */
 				so->skipScanKey->keysz = prefix;
