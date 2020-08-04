@@ -1269,6 +1269,16 @@ update test_jsonb_subscript set test_json[NULL] = 1;
 update test_jsonb_subscript set test_json['another_key'] = NULL;
 select * from test_jsonb_subscript;
 
+-- Fill the gaps logic
+delete from test_jsonb_subscript;
+insert into test_jsonb_subscript values (1, '[0]');
+
+update test_jsonb_subscript set test_json[5] = 1;
+select * from test_jsonb_subscript;
+
+update test_jsonb_subscript set test_json[-5] = 1;
+select * from test_jsonb_subscript;
+
 -- jsonb to tsvector
 select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb);
 

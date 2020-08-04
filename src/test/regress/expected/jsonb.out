@@ -4928,6 +4928,23 @@ select * from test_jsonb_subscript;
   2 | {"a": [1, 2, 3], "key": "value", "another_key": null}
 (2 rows)
 
+-- Fill the gaps logic
+delete from test_jsonb_subscript;
+insert into test_jsonb_subscript values (1, '[0]');
+update test_jsonb_subscript set test_json[5] = 1;
+select * from test_jsonb_subscript;
+ id |           test_json            
+----+--------------------------------
+  1 | [0, null, null, null, null, 1]
+(1 row)
+
+update test_jsonb_subscript set test_json[-5] = 1;
+select * from test_jsonb_subscript;
+ id |                          test_json                           
+----+--------------------------------------------------------------
+  1 | [1, null, null, null, null, 0, null, null, null, null, 1, 1]
+(1 row)
+
 -- jsonb to tsvector
 select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb);
                                 to_tsvector                                

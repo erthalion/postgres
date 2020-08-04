@@ -47,6 +47,7 @@
 #define JB_PATH_INSERT_AFTER			0x0010
 #define JB_PATH_CREATE_OR_INSERT \
 	(JB_PATH_INSERT_BEFORE | JB_PATH_INSERT_AFTER | JB_PATH_CREATE)
+#define JB_PATH_FILL_GAPS				0x0020
 
 /* state for json_object_keys */
 typedef struct OkeysState
@@ -1492,10 +1493,8 @@ get_jsonb_path_all(FunctionCallInfo fcinfo, bool as_text)
 static Datum
 jsonb_get_element(Jsonb *jb, Datum *path, int npath, bool *isnull, bool as_text)
 {
-	Jsonb		   *res;
 	JsonbContainer *container = &jb->root;
 	JsonbValue	   *jbvp = NULL;
-	JsonbValue		tv;
 	int				i;
 	bool			have_object = false,
 					have_array = false;
@@ -1657,11 +1656,22 @@ jsonb_set_element(Datum jsonbdatum, Datum *path, int path_len,
 	it = JsonbIteratorInit(&jb->root);
 
 	res = setPath(&it, path, path_nulls, path_len, &state, 0,
-				  newval, JB_PATH_CREATE);
+				  newval, JB_PATH_CREATE | JB_PATH_FILL_GAPS);
 
 	pfree(path_nulls);
 
 	PG_RETURN_JSONB_P(JsonbValueToJsonb(res));
+}
+
+static void
+push_null_elements(JsonbParseState **ps, int num)
+{
+		JsonbValue	null;
+
+		null.type = jbvNull;
+
+		while (num-- > 0)
+				pushJsonbValue(ps, WJB_ELEM, &null);
 }
 
 /*
@@ -5004,16 +5014,19 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
 	else
 		idx = nelems;
 
-	if (idx < 0)
+	if (!(op_type & JB_PATH_FILL_GAPS))
 	{
-		if (-idx > nelems)
-			idx = INT_MIN;
-		else
-			idx = nelems + idx;
-	}
+		if (idx < 0)
+		{
+			if (-idx > nelems)
+				idx = INT_MIN;
+			else
+				idx = nelems + idx;
+		}
 
-	if (idx > 0 && idx > nelems)
-		idx = nelems;
+		if (idx > 0 && idx > nelems)
+			idx = nelems;
+	}
 
 	/*
 	 * if we're creating, and idx == INT_MIN, we prepend the new value to the
@@ -5027,6 +5040,13 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
 		Assert(newval != NULL);
 		(void) pushJsonbValue(st, WJB_ELEM, newval);
 		done = true;
+	}
+
+	if (op_type & JB_PATH_FILL_GAPS && idx < 0)
+	{
+		Assert(newval != NULL);
+		(void) pushJsonbValue(st, WJB_ELEM, newval);
+		push_null_elements(st, -idx - 1);
 	}
 
 	/* iterate over the array elements */
@@ -5086,10 +5106,14 @@ setPathArray(JsonbIterator **it, Datum *path_elems, bool *path_nulls,
 			if ((op_type & JB_PATH_CREATE_OR_INSERT) && !done &&
 				level == path_len - 1 && i == nelems - 1)
 			{
+				if (op_type & JB_PATH_FILL_GAPS && idx > nelems)
+					push_null_elements(st, idx - nelems);
+
 				(void) pushJsonbValue(st, WJB_ELEM, newval);
 			}
 		}
 	}
+
 }
 
 /*
