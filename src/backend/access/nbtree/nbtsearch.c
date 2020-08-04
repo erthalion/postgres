@@ -1559,7 +1559,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	 */
 	if (BufferIsValid(so->currPos.buf) && ScanDirectionIsForward(dir))
 	{
-		LockBuffer(so->currPos.buf, BT_READ);
+		_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
 
 		if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
 		{
@@ -1577,7 +1577,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			/* Now read the data */
 			keyFound = _bt_readpage(scan, dir, offnum);
 
-			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+			_bt_unlockbuf(indexRel, so->currPos.buf);
 			ReleaseBuffer(so->currPos.buf);
 			so->currPos.buf = InvalidBuffer;
 
@@ -1591,9 +1591,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			}
 		}
 		else
-		{
-			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-		}
+			_bt_unlockbuf(indexRel, so->currPos.buf);
 	}
 
 	if (BufferIsValid(so->currPos.buf))
@@ -1653,10 +1651,10 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			/* One step back to find a previous value */
 			_bt_readpage(scan, dir, offnum);
 
-			LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+			_bt_unlockbuf(indexRel, so->currPos.buf);
 			if (_bt_next(scan, dir))
 			{
-				LockBuffer(so->currPos.buf, BT_READ);
+				_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
 				_bt_update_skip_scankeys(scan, indexRel);
 
 				/*
@@ -1674,7 +1672,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 						if (so->numKilled > 0)
 							_bt_killitems(scan);
 
-						LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+						_bt_unlockbuf(indexRel, so->currPos.buf);
 						ReleaseBuffer(so->currPos.buf);
 						so->currPos.buf = InvalidBuffer;
 					}
@@ -1739,14 +1737,14 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					 * advance to the next page. Return false if there's no
 					 * matching data at all.
 					 */
-					LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+					_bt_unlockbuf(indexRel, so->currPos.buf);
 					if (!_bt_steppage(scan, dir))
 					{
 						pfree(so->skipScanKey);
 						so->skipScanKey = NULL;
 						return false;
 					}
-					LockBuffer(so->currPos.buf, BT_READ);
+					_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
 				}
 
 				currItem = &so->currPos.items[so->currPos.firstItem];
@@ -1761,7 +1759,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					if (so->numKilled > 0)
 						_bt_killitems(scan);
 
-					LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+					_bt_unlockbuf(indexRel, so->currPos.buf);
 					ReleaseBuffer(so->currPos.buf);
 					so->currPos.buf = InvalidBuffer;
 				}
@@ -1787,14 +1785,14 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					 * advance to the next page. Return false if there's no
 					 * matching data at all.
 					 */
-					LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+					_bt_unlockbuf(indexRel, so->currPos.buf);
 					if (!_bt_steppage(scan, indexdir))
 					{
 						pfree(so->skipScanKey);
 						so->skipScanKey = NULL;
 						return false;
 					}
-					LockBuffer(so->currPos.buf, BT_READ);
+					_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
 				}
 
 				currItem = &so->currPos.items[so->currPos.lastItem];
@@ -1886,7 +1884,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 
 					if ((offnum > maxoff) & (so->currPos.nextPage == P_NONE))
 					{
-						LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+						_bt_unlockbuf(indexRel, so->currPos.buf);
 
 						BTScanPosUnpinIfPinned(so->currPos);
 						BTScanPosInvalidate(so->currPos);
@@ -1917,7 +1915,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		 * There's no actually-matching data on this page.  Try to advance to
 		 * the next page.  Return false if there's no matching data at all.
 		 */
-		LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+		_bt_unlockbuf(indexRel, so->currPos.buf);
 		if (!_bt_steppage(scan, dir))
 		{
 			pfree(so->skipScanKey);
@@ -1926,10 +1924,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		}
 	}
 	else
-	{
 		/* Drop the lock, and maybe the pin, on the current page */
-		LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-	}
+		_bt_unlockbuf(indexRel, so->currPos.buf);
 
 	/* And set IndexTuple */
 	currItem = &so->currPos.items[so->currPos.itemIndex];
