@@ -937,3 +937,40 @@ BEGIN;
 
 COMMIT;
 DROP TABLE distinct_killed;
+-- test posting lists
+CREATE TABLE distinct_posting (a int, b int, c int);
+CREATE INDEX ON distinct_posting (a, b, c);
+INSERT INTO distinct_posting
+	VALUES (1, 1, 1),
+		   (1, 1, 2),
+		   (1, 2, 2),
+		   (1, 2, 3),
+		   (2, 2, 1),
+		   (2, 2, 3),
+		   (3, 1, 1),
+		   (3, 1, 2),
+		   (3, 2, 2),
+		   (3, 2, 3);
+INSERT INTO distinct_posting (
+    SELECT 1 as a, 1 as b, 1 AS c
+        FROM generate_series(1,1000) i
+);
+BEGIN;
+    DECLARE c SCROLL CURSOR FOR
+    SELECT DISTINCT ON (a) a,b,c FROM distinct_posting WHERE c = 2
+    ORDER BY a DESC, b DESC;
+    FETCH ALL FROM c;
+ a | b | c 
+---+---+---
+ 3 | 2 | 2
+ 1 | 2 | 2
+(2 rows)
+
+    FETCH BACKWARD ALL FROM c;
+ a | b | c 
+---+---+---
+ 1 | 2 | 2
+ 3 | 2 | 2
+(2 rows)
+
+COMMIT;

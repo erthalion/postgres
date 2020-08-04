@@ -1835,14 +1835,53 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					/* Now read the data */
 					if (_bt_readpage(scan, ForwardScanDirection, startOffset))
 					{
+						ItemPointer resultTids, verifyTids;
+						int nresult = 1,
+							nverify = 1;
+
 						currItem = &so->currPos.items[so->currPos.itemIndex];
 						verifiedItup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
 
-						if (ItemPointerEquals(&itup->t_tid,
-											  &verifiedItup->t_tid))
-							offnum = jumpOffset;
+						/*
+						 * We need to keep in mind that tuples we deal with
+						 * could be also posting tuples and represent a list of
+						 * tids.
+						 */
+						if (BTreeTupleIsPosting(verifiedItup))
+						{
+							nverify = BTreeTupleGetNPosting(verifiedItup);
+							verifyTids = BTreeTupleGetPosting(verifiedItup);
+							for (int i = 1; i < nverify; i++)
+								verifyTids[i] = *BTreeTupleGetPostingN(verifiedItup, i);
+						}
 						else
-							nextFound = true;
+							verifyTids = &verifiedItup->t_tid;
+
+						if (BTreeTupleIsPosting(itup))
+						{
+							nresult = BTreeTupleGetNPosting(itup);
+							resultTids = BTreeTupleGetPosting(itup);
+							for (int i = 1; i < nresult; i++)
+								resultTids[i] = *BTreeTupleGetPostingN(itup, i);
+						}
+						else
+							resultTids = &itup->t_tid;
+
+						/* One not equal means they're not equal. */
+						for(int i = 0; i < nverify; i++)
+						{
+							for(int j = 0; j < nresult; j++)
+							{
+								if (!ItemPointerEquals(&resultTids[j], &verifyTids[i]))
+								{
+									nextFound = true;
+									break;
+								}
+							}
+						}
+
+						if (!nextFound)
+							offnum = jumpOffset;
 					}
 
 					if ((offnum > maxoff) & (so->currPos.nextPage == P_NONE))
