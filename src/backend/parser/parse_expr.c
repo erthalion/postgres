@@ -1301,6 +1301,9 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			 */
 			List	   *aexprs;
 			ArrayExpr  *newa;
+			bool		all_const = true;
+			Node 	   *const_array;
+			Datum		arr_datum;
 
 			aexprs = NIL;
 			foreach(l, rnonvars)
@@ -1310,6 +1313,10 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 				rexpr = coerce_to_common_type(pstate, rexpr,
 											  scalar_type,
 											  "IN");
+
+				if (!IsA(rexpr, Const))
+					all_const = false;
+
 				aexprs = lappend(aexprs, rexpr);
 			}
 			newa = makeNode(ArrayExpr);
@@ -1319,6 +1326,37 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			newa->elements = aexprs;
 			newa->multidims = false;
 			newa->location = -1;
+
+			if (all_const)
+			{
+				Datum *elems = (Datum *) palloc(sizeof(Datum) * aexprs->length);
+				int = 0;
+				Oid type;
+				bool byval;
+				int len;
+
+				foreach(l, rnonvars)
+				{
+					Const	   *rexpr = (Const *) lfirst(l);
+
+					rexpr = coerce_to_common_type(pstate, rexpr,
+												  scalar_type,
+												  "IN");
+
+					elems[i] = rexpr->constvalue;
+					type = rexpr->consttype;
+					byval = rexpr->constbyval;
+					len = rexpr->constlen;
+				}
+
+				get_typlenbyvalalign(scalar_type, &len, &byval, &align);
+				arr_datum = PointerGetDatum(construct_array(elems,
+															aexprs->lengths,
+															scalar_type,
+															len,
+															byval,
+															align));
+			}
 
 			result = (Node *) make_scalar_array_op(pstate,
 												   a->name,
