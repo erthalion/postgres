@@ -1148,8 +1148,6 @@ build_uniquekeys(PlannerInfo *root, List *sortclauses)
 		PathKey    *pathkey = (PathKey *) lfirst(l);
 		EquivalenceClass *ec = pathkey->pk_eclass;
 		EquivalenceMember *mem = (EquivalenceMember*) lfirst(list_head(ec->ec_members));
-		if (EC_MUST_BE_REDUNDANT(ec))
-			continue;
 		exprs = lappend(exprs, mem->em_expr);
 	}
 

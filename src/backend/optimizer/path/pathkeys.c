@@ -1275,6 +1275,9 @@ make_pathkeys_for_uniquekeys(PlannerInfo *root,
 										   sortcl->tleSortGroupRef,
 										   true);
 
+		if (EC_MUST_BE_REDUNDANT(pathkey->pk_eclass))
+			continue;
+
 		if (pathkey_is_unique(pathkey, pathkeys))
 			pathkeys = lappend(pathkeys, pathkey);
 	}
