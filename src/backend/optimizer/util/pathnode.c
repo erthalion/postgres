@@ -3013,51 +3013,24 @@ create_upper_unique_path(PlannerInfo *root,
  */
 IndexPath *
 create_skipscan_unique_path(PlannerInfo *root, IndexOptInfo *index,
-							Path *basepath, List *unique_exprs)
+							Path *basepath, int prefix)
 {
 	IndexPath 	*pathnode = makeNode(IndexPath);
 	int 		numDistinctRows;
-	int 		distinctPrefixKeys;
-	ListCell 	*lc;
-	List 	   	*exprs = NIL;
-
-
-	distinctPrefixKeys = list_length(unique_exprs);
+	UniqueKey *ukey;
 
 	Assert(IsA(basepath, IndexPath));
 
 	/* We don't want to modify basepath, so make a copy. */
 	memcpy(pathnode, basepath, sizeof(IndexPath));
 
-	/*
-	 * Normally we can think about distinctPrefixKeys as just
-	 * a number of distinct keys. But if lets say we have a
-	 * distinct key a, and the index contains b, a in exactly
-	 * this order. In such situation we need to use position
-	 * of a in the index as distinctPrefixKeys, otherwise skip
-	 * will happen only by the first column.
-	 */
-	foreach(lc, unique_exprs)
-	{
-		Expr *unique_expr = (Expr *) lfirst(lc);
-		Var *var = (Var *) unique_expr;
+	ukey = linitial_node(UniqueKey, root->query_uniquekeys);
 
-		exprs = lappend(exprs, unique_expr);
+	Assert(prefix > 0);
+	pathnode->indexskipprefix = prefix;
+	pathnode->path.uniquekeys = root->query_uniquekeys;
 
-		for (int i = 0; i < index->ncolumns; i++)
-		{
-			if (index->indexkeys[i] == var->varattno)
-			{
-				distinctPrefixKeys = Max(i + 1, distinctPrefixKeys);
-				break;
-			}
-		}
-	}
-
-	Assert(distinctPrefixKeys > 0);
-	pathnode->indexskipprefix = distinctPrefixKeys;
-
-	numDistinctRows = estimate_num_groups(root, exprs,
+	numDistinctRows = estimate_num_groups(root, ukey->exprs,
 										  pathnode->path.rows,
 										  NULL);
 

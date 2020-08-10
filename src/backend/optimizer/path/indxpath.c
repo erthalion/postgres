@@ -1165,15 +1165,27 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 		/* Consider index skip scan as well */
 		if (root->query_uniquekeys != NULL && can_skip && !not_empty_qual)
 		{
-			ListCell   *lc;
+			int numusefulkeys = list_length(useful_pathkeys);
+			int numsortkeys = list_length(root->query_pathkeys);
 
-			foreach(lc, root->query_uniquekeys)
+			if (numusefulkeys == numsortkeys)
 			{
-				UniqueKey *ukey = lfirst_node(UniqueKey, lc);
+				int prefix;
+				if (list_length(root->distinct_pathkeys) > 0)
+					prefix = find_index_prefix_for_pathkey(root,
+														   index,
+														   ForwardScanDirection,
+														   llast_node(PathKey,
+														   root->distinct_pathkeys));
+				else
+					/* all are distinct keys are constant and optimized away.
+					 * skipping with 1 is sufficient as all are constant anyway
+					 */
+					prefix = 1;
+
 				result = lappend(result,
 								 create_skipscan_unique_path(root, index,
-															 (Path *) ipath,
-															 ukey->exprs));
+															 (Path *) ipath, prefix));
 			}
 		}
 
@@ -1235,15 +1247,27 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 			/* Consider index skip scan as well */
 			if (root->query_uniquekeys != NULL && can_skip && !not_empty_qual)
 			{
-				ListCell   *lc;
+				int numusefulkeys = list_length(useful_pathkeys);
+				int numsortkeys = list_length(root->query_pathkeys);
 
-				foreach(lc, root->query_uniquekeys)
+				if (numusefulkeys == numsortkeys)
 				{
-					UniqueKey *ukey = lfirst_node(UniqueKey, lc);
+					int prefix;
+					if (list_length(root->distinct_pathkeys) > 0)
+						prefix = find_index_prefix_for_pathkey(root,
+															   index,
+															   BackwardScanDirection,
+															   llast_node(PathKey,
+															   root->distinct_pathkeys));
+					else
+						/* all are distinct keys are constant and optimized away.
+						 * skipping with 1 is sufficient as all are constant anyway
+						 */
+						prefix = 1;
+
 					result = lappend(result,
 									 create_skipscan_unique_path(root, index,
-																 (Path *) ipath,
-																 ukey->exprs));
+																 (Path *) ipath, prefix));
 				}
 			}
 

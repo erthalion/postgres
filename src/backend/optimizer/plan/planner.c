@@ -3627,12 +3627,18 @@ standard_qp_callback(PlannerInfo *root, void *extra)
 
 	if (parse->distinctClause &&
 		grouping_is_sortable(parse->distinctClause))
+	{
 		root->distinct_pathkeys =
 			make_pathkeys_for_sortclauses(root,
 										  parse->distinctClause,
 										  tlist);
+		root->query_uniquekeys = build_uniquekeys(root, parse->distinctClause);
+	}
 	else
+	{
 		root->distinct_pathkeys = NIL;
+		root->query_uniquekeys = NIL;
+	}
 
 	root->sort_pathkeys =
 		make_pathkeys_for_sortclauses(root,
@@ -3663,17 +3669,9 @@ standard_qp_callback(PlannerInfo *root, void *extra)
 		root->query_pathkeys = root->window_pathkeys;
 	else if (list_length(root->distinct_pathkeys) >
 			 list_length(root->sort_pathkeys))
-	{
 		root->query_pathkeys = root->distinct_pathkeys;
-		root->query_uniquekeys = build_uniquekeys(root, parse->distinctClause);
-	}
 	else if (root->sort_pathkeys)
-	{
 		root->query_pathkeys = root->sort_pathkeys;
-
-		if (root->distinct_pathkeys)
-			root->query_uniquekeys = build_uniquekeys(root, parse->distinctClause);
-	}
 	else
 		root->query_pathkeys = NIL;
 }
@@ -4834,7 +4832,7 @@ create_distinct_paths(PlannerInfo *root,
 		{
 			Path	   *path = (Path *) lfirst(lc);
 
-			if (query_has_uniquekeys_for(root, needed_pathkeys, false))
+			if (query_has_uniquekeys_for(root, path->uniquekeys, false))
 				add_path(distinct_rel, path);
 		}
 

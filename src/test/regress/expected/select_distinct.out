@@ -647,14 +647,12 @@ FROM distinct_a ORDER BY a;
 EXPLAIN (COSTS OFF)
 SELECT DISTINCT ON (a) a, b, c
 FROM distinct_a WHERE a = 1 ORDER BY a;
-                     QUERY PLAN                      
------------------------------------------------------
- Unique
-   ->  Bitmap Heap Scan on distinct_a
-         Recheck Cond: (a = 1)
-         ->  Bitmap Index Scan on distinct_a_a_b_idx
-               Index Cond: (a = 1)
-(5 rows)
+                    QUERY PLAN                     
+---------------------------------------------------
+ Index Scan using distinct_a_a_b_idx on distinct_a
+   Skip scan: true
+   Index Cond: (a = 1)
+(3 rows)
 
 EXPLAIN (COSTS OFF)
 SELECT DISTINCT *

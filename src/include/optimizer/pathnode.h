@@ -210,7 +210,7 @@ extern UpperUniquePath *create_upper_unique_path(PlannerInfo *root,
 extern IndexPath *create_skipscan_unique_path(PlannerInfo *root,
 											  IndexOptInfo *index,
 											  Path *subpath,
-											  List *unique_exprs);
+											  int prefix);
 extern AggPath *create_agg_path(PlannerInfo *root,
 								RelOptInfo *rel,
 								Path *subpath,
