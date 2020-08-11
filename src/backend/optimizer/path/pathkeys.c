@@ -529,63 +529,25 @@ get_cheapest_parallel_safe_total_inner(List *paths)
  * Returns 0 when not found.
  */
 int
-find_index_prefix_for_pathkey(PlannerInfo *root,
-					 IndexOptInfo *index,
-					 ScanDirection scandir,
-					 PathKey *pathkey)
+find_index_prefix_for_pathkey(List *index_pathkeys,
+							  List *pathkeys_positions,
+							  PathKey *target_pathkey)
 {
 	ListCell   *lc;
 	int			i;
 
 	i = 0;
-	foreach(lc, index->indextlist)
+	foreach(lc, index_pathkeys)
 	{
-		TargetEntry *indextle = (TargetEntry *) lfirst(lc);
-		Expr	   *indexkey;
-		bool		reverse_sort;
-		bool		nulls_first;
-		PathKey    *cpathkey;
+		PathKey    *cpathkey = (PathKey *) lfirst(lc);
 
-		/*
-		 * INCLUDE columns are stored in index unordered, so they don't
-		 * support ordered index scan.
-		 */
-		if (i >= index->nkeycolumns)
-			break;
-
-		/* We assume we don't need to make a copy of the tlist item */
-		indexkey = indextle->expr;
-
-		if (ScanDirectionIsBackward(scandir))
+		if (cpathkey == target_pathkey)
 		{
-			reverse_sort = !index->reverse_sort[i];
-			nulls_first = !index->nulls_first[i];
-		}
-		else
-		{
-			reverse_sort = index->reverse_sort[i];
-			nulls_first = index->nulls_first[i];
-		}
-
-		/*
-		 * OK, try to make a canonical pathkey for this sort key.  Note we're
-		 * underneath any outer joins, so nullable_relids should be NULL.
-		 */
-		cpathkey = make_pathkey_from_sortinfo(root,
-											  indexkey,
-											  NULL,
-											  index->sortopfamily[i],
-											  index->opcintype[i],
-											  index->indexcollations[i],
-											  reverse_sort,
-											  nulls_first,
-											  0,
-											  index->rel->relids,
-											  false);
-
-		if (cpathkey == pathkey)
-		{
-			return i + 1;
+			if (pathkeys_positions != NIL &&
+				pathkeys_positions->length > i + 1)
+				return list_nth_int(pathkeys_positions, i + 1);
+			else
+				return i + 1;
 		}
 
 		i++;
@@ -593,6 +555,71 @@ find_index_prefix_for_pathkey(PlannerInfo *root,
 
 	return 0;
 }
+/*int*/
+/*find_index_prefix_for_pathkey(PlannerInfo *root,*/
+					 /*IndexOptInfo *index,*/
+					 /*ScanDirection scandir,*/
+					 /*PathKey *pathkey)*/
+/*{*/
+	/*ListCell   *lc;*/
+	/*int			i;*/
+
+	/*i = 0;*/
+	/*foreach(lc, index->indextlist)*/
+	/*{*/
+		/*TargetEntry *indextle = (TargetEntry *) lfirst(lc);*/
+		/*Expr	   *indexkey;*/
+		/*bool		reverse_sort;*/
+		/*bool		nulls_first;*/
+		/*PathKey    *cpathkey;*/
+
+		/*
+		 * INCLUDE columns are stored in index unordered, so they don't
+		 * support ordered index scan.
+		 */
+		/*if (i >= index->nkeycolumns)*/
+			/*break;*/
+
+		/*[> We assume we don't need to make a copy of the tlist item <]*/
+		/*indexkey = indextle->expr;*/
+
+		/*if (ScanDirectionIsBackward(scandir))*/
+		/*{*/
+			/*reverse_sort = !index->reverse_sort[i];*/
+			/*nulls_first = !index->nulls_first[i];*/
+		/*}*/
+		/*else*/
+		/*{*/
+			/*reverse_sort = index->reverse_sort[i];*/
+			/*nulls_first = index->nulls_first[i];*/
+		/*}*/
+
+		/*
+		 * OK, try to make a canonical pathkey for this sort key.  Note we're
+		 * underneath any outer joins, so nullable_relids should be NULL.
+		 */
+		/*cpathkey = make_pathkey_from_sortinfo(root,*/
+											  /*indexkey,*/
+											  /*NULL,*/
+											  /*index->sortopfamily[i],*/
+											  /*index->opcintype[i],*/
+											  /*index->indexcollations[i],*/
+											  /*reverse_sort,*/
+											  /*nulls_first,*/
+											  /*0,*/
+											  /*index->rel->relids,*/
+											  /*false);*/
+
+		/*if (cpathkey == pathkey)*/
+		/*{*/
+			/*return i + 1;*/
+		/*}*/
+
+		/*i++;*/
+	/*}*/
+
+	/*return 0;*/
+/*}*/
 
 /*
  * build_index_pathkeys
@@ -617,7 +644,8 @@ find_index_prefix_for_pathkey(PlannerInfo *root,
 List *
 build_index_pathkeys(PlannerInfo *root,
 					 IndexOptInfo *index,
-					 ScanDirection scandir)
+					 ScanDirection scandir,
+					 List **positions)
 {
 	List	   *retval = NIL;
 	ListCell   *lc;
@@ -625,6 +653,8 @@ build_index_pathkeys(PlannerInfo *root,
 
 	if (index->sortopfamily == NULL)
 		return NIL;				/* non-orderable index */
+
+	*positions = NIL;
 
 	i = 0;
 	foreach(lc, index->indextlist)
@@ -679,7 +709,11 @@ build_index_pathkeys(PlannerInfo *root,
 			 * for this query.  Add it to list, unless it's redundant.
 			 */
 			if (!pathkey_is_redundant(cpathkey, retval))
+			{
 				retval = lappend(retval, cpathkey);
+				*positions = lappend_int(*positions,
+										 foreach_current_index(lc));
+			}
 		}
 		else
 		{

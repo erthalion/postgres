@@ -872,8 +872,9 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	double		loop_count;
 	List	   *orderbyclauses;
 	List	   *orderbyclausecols;
-	List	   *index_pathkeys;
+	List	   *index_pathkeys = NIL;
 	List	   *useful_pathkeys;
+	List	   *index_pathkeys_pos = NIL;
 	bool		found_lower_saop_clause;
 	bool		pathkeys_possibly_useful;
 	bool		index_is_ordered;
@@ -997,7 +998,8 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	if (index_is_ordered && pathkeys_possibly_useful)
 	{
 		index_pathkeys = build_index_pathkeys(root, index,
-											  ForwardScanDirection);
+											  ForwardScanDirection,
+											  &index_pathkeys_pos);
 		useful_pathkeys = truncate_useless_pathkeys(root, rel,
 													index_pathkeys);
 		orderbyclauses = NIL;
@@ -1172,9 +1174,8 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 			{
 				int prefix;
 				if (list_length(root->distinct_pathkeys) > 0)
-					prefix = find_index_prefix_for_pathkey(root,
-														   index,
-														   ForwardScanDirection,
+					prefix = find_index_prefix_for_pathkey(index_pathkeys,
+														   index_pathkeys_pos,
 														   llast_node(PathKey,
 														   root->distinct_pathkeys));
 				else
@@ -1227,7 +1228,8 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 	if (index_is_ordered && pathkeys_possibly_useful)
 	{
 		index_pathkeys = build_index_pathkeys(root, index,
-											  BackwardScanDirection);
+											  BackwardScanDirection,
+											  &index_pathkeys_pos);
 		useful_pathkeys = truncate_useless_pathkeys(root, rel,
 													index_pathkeys);
 		if (useful_pathkeys != NIL)
@@ -1254,9 +1256,8 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 				{
 					int prefix;
 					if (list_length(root->distinct_pathkeys) > 0)
-						prefix = find_index_prefix_for_pathkey(root,
-															   index,
-															   BackwardScanDirection,
+						prefix = find_index_prefix_for_pathkey(index_pathkeys,
+															   index_pathkeys_pos,
 															   llast_node(PathKey,
 															   root->distinct_pathkeys));
 					else
