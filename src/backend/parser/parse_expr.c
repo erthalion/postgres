@@ -32,6 +32,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/lsyscache.h"
@@ -1304,6 +1305,7 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			bool		all_const = true;
 			Node 	   *const_array;
 			Datum		arr_datum;
+			int32 		typmod;
 
 			aexprs = NIL;
 			foreach(l, rnonvars)
@@ -1330,40 +1332,55 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			if (all_const)
 			{
 				Datum *elems = (Datum *) palloc(sizeof(Datum) * aexprs->length);
-				int = 0;
+				int i = 0;
 				Oid type;
 				bool byval;
-				int len;
+				int16 len;
+				char align;
 
 				foreach(l, rnonvars)
 				{
 					Const	   *rexpr = (Const *) lfirst(l);
 
-					rexpr = coerce_to_common_type(pstate, rexpr,
-												  scalar_type,
-												  "IN");
-
 					elems[i] = rexpr->constvalue;
 					type = rexpr->consttype;
 					byval = rexpr->constbyval;
 					len = rexpr->constlen;
+					typmod = rexpr->consttypmod;
+					i++;
 				}
 
 				get_typlenbyvalalign(scalar_type, &len, &byval, &align);
 				arr_datum = PointerGetDatum(construct_array(elems,
-															aexprs->lengths,
+															aexprs->length,
 															scalar_type,
 															len,
 															byval,
 															align));
-			}
+				result = (Node *) makeConst(array_type,
+											typmod,
+											newa->array_collid,
+										   	len,
+										   	arr_datum,
+											false,
+										   	byval);
 
-			result = (Node *) make_scalar_array_op(pstate,
+				result = (Node *) make_scalar_array_op(pstate,
+												   a->name,
+												   useOr,
+												   lexpr,
+												   (Node *) result,
+												   a->location);
+			}
+			else
+			{
+				result = (Node *) make_scalar_array_op(pstate,
 												   a->name,
 												   useOr,
 												   lexpr,
 												   (Node *) newa,
 												   a->location);
+			}
 
 			/* Consider only the Vars (if any) in the loop below */
 			rexprs = rvars;
