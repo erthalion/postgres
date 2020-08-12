@@ -1360,13 +1360,10 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 												 scalar_type, elemlen,
 												 elembyval, elemalign);
 
-				result = (Node *) makeConst(array_type,
-											-1,
-											newa->array_collid,
-										   	elemlen,
+				result = (Node *) makeConst(array_type, -1,
+											newa->array_collid, -1,
 										   	PointerGetDatum(const_array),
-											false,
-										   	elembyval);
+											false, false);
 
 				result = (Node *) make_scalar_array_op(pstate,
 													   a->name,
