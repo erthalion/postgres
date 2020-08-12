@@ -1303,9 +1303,6 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			List	   *aexprs;
 			ArrayExpr  *newa;
 			bool		all_const = true;
-			Node 	   *const_array;
-			Datum		arr_datum;
-			int32 		typmod;
 
 			aexprs = NIL;
 			foreach(l, rnonvars)
@@ -1329,58 +1326,62 @@ transformAExprIn(ParseState *pstate, A_Expr *a)
 			newa->multidims = false;
 			newa->location = -1;
 
+			/* if all elements are const reduce ArrayExpr to a const as well */
 			if (all_const)
 			{
-				Datum *elems = (Datum *) palloc(sizeof(Datum) * aexprs->length);
-				int i = 0;
-				Oid type;
-				bool byval;
-				int16 len;
-				char align;
+				ArrayType  	*const_array;
+				Datum 		*elems = (Datum *) palloc(sizeof(Datum) * aexprs->length);
+				bool 		*nulls = (bool *) palloc(sizeof(bool) * aexprs->length);
 
-				foreach(l, rnonvars)
+				int			dims[1];
+				int			lbs[1];
+
+				bool 		elembyval;
+				int16 		elemlen;
+				char 		elemalign;
+				int 		i = 0;
+
+				foreach(l, aexprs)
 				{
-					Const	   *rexpr = (Const *) lfirst(l);
+					Const	   *expr = (Const *) lfirst(l);
 
-					elems[i] = rexpr->constvalue;
-					type = rexpr->consttype;
-					byval = rexpr->constbyval;
-					len = rexpr->constlen;
-					typmod = rexpr->consttypmod;
+					elems[i] = expr->constvalue;
+					nulls[i] = expr->constisnull;
 					i++;
 				}
 
-				get_typlenbyvalalign(scalar_type, &len, &byval, &align);
-				arr_datum = PointerGetDatum(construct_array(elems,
-															aexprs->length,
-															scalar_type,
-															len,
-															byval,
-															align));
+				/* ArrayExpr would have only one dimention */
+				dims[0] = aexprs->length;
+				lbs[0] = 1;
+
+				get_typlenbyvalalign(scalar_type, &elemlen,
+									 &elembyval, &elemalign);
+				const_array = construct_md_array(elems, nulls, 1, dims, lbs,
+												 scalar_type, elemlen,
+												 elembyval, elemalign);
+
 				result = (Node *) makeConst(array_type,
-											typmod,
+											-1,
 											newa->array_collid,
-										   	len,
-										   	arr_datum,
+										   	elemlen,
+										   	PointerGetDatum(const_array),
 											false,
-										   	byval);
+										   	elembyval);
 
 				result = (Node *) make_scalar_array_op(pstate,
-												   a->name,
-												   useOr,
-												   lexpr,
-												   (Node *) result,
-												   a->location);
+													   a->name,
+													   useOr,
+													   lexpr,
+													   (Node *) result,
+													   a->location);
 			}
 			else
-			{
 				result = (Node *) make_scalar_array_op(pstate,
-												   a->name,
-												   useOr,
-												   lexpr,
-												   (Node *) newa,
-												   a->location);
-			}
+													   a->name,
+													   useOr,
+													   lexpr,
+													   (Node *) newa,
+													   a->location);
 
 			/* Consider only the Vars (if any) in the loop below */
 			rexprs = rvars;
