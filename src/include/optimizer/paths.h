@@ -201,10 +201,6 @@ extern Path *get_cheapest_parallel_safe_total_inner(List *paths);
 extern int find_index_prefix_for_pathkey(List *index_pathkeys,
 										 List *pathkey_positions,
 										 PathKey *target_pathkey);
-//extern int find_index_prefix_for_pathkey(PlannerInfo *root,
-					 //IndexOptInfo *index,
-					 //ScanDirection scandir,
-					 //PathKey *pathkey);
 extern List *build_index_pathkeys(PlannerInfo *root, IndexOptInfo *index,
 								  ScanDirection scandir, List **positions);
 extern List *build_partition_pathkeys(PlannerInfo *root, RelOptInfo *partrel,

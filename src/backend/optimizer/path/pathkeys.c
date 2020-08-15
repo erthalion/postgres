@@ -523,9 +523,12 @@ get_cheapest_parallel_safe_total_inner(List *paths)
  ****************************************************************************/
 
 /*
- * Find the prefix size for a specific path key in an index.
- * For example, an index with (a,b,c) finding path key b will
- * return prefix 2.
+ * Find the prefix size for a specific path key in an index. For example, an
+ * index with (a,b,c) finding path key b will return prefix 2. Optionally
+ * pathkeys_positions can be provided, to specify at which position in the
+ * original pathkey list this particular key could be found (this is helpful
+ * when we deal with redundant pathkeys).
+ *
  * Returns 0 when not found.
  */
 int
@@ -543,9 +546,13 @@ find_index_prefix_for_pathkey(List *index_pathkeys,
 
 		if (cpathkey == target_pathkey)
 		{
+			/*
+			 * Prefix expected to start from 1, increment positions since
+			 * they're 0 based.
+			 */
 			if (pathkeys_positions != NIL &&
-				pathkeys_positions->length > i + 1)
-				return list_nth_int(pathkeys_positions, i + 1);
+				pathkeys_positions->length > i)
+				return list_nth_int(pathkeys_positions, i) + 1;
 			else
 				return i + 1;
 		}
@@ -555,71 +562,6 @@ find_index_prefix_for_pathkey(List *index_pathkeys,
 
 	return 0;
 }
-/*int*/
-/*find_index_prefix_for_pathkey(PlannerInfo *root,*/
-					 /*IndexOptInfo *index,*/
-					 /*ScanDirection scandir,*/
-					 /*PathKey *pathkey)*/
-/*{*/
-	/*ListCell   *lc;*/
-	/*int			i;*/
-
-	/*i = 0;*/
-	/*foreach(lc, index->indextlist)*/
-	/*{*/
-		/*TargetEntry *indextle = (TargetEntry *) lfirst(lc);*/
-		/*Expr	   *indexkey;*/
-		/*bool		reverse_sort;*/
-		/*bool		nulls_first;*/
-		/*PathKey    *cpathkey;*/
-
-		/*
-		 * INCLUDE columns are stored in index unordered, so they don't
-		 * support ordered index scan.
-		 */
-		/*if (i >= index->nkeycolumns)*/
-			/*break;*/
-
-		/*[> We assume we don't need to make a copy of the tlist item <]*/
-		/*indexkey = indextle->expr;*/
-
-		/*if (ScanDirectionIsBackward(scandir))*/
-		/*{*/
-			/*reverse_sort = !index->reverse_sort[i];*/
-			/*nulls_first = !index->nulls_first[i];*/
-		/*}*/
-		/*else*/
-		/*{*/
-			/*reverse_sort = index->reverse_sort[i];*/
-			/*nulls_first = index->nulls_first[i];*/
-		/*}*/
-
-		/*
-		 * OK, try to make a canonical pathkey for this sort key.  Note we're
-		 * underneath any outer joins, so nullable_relids should be NULL.
-		 */
-		/*cpathkey = make_pathkey_from_sortinfo(root,*/
-											  /*indexkey,*/
-											  /*NULL,*/
-											  /*index->sortopfamily[i],*/
-											  /*index->opcintype[i],*/
-											  /*index->indexcollations[i],*/
-											  /*reverse_sort,*/
-											  /*nulls_first,*/
-											  /*0,*/
-											  /*index->rel->relids,*/
-											  /*false);*/
-
-		/*if (cpathkey == pathkey)*/
-		/*{*/
-			/*return i + 1;*/
-		/*}*/
-
-		/*i++;*/
-	/*}*/
-
-	/*return 0;*/
-/*}*/
 
 /*
  * build_index_pathkeys
@@ -633,7 +575,9 @@ find_index_prefix_for_pathkey(List *index_pathkeys,
  * We iterate only key columns of covering indexes, since non-key columns
  * don't influence index ordering.  The result is canonical, meaning that
  * redundant pathkeys are removed; it may therefore have fewer entries than
- * there are key columns in the index.
+ * there are key columns in the index. Since by removing redundant pathkeys the
+ * information about original position is lost, return it via positions
+ * argument.
  *
  * Another reason for stopping early is that we may be able to tell that
  * an index column's sort order is uninteresting for this query.  However,
