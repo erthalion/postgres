@@ -1916,18 +1916,19 @@ cost_incremental_sort(Path *path,
 void
 cost_reordered_groupby(Path *path, PlannerInfo *root,
 		  List *pathkeys, Cost input_cost, double tuples,
-		  int width, double *est_num_groups, double *widths,
+		  int width, List *pathkeys_cost_details,
 		  Cost comparison_cost, int sort_mem,
 		  double limit_tuples)
 {
 	Cost		startup_cost;
 	Cost		run_cost;
-	double 		group_ratio = est_num_groups[0] / tuples;
-	double		tuples_ratio = 1.0 / est_num_groups[0];
+	GroupCosts *group_costs = linitial(pathkeys_cost_details);
+	double 		group_ratio = group_costs->est_num_groups / tuples;
+	double		tuples_ratio = 1.0 / group_costs->est_num_groups;
 	double 		default_cost = 2.0 * cpu_operator_cost;
 
 	cost_tuplesort(&startup_cost, &run_cost, tuples,
-				   widths[0] + (width - widths[0]) * tuples_ratio,
+				   group_costs->width + (width - group_costs->width) * tuples_ratio,
 				   -default_cost + (default_cost * (1 - group_ratio)),
 				   sort_mem, limit_tuples);
 

@@ -112,7 +112,7 @@ extern void cost_incremental_sort(Path *path,
 								  double limit_tuples);
 extern void cost_reordered_groupby(Path *path, PlannerInfo *root,
 					  List *pathkeys, Cost input_cost, double tuples,
-					  int width, double *est_num_groups, double *widths,
+					  int width, List *pathkeys_cost_details,
 					  Cost comparison_cost, int sort_mem,
 					  double limit_tuples);
 extern void cost_append(AppendPath *path);

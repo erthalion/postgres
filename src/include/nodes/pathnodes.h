@@ -2549,4 +2549,11 @@ typedef struct JoinCostWorkspace
 	double		inner_rows_total;
 } JoinCostWorkspace;
 
+typedef struct GroupCosts
+{
+	Cost 	comparison_cost;
+	double 	width;
+	double 	est_num_groups;
+} GroupCosts;
+
 #endif							/* PATHNODES_H */

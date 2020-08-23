@@ -2852,8 +2852,7 @@ create_sort_reordered_path(PlannerInfo *root,
 				 RelOptInfo *rel,
 				 Path *subpath,
 				 List *pathkeys,
-				 double *est_num_groups,
-				 int *widths,
+				 List *pathkeys_cost_details,
 				 double limit_tuples)
 {
 	SortPath   *pathnode = makeNode(SortPath);
@@ -2872,13 +2871,12 @@ create_sort_reordered_path(PlannerInfo *root,
 
 	pathnode->subpath = subpath;
 
-	if (est_num_groups != NULL)
+	if (pathkeys_cost_details != NULL)
 		cost_reordered_groupby(&pathnode->path, root, pathkeys,
 				  subpath->total_cost,
 				  subpath->rows,
 				  subpath->pathtarget->width,
-				  est_num_groups,
-				  widths,
+				  pathkeys_cost_details,
 				  0.0,				/* XXX comparison_cost shouldn't be 0? */
 				  work_mem, limit_tuples);
 	else

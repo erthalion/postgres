@@ -565,8 +565,7 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 							  List *target_list,
 							  List **group_pathkeys,
 							  List **group_clauses,
-							  double **est_num_groups,
-							  double **widths,
+							  List **pathkeys_cost_details,
 							  int n_preordered, int sort_mem)
 {
 	struct
@@ -600,8 +599,6 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 		return;
 
 	keys = palloc(nkeys * sizeof(*keys));
-	*est_num_groups = palloc0(nkeys * sizeof(double));
-	*widths = palloc0(nkeys * sizeof(double));
 
 	/*
 	 * Collect information about pathkey for subsequent usage
@@ -710,10 +707,14 @@ get_cheapest_group_keys_order(PlannerInfo *root, double nrows,
 		}
 		else
 		{
+			GroupCosts *key_cost_details = (GroupCosts *) palloc(sizeof(GroupCosts));
+			key_cost_details->comparison_cost = keys[i - n_preordered].comparison_cost;
+			key_cost_details->width = keys[i - n_preordered].width;
+			key_cost_details->est_num_groups = keys[i - n_preordered].est_num_groups;
 			pathkey = keys[i - n_preordered].pathkey;
 			sgc = keys[i - n_preordered].sgc;
-			(*est_num_groups)[i - n_preordered] = keys[i - n_preordered].est_num_groups;
-			(*widths)[i - n_preordered] = keys[i - n_preordered].width;
+			*pathkeys_cost_details = lappend(*pathkeys_cost_details,
+											 key_cost_details);
 		}
 
 		new_group_pathkeys = lappend(new_group_pathkeys, pathkey);
