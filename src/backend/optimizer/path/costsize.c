@@ -1927,6 +1927,7 @@ cost_reordered_groupby(Path *path, PlannerInfo *root,
 	double		tuples_ratio = 1.0 / group_costs->est_num_groups;
 	double 		default_cost = 2.0 * cpu_operator_cost;
 
+	elog(LOG, "COST REORDERED GROUP BY");
 	cost_tuplesort(&startup_cost, &run_cost, tuples,
 				   group_costs->width + (width - group_costs->width) * tuples_ratio,
 				   -default_cost + (default_cost * (1 - group_ratio)),
@@ -1959,6 +1960,7 @@ cost_sort(Path *path, PlannerInfo *root,
 	Cost		startup_cost;
 	Cost		run_cost;
 
+	elog(LOG, "COST SORT");
 	cost_tuplesort(&startup_cost, &run_cost,
 				   tuples, width,
 				   comparison_cost, sort_mem,
@@ -2384,6 +2386,7 @@ cost_agg(Path *path, PlannerInfo *root,
 		startup_cost += aggcosts->finalCost.per_tuple;
 		/* we aren't grouping */
 		total_cost = startup_cost + cpu_tuple_cost;
+		printf("TOTAL COST 1: %f\n", total_cost);
 		output_tuples = 1;
 	}
 	else if (aggstrategy == AGG_SORTED || aggstrategy == AGG_MIXED)
@@ -2391,18 +2394,26 @@ cost_agg(Path *path, PlannerInfo *root,
 		/* Here we are able to deliver output on-the-fly */
 		startup_cost = input_startup_cost;
 		total_cost = input_total_cost;
+		printf("TOTAL COST 2.1: %f\n", total_cost);
 		if (aggstrategy == AGG_MIXED && !enable_hashagg)
 		{
 			startup_cost += disable_cost;
 			total_cost += disable_cost;
 		}
+		printf("TOTAL COST 2.2: %f\n", total_cost);
 		/* calcs phrased this way to match HASHED case, see note above */
 		total_cost += aggcosts->transCost.startup;
+		printf("TOTAL COST 2.3: %f\n", total_cost);
 		total_cost += aggcosts->transCost.per_tuple * input_tuples;
+		printf("TOTAL COST 2.4: %f\n", total_cost);
 		total_cost += (cpu_operator_cost * numGroupCols) * input_tuples;
+		printf("TOTAL COST 2.5: %f\n", total_cost);
 		total_cost += aggcosts->finalCost.startup;
+		printf("TOTAL COST 2.6: %f\n", total_cost);
 		total_cost += aggcosts->finalCost.per_tuple * numGroups;
+		printf("TOTAL COST 2.7: %f\n", total_cost);
 		total_cost += cpu_tuple_cost * numGroups;
+		printf("TOTAL COST 2.8: %f\n", total_cost);
 		output_tuples = numGroups;
 	}
 	else
@@ -2421,6 +2432,7 @@ cost_agg(Path *path, PlannerInfo *root,
 		total_cost += aggcosts->finalCost.per_tuple * numGroups;
 		/* cost of retrieving from hash table */
 		total_cost += cpu_tuple_cost * numGroups;
+		printf("TOTAL COST 3: %f\n", total_cost);
 		output_tuples = numGroups;
 	}
 
@@ -2482,6 +2494,7 @@ cost_agg(Path *path, PlannerInfo *root,
 		startup_cost += pages_written * random_page_cost;
 		total_cost += pages_written * random_page_cost;
 		total_cost += pages_read * seq_page_cost;
+		printf("TOTAL COST 4: %f\n", total_cost);
 	}
 
 	/*
@@ -2495,6 +2508,7 @@ cost_agg(Path *path, PlannerInfo *root,
 		cost_qual_eval(&qual_cost, quals, root);
 		startup_cost += qual_cost.startup;
 		total_cost += qual_cost.startup + output_tuples * qual_cost.per_tuple;
+		printf("TOTAL COST 5: %f\n", total_cost);
 
 		output_tuples = clamp_row_est(output_tuples *
 									  clauselist_selectivity(root,

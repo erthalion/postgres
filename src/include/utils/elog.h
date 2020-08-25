@@ -436,4 +436,6 @@ extern void set_syslog_parameters(const char *ident, int facility);
  */
 extern void write_stderr(const char *fmt,...) pg_attribute_printf(1, 2);
 
+extern const char *	get_debug_query(void);
+
 #endif							/* ELOG_H */

@@ -3510,3 +3510,9 @@ trace_recovery(int trace_level)
 
 	return trace_level;
 }
+
+const char *
+get_debug_query()
+{
+	return debug_query_string;
+}

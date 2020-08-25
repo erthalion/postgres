@@ -3060,6 +3060,10 @@ create_agg_path(PlannerInfo *root,
 	pathnode->path.total_cost += target->cost.startup +
 		target->cost.per_tuple * pathnode->path.rows;
 
+	printf("AGG PATH: total cost %f, startup cost %f per_tuple %f\n",
+			pathnode->path.total_cost,
+			pathnode->path.startup_cost,
+			target->cost.per_tuple);
 	return pathnode;
 }
 
