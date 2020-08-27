@@ -1933,6 +1933,8 @@ cost_reordered_groupby(Path *path, PlannerInfo *root,
 				   -default_cost + (default_cost * (1 - group_ratio)),
 				   sort_mem, limit_tuples);
 
+	startup_cost += input_cost;
+
 	path->rows = tuples;
 	path->startup_cost = startup_cost;
 	path->total_cost = startup_cost + run_cost;

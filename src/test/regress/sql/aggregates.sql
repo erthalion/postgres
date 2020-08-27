@@ -1072,7 +1072,7 @@ SET enable_bitmapscan = off;
 VACUUM btg;
 
 EXPLAIN (COSTS off)
-SELECT count('issue') FROM btg GROUP BY p, v;
+SELECT count(*) FROM btg GROUP BY p, v;
 
 EXPLAIN (COSTS off)
 SELECT count(*) FROM btg GROUP BY p, v ORDER BY p, v;

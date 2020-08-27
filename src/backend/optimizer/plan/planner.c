@@ -6474,266 +6474,6 @@ done:
 	return parallel_workers;
 }
 
-static void
-print_restrictclauses(PlannerInfo *root, List *clauses)
-{
-	ListCell   *l;
-
-	foreach(l, clauses)
-	{
-		RestrictInfo *c = lfirst(l);
-
-		print_expr((Node *) c->clause, root->parse->rtable);
-		if (lnext(clauses, l))
-			printf(", ");
-	}
-}
-
-static void
-print_relids(PlannerInfo *root, Relids relids)
-{
-	int			x;
-	bool		first = true;
-
-	x = -1;
-	while ((x = bms_next_member(relids, x)) >= 0)
-	{
-		if (!first)
-			printf(" ");
-		if (x < root->simple_rel_array_size &&
-			root->simple_rte_array[x])
-			printf("%s", root->simple_rte_array[x]->eref->aliasname);
-		else
-			printf("%d", x);
-		first = false;
-	}
-}
-
-static void
-print_path(PlannerInfo *root, Path *path, int indent)
-{
-	const char *ptype;
-	bool		join = false;
-	Path	   *subpath = NULL;
-	int			i;
-
-	switch (nodeTag(path))
-	{
-		case T_Path:
-			switch (path->pathtype)
-			{
-				case T_SeqScan:
-					ptype = "SeqScan";
-					break;
-				case T_SampleScan:
-					ptype = "SampleScan";
-					break;
-				case T_FunctionScan:
-					ptype = "FunctionScan";
-					break;
-				case T_TableFuncScan:
-					ptype = "TableFuncScan";
-					break;
-				case T_ValuesScan:
-					ptype = "ValuesScan";
-					break;
-				case T_CteScan:
-					ptype = "CteScan";
-					break;
-				case T_NamedTuplestoreScan:
-					ptype = "NamedTuplestoreScan";
-					break;
-				case T_Result:
-					ptype = "Result";
-					break;
-				case T_WorkTableScan:
-					ptype = "WorkTableScan";
-					break;
-				default:
-					ptype = "???Path";
-					break;
-			}
-			break;
-		case T_IndexPath:
-			ptype = "IdxScan";
-			break;
-		case T_BitmapHeapPath:
-			ptype = "BitmapHeapScan";
-			break;
-		case T_BitmapAndPath:
-			ptype = "BitmapAndPath";
-			break;
-		case T_BitmapOrPath:
-			ptype = "BitmapOrPath";
-			break;
-		case T_TidPath:
-			ptype = "TidScan";
-			break;
-		case T_SubqueryScanPath:
-			ptype = "SubqueryScan";
-			break;
-		case T_ForeignPath:
-			ptype = "ForeignScan";
-			break;
-		case T_CustomPath:
-			ptype = "CustomScan";
-			break;
-		case T_NestPath:
-			ptype = "NestLoop";
-			join = true;
-			break;
-		case T_MergePath:
-			ptype = "MergeJoin";
-			join = true;
-			break;
-		case T_HashPath:
-			ptype = "HashJoin";
-			join = true;
-			break;
-		case T_AppendPath:
-			ptype = "Append";
-			break;
-		case T_MergeAppendPath:
-			ptype = "MergeAppend";
-			break;
-		case T_GroupResultPath:
-			ptype = "GroupResult";
-			break;
-		case T_MaterialPath:
-			ptype = "Material";
-			subpath = ((MaterialPath *) path)->subpath;
-			break;
-		case T_UniquePath:
-			ptype = "Unique";
-			subpath = ((UniquePath *) path)->subpath;
-			break;
-		case T_GatherPath:
-			ptype = "Gather";
-			subpath = ((GatherPath *) path)->subpath;
-			break;
-		case T_GatherMergePath:
-			ptype = "GatherMerge";
-			subpath = ((GatherMergePath *) path)->subpath;
-			break;
-		case T_ProjectionPath:
-			ptype = "Projection";
-			subpath = ((ProjectionPath *) path)->subpath;
-			break;
-		case T_ProjectSetPath:
-			ptype = "ProjectSet";
-			subpath = ((ProjectSetPath *) path)->subpath;
-			break;
-		case T_SortPath:
-			ptype = "Sort";
-			subpath = ((SortPath *) path)->subpath;
-			break;
-		case T_IncrementalSortPath:
-			ptype = "IncrementalSort";
-			subpath = ((SortPath *) path)->subpath;
-			break;
-		case T_GroupPath:
-			ptype = "Group";
-			subpath = ((GroupPath *) path)->subpath;
-			break;
-		case T_UpperUniquePath:
-			ptype = "UpperUnique";
-			subpath = ((UpperUniquePath *) path)->subpath;
-			break;
-		case T_AggPath:
-			ptype = "Agg";
-			subpath = ((AggPath *) path)->subpath;
-			break;
-		case T_GroupingSetsPath:
-			ptype = "GroupingSets";
-			subpath = ((GroupingSetsPath *) path)->subpath;
-			break;
-		case T_MinMaxAggPath:
-			ptype = "MinMaxAgg";
-			break;
-		case T_WindowAggPath:
-			ptype = "WindowAgg";
-			subpath = ((WindowAggPath *) path)->subpath;
-			break;
-		case T_SetOpPath:
-			ptype = "SetOp";
-			subpath = ((SetOpPath *) path)->subpath;
-			break;
-		case T_RecursiveUnionPath:
-			ptype = "RecursiveUnion";
-			break;
-		case T_LockRowsPath:
-			ptype = "LockRows";
-			subpath = ((LockRowsPath *) path)->subpath;
-			break;
-		case T_ModifyTablePath:
-			ptype = "ModifyTable";
-			break;
-		case T_LimitPath:
-			ptype = "Limit";
-			subpath = ((LimitPath *) path)->subpath;
-			break;
-		default:
-			ptype = "???Path";
-			break;
-	}
-
-	for (i = 0; i < indent; i++)
-		printf("\t");
-	printf("%s", ptype);
-
-	if (path->parent)
-	{
-		printf("(");
-		print_relids(root, path->parent->relids);
-		printf(")");
-	}
-	if (path->param_info)
-	{
-		printf(" required_outer (");
-		print_relids(root, path->param_info->ppi_req_outer);
-		printf(")");
-	}
-	printf(" rows=%.0f cost=%.2f..%.2f\n",
-		   path->rows, path->startup_cost, path->total_cost);
-
-	if (path->pathkeys)
-	{
-		for (i = 0; i < indent; i++)
-			printf("\t");
-		printf("  pathkeys: ");
-		print_pathkeys(path->pathkeys, root->parse->rtable);
-	}
-
-	if (join)
-	{
-		JoinPath   *jp = (JoinPath *) path;
-
-		for (i = 0; i < indent; i++)
-			printf("\t");
-		printf("  clauses: ");
-		print_restrictclauses(root, jp->joinrestrictinfo);
-		printf("\n");
-
-		if (IsA(path, MergePath))
-		{
-			MergePath  *mp = (MergePath *) path;
-
-			for (i = 0; i < indent; i++)
-				printf("\t");
-			printf("  sortouter=%d sortinner=%d materializeinner=%d\n",
-				   ((mp->outersortkeys) ? 1 : 0),
-				   ((mp->innersortkeys) ? 1 : 0),
-				   ((mp->materialize_inner) ? 1 : 0));
-		}
-
-		print_path(root, jp->outerjoinpath, indent + 1);
-		print_path(root, jp->innerjoinpath, indent + 1);
-	}
-
-	if (subpath)
-		print_path(root, subpath, indent + 1);
-}
-
 /*
  * add_paths_to_grouping_rel
  *
@@ -6803,7 +6543,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 													  /*&group_clauses,*/
 													  /*n_preordered_groups,*/
 													  /*work_mem);*/
-					elog(LOG, "CREATE SORT PATH");
 					path = (Path *) create_sort_path(root,
 													 grouped_rel,
 													 path,
@@ -6814,7 +6553,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				/* Now decide what to stick atop it */
 				if (parse->groupingSets)
 				{
-					elog(LOG, "CONSIDER GROUPING SETS PATHS");
 					consider_groupingsets_paths(root, grouped_rel,
 												path, true, can_hash,
 												gd, agg_costs, dNumGroups);
@@ -6825,7 +6563,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 					 * We have aggregation, possibly with plain GROUP BY. Make
 					 * an AggPath.
 					 */
-					elog(LOG, "CREATE AGG PATH");
 					Path *newPath = (Path *) create_agg_path(root,
 											 grouped_rel,
 											 path,
@@ -6836,15 +6573,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 											 havingQual,
 											 agg_costs,
 											 dNumGroups);
-					printf("TOTAL PATHS NORMAL: %f\n", newPath->total_cost);
 					add_path(grouped_rel, newPath);
-
-					/*printf("TOTAL PATHS NORMAL:\n");*/
-					/*foreach(lc, grouped_rel->pathlist)*/
-					/*{*/
-						/*Path *p = (Path *) lfirst(lc);*/
-						/*print_path(root, p, 0);*/
-					/*}*/
 				}
 				else if (parse->groupClause)
 				{
@@ -6852,7 +6581,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 					 * We have GROUP BY without aggregation or grouping sets.
 					 * Make a GroupPath.
 					 */
-					elog(LOG, "CREATE GROUP PATH");
 					add_path(grouped_rel, (Path *)
 							 create_group_path(root,
 											   grouped_rel,
@@ -6877,8 +6605,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				double 	   *widths = NULL;
 				List 	   *pathkeys_cost_details = NIL;
 
-				elog(LOG, "REORDER");
-
 				/* Sort the cheapest-total path if it isn't already sorted */
 				if (!parse->groupingSets)
 					get_cheapest_group_keys_order(root,
@@ -6900,7 +6626,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				/* Now decide what to stick atop it */
 				if (parse->groupingSets)
 				{
-					elog(LOG, "CONSIDER GROUPING SETS PATHS REORDER");
 					consider_groupingsets_paths(root, grouped_rel,
 												path, true, can_hash,
 												gd, agg_costs, dNumGroups);
@@ -6923,34 +6648,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 											 agg_costs,
 											 dNumGroups);
 
-					elog(LOG, "CREATE AGG PATH REORDER, total cost %f", newPath->total_cost);
-
-					printf("START PATHS: %s\n", get_debug_query());
-					printf("TOTAL PATHS BEFORE:\n");
-					foreach(lc, grouped_rel->pathlist)
-					{
-						Path *p = (Path *) lfirst(lc);
-						print_path(root, p, 0);
-					}
-
-					if (newPath != NULL)
-					{
-						printf("NEW PATH:\n");
-						print_path(root, newPath, 0);
-					}
-					if (path != NULL)
-					{
-						printf("SUB PATH:\n");
-						print_path(root, path, 0);
-					}
-
 					add_path(grouped_rel, newPath);
-					printf("TOTAL PATHS:\n");
-					foreach(lc, grouped_rel->pathlist)
-					{
-						Path *p = (Path *) lfirst(lc);
-						print_path(root, p, 0);
-					}
 				}
 				else if (parse->groupClause)
 				{
@@ -6958,7 +6656,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 					 * We have GROUP BY without aggregation or grouping sets.
 					 * Make a GroupPath.
 					 */
-					elog(LOG, "CREATE GROUP PATH REORDER");
 					add_path(grouped_rel, (Path *)
 							 create_group_path(root,
 											   grouped_rel,
@@ -7091,7 +6788,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 												  /*n_preordered_groups,*/
 												  /*work_mem);*/
 
-					elog(LOG, "INSERT SORTING IN PARTIAL SORT");
 					path = (Path *) create_sort_path(root,
 													 grouped_rel,
 													 path,
@@ -7101,7 +6797,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 
 				if (parse->hasAggs)
 				{
-					elog(LOG, "CREATE AGG PATH PARTIAL");
 					add_path(grouped_rel, (Path *)
 							 create_agg_path(root,
 											 grouped_rel,
@@ -7116,7 +6811,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				}
 				else
 				{
-					elog(LOG, "CREATE GROUP PATH PARTIAL");
 					add_path(grouped_rel, (Path *)
 							 create_group_path(root,
 											   grouped_rel,
@@ -7262,13 +6956,6 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 	 */
 	if (grouped_rel->partial_pathlist != NIL)
 		gather_grouping_paths(root, grouped_rel);
-
-	foreach(lc, grouped_rel->pathlist)
-	{
-		Path *p = (Path *) lfirst(lc);
-		printf("TOTAL PATHS: %s\n", get_debug_query());
-		print_path(root, p, 0);
-	}
 }
 
 /*
