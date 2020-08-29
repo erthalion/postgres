@@ -6511,24 +6511,9 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 					   *group_clauses = parse->groupClause;
 			int			n_preordered_groups = 0;
 
-			if (parse->groupingSets || !enable_groupby_reorder)
-			{
-				/*
-				 * prevent group pathkey rreordering, just check the same
-				 * order paths pathkeys and group pathkeys
-				 */
-				is_sorted = pathkeys_count_contained_in(group_pathkeys,
-												        path->pathkeys,
-												        &presorted_keys);
-			}
-			else
-			{
-				presorted_keys = n_preordered_groups =
-						group_keys_reorder_by_pathkeys(path->pathkeys,
-													   &group_pathkeys,
-													   &group_clauses);
-				is_sorted = (n_preordered_groups == list_length(group_pathkeys));
-			}
+			is_sorted = pathkeys_count_contained_in(group_pathkeys,
+													path->pathkeys,
+													&presorted_keys);
 
 			if (path == cheapest_path || is_sorted)
 			{
@@ -6605,6 +6590,25 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				double 	   *widths = NULL;
 				List 	   *pathkeys_cost_details = NIL;
 
+				if (parse->groupingSets)
+				{
+					/*
+					 * prevent group pathkey rreordering, just check the same
+					 * order paths pathkeys and group pathkeys
+					 */
+					is_sorted = pathkeys_count_contained_in(group_pathkeys,
+															path->pathkeys,
+															&presorted_keys);
+				}
+				else
+				{
+					presorted_keys = n_preordered_groups =
+							group_keys_reorder_by_pathkeys(path->pathkeys,
+														   &group_pathkeys,
+														   &group_clauses);
+					is_sorted = (n_preordered_groups == list_length(group_pathkeys));
+				}
+
 				/* Sort the cheapest-total path if it isn't already sorted */
 				if (!parse->groupingSets)
 					get_cheapest_group_keys_order(root,
@@ -6616,12 +6620,13 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 												  0,
 												  work_mem);
 
-				path = (Path *) create_sort_reordered_path(root,
-												 grouped_rel,
-												 path,
-												 group_pathkeys,
-												 pathkeys_cost_details,
-												 -1.0);
+				if (!is_sorted)
+					path = (Path *) create_sort_reordered_path(root,
+													 grouped_rel,
+													 path,
+													 group_pathkeys,
+													 pathkeys_cost_details,
+													 -1.0);
 
 				/* Now decide what to stick atop it */
 				if (parse->groupingSets)

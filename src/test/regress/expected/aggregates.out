@@ -2550,6 +2550,7 @@ RESET max_parallel_workers;
 RESET max_parallel_workers_per_gather;
 RESET enable_seqscan;
 RESET enable_bitmapscan;
+RESET enable_groupby_reorder;
 -- test coverage for aggregate combine/serial/deserial functions
 BEGIN ISOLATION LEVEL REPEATABLE READ;
 SET parallel_setup_cost = 0;
