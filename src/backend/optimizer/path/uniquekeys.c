@@ -739,7 +739,7 @@ get_exprs_from_uniqueindex(IndexOptInfo *unique_index,
 	*multi_nullvals = false;
 
 	indexpr_item = list_head(unique_index->indexprs);
-	for(c = 0; c < unique_index->ncolumns; c++)
+	for(c = 0; c < unique_index->nkeycolumns; c++)
 	{
 		int attr = unique_index->indexkeys[c];
 		Expr *expr;

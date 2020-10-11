@@ -1416,6 +1416,7 @@ backtrack:
 		Assert(!attempt_pagedel || nhtidslive == 0);
 	}
 
+	attempt_pagedel = false;
 	if (attempt_pagedel)
 	{
 		MemoryContext oldcontext;

@@ -282,7 +282,7 @@
  * You should normally use MEMORY_CONTEXT_CHECKING with USE_VALGRIND;
  * instrumentation of repalloc() is inferior without it.
  */
-/* #define USE_VALGRIND */
+#define USE_VALGRIND
 
 /*
  * Define this to cause pfree()'d memory to be cleared immediately, to

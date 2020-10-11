@@ -1533,6 +1533,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	Assert(scan->xs_want_itup);
 	Assert(scan->xs_itup);
 
+	/*scanstart = !BTScanPosIsValid(so->currPos);*/
+
 	if (so->numKilled > 0)
 		_bt_killitems(scan);
 
@@ -1631,7 +1633,8 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	 * to go one step back, since we need a last element from the previous
 	 * series.
 	 */
-	if (ScanDirectionIsBackward(dir) && ScanDirectionIsBackward(indexdir))
+	if ((ScanDirectionIsBackward(dir) && ScanDirectionIsBackward(indexdir)) ||
+		(ScanDirectionIsForward(dir) && ScanDirectionIsBackward(indexdir) & scanstart))
 		 offnum = OffsetNumberPrev(offnum);
 
 	/*
@@ -1643,57 +1646,54 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	 * to find the first item in the series and let _bt_readpage do everything
 	 * else.
 	 */
-	else if (ScanDirectionIsBackward(dir) && ScanDirectionIsForward(indexdir))
+	else if (ScanDirectionIsBackward(dir) && ScanDirectionIsForward(indexdir) && !scanstart)
 	{
-		if (!scanstart)
+		/* Reading forward means we expect to see more data on the right */
+		so->currPos.moreRight = true;
+
+		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+
+		/* One step back to find a previous value */
+		_bt_readpage(scan, dir, offnum);
+
+		_bt_unlockbuf(indexRel, so->currPos.buf);
+		if (_bt_next(scan, dir))
 		{
-			/* Reading forward means we expect to see more data on the right */
-			so->currPos.moreRight = true;
+			_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
+			_bt_update_skip_scankeys(scan, indexRel);
 
-			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-
-			/* One step back to find a previous value */
-			_bt_readpage(scan, dir, offnum);
-
-			_bt_unlockbuf(indexRel, so->currPos.buf);
-			if (_bt_next(scan, dir))
-			{
-				_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
-				_bt_update_skip_scankeys(scan, indexRel);
-
-				/*
-				 * And now find the last item from the sequence for the
-				 * current, value with the intention do OffsetNumberNext. As a
-				 * result we end up on a first element from the sequence.
-				 */
-				if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
-					offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-				else
-				{
-					if (BufferIsValid(so->currPos.buf))
-					{
-						/* Before leaving current page, deal with any killed items */
-						if (so->numKilled > 0)
-							_bt_killitems(scan);
-
-						_bt_unlockbuf(indexRel, so->currPos.buf);
-						ReleaseBuffer(so->currPos.buf);
-						so->currPos.buf = InvalidBuffer;
-					}
-
-					stack = _bt_search(scan->indexRelation, so->skipScanKey,
-									   &buf, BT_READ, scan->xs_snapshot);
-					_bt_freestack(stack);
-					so->currPos.buf = buf;
-					offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-				}
-			}
+			/*
+			 * And now find the last item from the sequence for the
+			 * current, value with the intention do OffsetNumberNext. As a
+			 * result we end up on a first element from the sequence.
+			 */
+			if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
+				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			else
 			{
-				pfree(so->skipScanKey);
-				so->skipScanKey = NULL;
-				return false;
+				if (BufferIsValid(so->currPos.buf))
+				{
+					/* Before leaving current page, deal with any killed items */
+					if (so->numKilled > 0)
+						_bt_killitems(scan);
+
+					_bt_unlockbuf(indexRel, so->currPos.buf);
+					ReleaseBuffer(so->currPos.buf);
+					so->currPos.buf = InvalidBuffer;
+				}
+
+				stack = _bt_search(scan->indexRelation, so->skipScanKey,
+								   &buf, BT_READ, scan->xs_snapshot);
+				_bt_freestack(stack);
+				so->currPos.buf = buf;
+				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			}
+		}
+		else
+		{
+			pfree(so->skipScanKey);
+			so->skipScanKey = NULL;
+			return false;
 		}
 	}
 
@@ -1712,203 +1712,198 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	 * here, and dead tuples could also lead to the same situation. This has to
 	 * be checked on the caller side.
 	 */
-	else if (ScanDirectionIsForward(dir) && ScanDirectionIsBackward(indexdir))
+	else if (ScanDirectionIsForward(dir) && ScanDirectionIsBackward(indexdir) && !scanstart)
 	{
-		if (scanstart)
-			offnum = OffsetNumberPrev(offnum);
-		else
+		IndexTuple 	startItup = CopyIndexTuple(scan->xs_itup);
+		bool 		nextFound = false;
+
+		/* Reading backwards means we expect to see more data on the left */
+		so->currPos.moreLeft = true;
+
+		while (!nextFound)
 		{
-			IndexTuple 	startItup = CopyIndexTuple(scan->xs_itup);
-			bool 		nextFound = false;
+			IndexTuple itup;
+			OffsetNumber jumpOffset;
+			CHECK_FOR_INTERRUPTS();
 
-			/* Reading backwards means we expect to see more data on the left */
-			so->currPos.moreLeft = true;
-
-			while (!nextFound)
+			/*
+			 * Find a next index tuple to update scan key. It could be at
+			 * the end, so check for max offset
+			 */
+			if (!_bt_readpage(scan, ForwardScanDirection, offnum))
 			{
-				IndexTuple itup;
-				OffsetNumber jumpOffset;
-				CHECK_FOR_INTERRUPTS();
-
 				/*
-				 * Find a next index tuple to update scan key. It could be at
-				 * the end, so check for max offset
+				 * There's no actually-matching data on this page.  Try to
+				 * advance to the next page. Return false if there's no
+				 * matching data at all.
 				 */
-				if (!_bt_readpage(scan, ForwardScanDirection, offnum))
+				_bt_unlockbuf(indexRel, so->currPos.buf);
+				if (!_bt_steppage(scan, dir))
 				{
+					pfree(so->skipScanKey);
+					so->skipScanKey = NULL;
+					return false;
+				}
+				_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
+			}
+
+			currItem = &so->currPos.items[so->currPos.firstItem];
+			itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+
+			scan->xs_itup = itup;
+
+			_bt_update_skip_scankeys(scan, indexRel);
+			if (BufferIsValid(so->currPos.buf))
+			{
+				/* Before leaving current page, deal with any killed items */
+				if (so->numKilled > 0)
+					_bt_killitems(scan);
+
+				_bt_unlockbuf(indexRel, so->currPos.buf);
+				ReleaseBuffer(so->currPos.buf);
+				so->currPos.buf = InvalidBuffer;
+			}
+
+			stack = _bt_search(scan->indexRelation, so->skipScanKey,
+							   &buf, BT_READ, scan->xs_snapshot);
+			_bt_freestack(stack);
+			so->currPos.buf = buf;
+
+			/*
+			 * We need to remember the original offset after the jump,
+			 * since in case of looping this would be the next starting
+			 * point
+			 */
+			jumpOffset = offnum = _bt_binsrch(scan->indexRelation,
+											  so->skipScanKey, buf);
+			offnum = OffsetNumberPrev(offnum);
+
+			if (!_bt_readpage(scan, indexdir, offnum))
+			{
+				/*
+				 * There's no actually-matching data on this page.  Try to
+				 * advance to the next page. Return false if there's no
+				 * matching data at all.
+				 */
+				_bt_unlockbuf(indexRel, so->currPos.buf);
+				if (!_bt_steppage(scan, indexdir))
+				{
+					pfree(so->skipScanKey);
+					so->skipScanKey = NULL;
+					return false;
+				}
+				_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
+			}
+
+			currItem = &so->currPos.items[so->currPos.lastItem];
+			itup = CopyIndexTuple((IndexTuple)
+					(so->currTuples + currItem->tupleOffset));
+
+			/*
+			 * To check if we returned the same tuple, try to find a
+			 * startItup on the current page. For that we need to update
+			 * scankey to match the whole tuple and set nextkey to return
+			 * an exact tuple, not the next one. If the tuple we found in
+			 * this way is equal to what we wanted to return, it means we
+			 * are in the loop, return offnum to the original position and
+			 * jump further
+			 *
+			 * Note that to compare tids we need to keep the leaf pinned,
+			 * otherwise there is a danger of vacuum cleaning up relevant
+			 * tuples.
+			 */
+			scan->xs_itup = startItup;
+			_bt_update_skip_scankeys(scan, indexRel);
+
+			so->skipScanKey->keysz = IndexRelationGetNumberOfKeyAttributes(indexRel);
+			so->skipScanKey->nextkey = false;
+
+			if (_bt_scankey_within_page(scan, so->skipScanKey,
+										so->currPos.buf, dir))
+			{
+				OffsetNumber maxoff, startOffset;
+				IndexTuple verifiedItup;
+				Page page = BufferGetPage(so->currPos.buf);
+				startOffset = _bt_binsrch(scan->indexRelation,
+										  so->skipScanKey,
+										  so->currPos.buf);
+
+				maxoff = PageGetMaxOffsetNumber(page);
+
+				/* Now read the data */
+				if (_bt_readpage(scan, ForwardScanDirection, startOffset))
+				{
+					ItemPointer resultTids, verifyTids;
+					int nresult = 1,
+						nverify = 1;
+
+					currItem = &so->currPos.items[so->currPos.itemIndex];
+					verifiedItup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+
 					/*
-					 * There's no actually-matching data on this page.  Try to
-					 * advance to the next page. Return false if there's no
-					 * matching data at all.
+					 * We need to keep in mind that tuples we deal with
+					 * could be also posting tuples and represent a list of
+					 * tids.
 					 */
-					_bt_unlockbuf(indexRel, so->currPos.buf);
-					if (!_bt_steppage(scan, dir))
+					if (BTreeTupleIsPosting(verifiedItup))
 					{
-						pfree(so->skipScanKey);
-						so->skipScanKey = NULL;
-						return false;
+						nverify = BTreeTupleGetNPosting(verifiedItup);
+						verifyTids = BTreeTupleGetPosting(verifiedItup);
+						for (int i = 1; i < nverify; i++)
+							verifyTids[i] = *BTreeTupleGetPostingN(verifiedItup, i);
 					}
-					_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
-				}
+					else
+						verifyTids = &verifiedItup->t_tid;
 
-				currItem = &so->currPos.items[so->currPos.firstItem];
-				itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
-
-				scan->xs_itup = itup;
-
-				_bt_update_skip_scankeys(scan, indexRel);
-				if (BufferIsValid(so->currPos.buf))
-				{
-					/* Before leaving current page, deal with any killed items */
-					if (so->numKilled > 0)
-						_bt_killitems(scan);
-
-					_bt_unlockbuf(indexRel, so->currPos.buf);
-					ReleaseBuffer(so->currPos.buf);
-					so->currPos.buf = InvalidBuffer;
-				}
-
-				stack = _bt_search(scan->indexRelation, so->skipScanKey,
-								   &buf, BT_READ, scan->xs_snapshot);
-				_bt_freestack(stack);
-				so->currPos.buf = buf;
-
-				/*
-				 * We need to remember the original offset after the jump,
-				 * since in case of looping this would be the next starting
-				 * point
-				 */
-				jumpOffset = offnum = _bt_binsrch(scan->indexRelation,
-												  so->skipScanKey, buf);
-				offnum = OffsetNumberPrev(offnum);
-
-				if (!_bt_readpage(scan, indexdir, offnum))
-				{
-					/*
-					 * There's no actually-matching data on this page.  Try to
-					 * advance to the next page. Return false if there's no
-					 * matching data at all.
-					 */
-					_bt_unlockbuf(indexRel, so->currPos.buf);
-					if (!_bt_steppage(scan, indexdir))
+					if (BTreeTupleIsPosting(itup))
 					{
-						pfree(so->skipScanKey);
-						so->skipScanKey = NULL;
-						return false;
+						nresult = BTreeTupleGetNPosting(itup);
+						resultTids = BTreeTupleGetPosting(itup);
+						for (int i = 1; i < nresult; i++)
+							resultTids[i] = *BTreeTupleGetPostingN(itup, i);
 					}
-					_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
-				}
+					else
+						resultTids = &itup->t_tid;
 
-				currItem = &so->currPos.items[so->currPos.lastItem];
-				itup = CopyIndexTuple((IndexTuple)
-						(so->currTuples + currItem->tupleOffset));
-
-				/*
-				 * To check if we returned the same tuple, try to find a
-				 * startItup on the current page. For that we need to update
-				 * scankey to match the whole tuple and set nextkey to return
-				 * an exact tuple, not the next one. If the tuple we found in
-				 * this way is equal to what we wanted to return, it means we
-				 * are in the loop, return offnum to the original position and
-				 * jump further
-				 *
-				 * Note that to compare tids we need to keep the leaf pinned,
-				 * otherwise there is a danger of vacuum cleaning up relevant
-				 * tuples.
-				 */
-				scan->xs_itup = startItup;
-				_bt_update_skip_scankeys(scan, indexRel);
-
-				so->skipScanKey->keysz = IndexRelationGetNumberOfKeyAttributes(indexRel);
-				so->skipScanKey->nextkey = false;
-
-				if (_bt_scankey_within_page(scan, so->skipScanKey,
-											so->currPos.buf, dir))
-				{
-					OffsetNumber maxoff, startOffset;
-					IndexTuple verifiedItup;
-					Page page = BufferGetPage(so->currPos.buf);
-					startOffset = _bt_binsrch(scan->indexRelation,
-											  so->skipScanKey,
-											  so->currPos.buf);
-
-					maxoff = PageGetMaxOffsetNumber(page);
-
-					/* Now read the data */
-					if (_bt_readpage(scan, ForwardScanDirection, startOffset))
+					/* One not equal means they're not equal. */
+					for(int i = 0; i < nverify; i++)
 					{
-						ItemPointer resultTids, verifyTids;
-						int nresult = 1,
-							nverify = 1;
-
-						currItem = &so->currPos.items[so->currPos.itemIndex];
-						verifiedItup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
-
-						/*
-						 * We need to keep in mind that tuples we deal with
-						 * could be also posting tuples and represent a list of
-						 * tids.
-						 */
-						if (BTreeTupleIsPosting(verifiedItup))
+						for(int j = 0; j < nresult; j++)
 						{
-							nverify = BTreeTupleGetNPosting(verifiedItup);
-							verifyTids = BTreeTupleGetPosting(verifiedItup);
-							for (int i = 1; i < nverify; i++)
-								verifyTids[i] = *BTreeTupleGetPostingN(verifiedItup, i);
-						}
-						else
-							verifyTids = &verifiedItup->t_tid;
-
-						if (BTreeTupleIsPosting(itup))
-						{
-							nresult = BTreeTupleGetNPosting(itup);
-							resultTids = BTreeTupleGetPosting(itup);
-							for (int i = 1; i < nresult; i++)
-								resultTids[i] = *BTreeTupleGetPostingN(itup, i);
-						}
-						else
-							resultTids = &itup->t_tid;
-
-						/* One not equal means they're not equal. */
-						for(int i = 0; i < nverify; i++)
-						{
-							for(int j = 0; j < nresult; j++)
+							if (!ItemPointerEquals(&resultTids[j], &verifyTids[i]))
 							{
-								if (!ItemPointerEquals(&resultTids[j], &verifyTids[i]))
-								{
-									nextFound = true;
-									break;
-								}
+								nextFound = true;
+								break;
 							}
 						}
-
-						if (!nextFound)
-							offnum = jumpOffset;
 					}
 
-					if ((offnum > maxoff) & (so->currPos.nextPage == P_NONE))
-					{
-						_bt_unlockbuf(indexRel, so->currPos.buf);
-
-						BTScanPosUnpinIfPinned(so->currPos);
-						BTScanPosInvalidate(so->currPos);
-
-						pfree(so->skipScanKey);
-						so->skipScanKey = NULL;
-						return false;
-					}
+					if (!nextFound)
+						offnum = jumpOffset;
 				}
-				else
-					/*
-					 * If startItup could be not found within the current page,
-					 * assume we found something new
-					 */
-					nextFound = true;
 
-				/* Return original scankey options */
-				so->skipScanKey->keysz = prefix;
-				so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
+				if ((offnum > maxoff) && (so->currPos.nextPage == P_NONE))
+				{
+					_bt_unlockbuf(indexRel, so->currPos.buf);
+
+					BTScanPosUnpinIfPinned(so->currPos);
+					BTScanPosInvalidate(so->currPos);
+
+					pfree(so->skipScanKey);
+					so->skipScanKey = NULL;
+					return false;
+				}
 			}
+			else
+				/*
+				 * If startItup could be not found within the current page,
+				 * assume we found something new
+				 */
+				nextFound = true;
+
+			/* Return original scankey options */
+			so->skipScanKey->keysz = prefix;
+			so->skipScanKey->nextkey = ScanDirectionIsForward(dir);
 		}
 	}
 
