@@ -185,12 +185,12 @@ IndexOnlyNext(IndexOnlyScanState *node)
 		CHECK_FOR_INTERRUPTS();
 
 		/*
-		 * While doing index only skip scan with advancing and reading in
-		 * different directions we can return to the same position where we
-		 * started after visibility check. Recognize such situations and skip
-		 * more.
+		 * If we already emitted first tuple, while doing index only skip scan
+		 * with advancing and reading in different directions we can return to
+		 * the same position where we started after visibility check. Recognize
+		 * such situations and skip more.
 		 */
-		if ((readDirection != direction) &&
+		if ((readDirection != direction) && node->ioss_FirstTupleEmitted &&
 			ItemPointerIsValid(&startTid) && ItemPointerEquals(&startTid, tid))
 		{
 			int i;

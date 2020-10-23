@@ -1103,7 +1103,7 @@ extern int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_skip(IndexScanDesc scan, ScanDirection dir,
-					 ScanDirection indexdir, bool start, int prefix);
+					 ScanDirection indexdir, int prefix);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost,
 							   Snapshot snapshot);
 
@@ -1129,7 +1129,7 @@ extern Size BTreeShmemSize(void);
 extern void BTreeShmemInit(void);
 extern bytea *btoptions(Datum reloptions, bool validate);
 extern bool btskip(IndexScanDesc scan, ScanDirection dir,
-				   ScanDirection indexdir, bool start, int prefix);
+				   ScanDirection indexdir, int prefix);
 extern bool btproperty(Oid index_oid, int attno,
 					   IndexAMProperty prop, const char *propname,
 					   bool *res, bool *isnull);

@@ -176,7 +176,6 @@ typedef bool (*amgettuple_function) (IndexScanDesc scan,
 typedef bool (*amskip_function) (IndexScanDesc scan,
 								 ScanDirection dir,
 								 ScanDirection indexdir,
-								 bool start,
 								 int prefix);
 
 /* fetch all valid tuples */

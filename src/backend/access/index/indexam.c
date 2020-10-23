@@ -752,7 +752,7 @@ index_skip(IndexScanDesc scan, ScanDirection direction,
 	SCAN_CHECKS;
 
 	return scan->indexRelation->rd_indam->amskip(scan, direction,
-												 indexdir, scanstart, prefix);
+												 indexdir, prefix);
 }
 
 /* ----------------

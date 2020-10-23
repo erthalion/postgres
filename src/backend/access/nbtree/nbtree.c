@@ -461,9 +461,9 @@ btrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
  */
 bool
 btskip(IndexScanDesc scan, ScanDirection direction,
-	   ScanDirection indexdir, bool start, int prefix)
+	   ScanDirection indexdir, int prefix)
 {
-	return _bt_skip(scan, direction, indexdir, start, prefix);
+	return _bt_skip(scan, direction, indexdir, prefix);
 }
 
 /*

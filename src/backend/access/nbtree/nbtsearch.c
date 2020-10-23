@@ -1520,7 +1520,7 @@ _bt_next(IndexScanDesc scan, ScanDirection dir)
  */
 bool
 _bt_skip(IndexScanDesc scan, ScanDirection dir,
-		 ScanDirection indexdir, bool scanstart, int prefix)
+		 ScanDirection indexdir, int prefix)
 {
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	BTStack stack;
@@ -1528,12 +1528,11 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	OffsetNumber offnum;
 	BTScanPosItem *currItem;
 	Relation 	 indexRel = scan->indexRelation;
+	bool scanstart = !BTScanPosIsValid(so->currPos);
 
 	/* We want to return tuples, and we need a starting point */
 	Assert(scan->xs_want_itup);
 	Assert(scan->xs_itup);
-
-	/*scanstart = !BTScanPosIsValid(so->currPos);*/
 
 	if (so->numKilled > 0)
 		_bt_killitems(scan);
