@@ -47,8 +47,9 @@ static bool _bt_endpoint(IndexScanDesc scan, ScanDirection dir);
 static inline void _bt_initialize_more_data(BTScanOpaque so, ScanDirection dir);
 static inline void _bt_update_skip_scankeys(IndexScanDesc scan,
 											Relation indexRel);
-static inline bool _bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
-										Buffer buf, ScanDirection dir);
+static inline bool _bt_scankey_within_page(IndexScanDesc scan,
+										   BTScanInsert key,
+										   Buffer buf);
 
 /*
  *	_bt_drop_lock_and_maybe_pin()
@@ -1566,7 +1567,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 	{
 		_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
 
-		if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
+		if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf))
 		{
 			bool keyFound = false;
 
@@ -1666,7 +1667,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			 * current, value with the intention do OffsetNumberNext. As a
 			 * result we end up on a first element from the sequence.
 			 */
-			if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf, dir))
+			if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf))
 				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 			else
 			{
@@ -1817,8 +1818,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			so->skipScanKey->keysz = IndexRelationGetNumberOfKeyAttributes(indexRel);
 			so->skipScanKey->nextkey = false;
 
-			if (_bt_scankey_within_page(scan, so->skipScanKey,
-										so->currPos.buf, dir))
+			if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf))
 			{
 				OffsetNumber maxoff, startOffset;
 				IndexTuple verifiedItup;
@@ -2970,8 +2970,7 @@ _bt_update_skip_scankeys(IndexScanDesc scan, Relation indexRel)
  * one, which affects whether or not it's ok to be equal to the page highkey.
  */
 static inline bool
-_bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key,
-						Buffer buf, ScanDirection dir)
+_bt_scankey_within_page(IndexScanDesc scan, BTScanInsert key, Buffer buf)
 {
 	OffsetNumber low, high;
 	Page page = BufferGetPage(buf);
