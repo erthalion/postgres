@@ -75,6 +75,15 @@ typedef struct UndoNode
 typedef struct WrittenUndoNode
 {
 	UndoRecPtr	location;
+
+	/*
+	 * Pointer to the chunk that contains this node.
+	 *
+	 * TODO Try to store it elsewhere as many records share the same chunk.
+	 * Currently the problem is that UndoRSReaderReadOneBackward() is not
+	 * aware of chunks at all.
+	 */
+	UndoRecPtr	chunk_hdr;
 	UndoNode	n;
 } WrittenUndoNode;
 #endif

@@ -163,7 +163,7 @@ undoxacttest_redo(XLogReaderState *record)
 }
 
 void
-undoxacttest_undo(const WrittenUndoNode *record)
+undoxacttest_undo(const WrittenUndoNode *record, UndoRecPtr chunk_hdr)
 {
 	const xu_undoxactest_mod *uxt_r = (const xu_undoxactest_mod *) record->n.data;
 

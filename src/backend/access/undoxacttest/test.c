@@ -64,8 +64,7 @@ undoxacttest_mod_impl(Oid reloid, int64 mod)
 	data = undoxacttest_fetch(rel, &buf, /* is_undo = */ false);
 	counter = ((int64 *) &data[0]);
 
-	oldval = undoxacttest_log_execute_mod(rel, buf, counter, mod,
-										  false);
+	oldval = undoxacttest_log_execute_mod(rel, buf, counter, mod, false);
 
 	UnlockReleaseBuffer(buf);
 

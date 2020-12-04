@@ -125,6 +125,8 @@ print_chunk_info(UndoRecPtr start, UndoRecordSetChunkHeader *hdr,
 		printf("<invalid>, ");
 	printf("size: %zu, ", hdr->size);
 
+	printf("last_rec_applied: %010zX, ", hdr->last_rec_applied);
+
 	if (type_header)
 	{
 		if (type == URST_TRANSACTION)

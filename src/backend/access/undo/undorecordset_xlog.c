@@ -75,6 +75,11 @@ DecodeUndoRecordSetXLogBufData(UndoRecordSetXLogBufData *out,
 		DESERIALIZE_FIXED(&out->insert_page_offset);
 	if (out->flags & URS_XLOG_ADD_PAGE)
 		DESERIALIZE_FIXED(&out->chunk_header_location);
+	if (out->flags & URS_XLOG_SET_APPLIED)
+	{
+		DESERIALIZE_FIXED(&out->chunk_last_rec_applied);
+		DESERIALIZE_FIXED(&out->chunk_lra_page_offset);
+	}
 
 	/* If there is still data left over, there is a format error. */
 	if (size != 0)
@@ -118,5 +123,10 @@ EncodeUndoRecordSetXLogBufData(const UndoRecordSetXLogBufData *in,
 		SERIALIZE_FIXED(&in->insert_page_offset);
 	if (in->flags & URS_XLOG_ADD_PAGE)
 		SERIALIZE_FIXED(&in->chunk_header_location);
+	if (in->flags & URS_XLOG_SET_APPLIED)
+	{
+		SERIALIZE_FIXED(&in->chunk_last_rec_applied);
+		SERIALIZE_FIXED(&in->chunk_lra_page_offset);
+	}
 }
 #endif

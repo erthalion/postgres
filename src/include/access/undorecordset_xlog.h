@@ -33,6 +33,7 @@
 #define URS_XLOG_CLOSE_MULTI_CHUNK	0x10
 #define URS_XLOG_INSERT				0x20
 #define URS_XLOG_ADD_PAGE			0x40
+#define URS_XLOG_SET_APPLIED		0x80
 
 #define URS_XLOG_HAS_TYPE_MASK									\
 	(URS_XLOG_CREATE | URS_XLOG_ADD_PAGE | URS_XLOG_ADD_CHUNK | \
@@ -106,6 +107,15 @@ typedef struct UndoRecordSetXLogBufData
 	 * type, to go in the page header.
 	 */
 	UndoRecPtr	chunk_header_location;
+
+	/*
+	 * If URS_XLOG_SET_APPLIED is set, then the following member contains the
+	 * pointer to the last record applied so far. See also the comments for
+	 * last_rec_applied in UndoRecordSetChunkHeader.
+	 */
+	UndoLogOffset chunk_last_rec_applied;
+	/* Where should chunk_last_rec_applied be written.  */
+	uint16		chunk_lra_page_offset;
 } UndoRecordSetXLogBufData;
 
 extern bool

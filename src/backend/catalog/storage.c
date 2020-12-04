@@ -20,6 +20,7 @@
 #include "postgres.h"
 
 #include "access/parallel.h"
+#include "access/undorecordset.h"
 #include "access/visibilitymap.h"
 #include "access/xact.h"
 #include "access/xactundo.h"
@@ -997,6 +998,12 @@ smgr_redo(XLogReaderState *record)
 		reln = smgropen(SMGR_MD, xlrec->rnode, InvalidBackendId);
 		smgrdounlinkall(&reln, 1, true);
 		smgrclose(reln);
+
+		/*
+		 * Use the record metadata to adjust the last_rec_applied pointer
+		 * pointer of the corresponding undo log chunk.
+		 */
+		XactUndoReplay(record, NULL);
 	}
 	else if (info == XLOG_SMGR_TRUNCATE)
 	{
@@ -1091,23 +1098,50 @@ smgr_redo(XLogReaderState *record)
 }
 
 void
-smgr_undo(const WrittenUndoNode *record)
+smgr_undo(const WrittenUndoNode *record, UndoRecPtr chunk_hdr)
 {
 	xu_smgr_precreate *undo_rec;
 	SMgrRelation srel;
 	xl_smgr_drop xlrec;
+	Buffer		undo_bufs[2];
+	XLogRecPtr	lsn;
 
 	Assert(record->n.rmid == RM_SMGR_ID);
 	/* Currently we only have a single type of SMGR undo record. */
 	Assert(record->n.type == UNDO_SMGR_CREATE);
 
+	/* Access the undo record. */
 	undo_rec = (xu_smgr_precreate *) record->n.data;
+
+	/* Locate and lock the buffer(s) containing last_rec_applied. */
+	Assert(chunk_hdr != InvalidUndoRecPtr);
+	UndoPrepareToUpdateLastAppliedRecord(chunk_hdr,
+										 undo_rec->relpersistence,
+										 undo_bufs);
+
+	/*
+	 * XXX Consider if critical section is needed anywhere below. Probably
+	 * not, as failure to execute undo should result in PANIC anyway.
+	 */
+
 	srel = smgropen(SMGR_MD, undo_rec->rnode, InvalidBackendId);
 	smgrdounlinkall(&srel, 1, false);
 	smgrclose(srel);
 
-	xlrec.rnode = undo_rec->rnode;
 	XLogBeginInsert();
+
+	/* Update the progress of the undo execution. */
+	UpdateLastAppliedRecord(record->location, chunk_hdr, undo_bufs, 0);
+
+	xlrec.rnode = undo_rec->rnode;
 	XLogRegisterData((char *) &xlrec, sizeof(xlrec));
-	XLogInsert(RM_SMGR_ID, XLOG_SMGR_DROP);
+	lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_DROP);
+
+	PageSetLSN(BufferGetPage(undo_bufs[0]), lsn);
+	if (undo_bufs[1] != InvalidBuffer)
+		PageSetLSN(BufferGetPage(undo_bufs[1]), lsn);
+
+	UnlockReleaseBuffer(undo_bufs[0]);
+	if (undo_bufs[1] != InvalidBuffer)
+		UnlockReleaseBuffer(undo_bufs[1]);
 }

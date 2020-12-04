@@ -33,6 +33,12 @@ typedef struct xl_undoxacttest_mod
 	int64		debug_mod;
 	int64		debug_oldval;
 	Oid			reloid;
+
+	/*
+	 * This is to simulate the fact that real AM will write a different WAL
+	 * record when executing the undo record.
+	 */
+	bool		is_undo;
 } xl_undoxacttest_mod;
 
 
@@ -50,7 +56,8 @@ typedef struct xu_undoxactest_mod
 extern void undoxacttest_redo(XLogReaderState *record);
 extern void undoxacttest_desc(StringInfo buf, XLogReaderState *record);
 extern const char *undoxacttest_identify(uint8 info);
-extern void undoxacttest_undo(const WrittenUndoNode *record);
+extern void undoxacttest_undo(const WrittenUndoNode *record,
+							  UndoRecPtr chunk_hdr);
 extern void undoxacttest_undo_desc(StringInfo buf,
 								   const WrittenUndoNode *record);
 

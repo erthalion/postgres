@@ -304,7 +304,7 @@ typedef struct RmgrData
 	void		(*rm_startup) (void);
 	void		(*rm_cleanup) (void);
 	void		(*rm_mask) (char *pagedata, BlockNumber blkno);
-	void		(*rm_undo) (const WrittenUndoNode *record);
+	void		(*rm_undo) (const WrittenUndoNode *record, UndoRecPtr chunk_hdr);
 	void		(*rm_undo_desc) (StringInfo buf, const WrittenUndoNode *record);
 } RmgrData;
 

@@ -27,7 +27,7 @@ typedef struct xu_smgr_precreate
 	char		relpersistence;
 } xu_smgr_precreate;
 
-extern void smgr_undo(const WrittenUndoNode *record);
+extern void smgr_undo(const WrittenUndoNode *record, UndoRecPtr chunk_hdr);
 extern void smgr_undo_desc(StringInfo buf, const WrittenUndoNode *record);
 
 #endif

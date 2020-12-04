@@ -40,6 +40,13 @@ typedef struct UndoRecordSetChunkHeader
 
 	UndoRecPtr	previous_chunk;
 
+	/*
+	 * last_rec_applied points at the last undo record of this chunk that has
+	 * already been applied to the database (i.e. the corresponding change was
+	 * undone). It is zero until the first record of the chunk is applied.
+	 */
+	UndoLogOffset last_rec_applied;
+
 	uint8		type;
 } UndoRecordSetChunkHeader;
 
@@ -86,6 +93,11 @@ extern UndoRecPtr UndoPrepareToInsert(UndoRecordSet *urs, size_t record_size);
 extern void UndoInsert(UndoRecordSet *urs,
 					   void *record_data,
 					   size_t record_size);
+extern void UndoPrepareToUpdateLastAppliedRecord(UndoRecPtr chunk_hdr,
+												 char persistence, Buffer *bufs);
+extern void UpdateLastAppliedRecord(UndoRecPtr last_rec_applied,
+									UndoRecPtr chunk_hdr, Buffer *bufs,
+									uint8 first_block_id);
 extern void UndoPageSetLSN(UndoRecordSet *urs, XLogRecPtr lsn);
 extern void UndoRelease(UndoRecordSet *urs);
 extern void UndoDestroy(UndoRecordSet *urs);

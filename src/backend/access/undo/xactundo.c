@@ -286,13 +286,18 @@ CleanupXactUndoInsertion(XactUndoContext *ctx)
 UndoRecPtr
 XactUndoReplay(XLogReaderState *xlog_record, UndoNode *undo_node)
 {
-	StringInfoData data;
+	if (undo_node)
+	{
+		StringInfoData data;
 
-	/* Prepare serialized undo data. */
-	initStringInfo(&data);
-	SerializeUndoData(&data, undo_node);
+		/* Prepare serialized undo data. */
+		initStringInfo(&data);
+		SerializeUndoData(&data, undo_node);
 
-	return UndoReplay(xlog_record, data.data, data.len);
+		return UndoReplay(xlog_record, data.data, data.len);
+	}
+	else
+		return UndoReplay(xlog_record, NULL, 0);
 }
 
 /*
@@ -307,6 +312,8 @@ PerformUndoActionsRange(UndoRecPtr begin, UndoRecPtr end,
 {
 	UndoRSReaderState r;
 	char		relpersistence;
+	UndoLogOffset last_rec_applied = 0;
+	UndoRecPtr	curchunkhdr = InvalidUndoRecPtr;
 
 	/* XXX Do we need a separate function for this conversion? */
 	if (plevel == UNDOPERSISTENCE_TEMP)
@@ -329,8 +336,32 @@ PerformUndoActionsRange(UndoRecPtr begin, UndoRecPtr end,
 	{
 		const RmgrData *rmgr;
 
+		/* Set or update last_rec_applied. */
+		if (curchunkhdr == InvalidUndoRecPtr ||
+			r.node.chunk_hdr != curchunkhdr)
+		{
+			UndoRecordSetChunkHeader hdr;
+
+			resetStringInfo(&r.buf);
+			undo_reader_read_bytes(&r,
+								   r.node.chunk_hdr,
+								   sizeof(UndoRecordSetChunkHeader));
+			memcpy(&hdr, r.buf.data, sizeof(UndoRecordSetChunkHeader));
+
+			last_rec_applied = hdr.last_rec_applied;
+			curchunkhdr = r.node.chunk_hdr;
+		}
+
 		rmgr = &RmgrTable[r.node.n.rmid];
-		rmgr->rm_undo(&r.node);
+
+		/*
+		 * Apply the undo record, but do not try to apply the same undo record
+		 * if it's already been applied.
+		 */
+		if (rmgr->rm_undo &&
+			(r.node.location < last_rec_applied ||
+			 last_rec_applied == 0))
+			rmgr->rm_undo(&r.node, r.node.chunk_hdr);
 	}
 
 	UndoRSReaderClose(&r);
