@@ -29,6 +29,7 @@ OBJS = \
 	standbydesc.o \
 	tblspcdesc.o \
 	undologdesc.o \
+	undoxacttestdesc.o \
 	xactdesc.o \
 	xlogdesc.o
 

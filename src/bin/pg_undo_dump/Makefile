@@ -16,12 +16,16 @@ OBJS = \
 	$(RMGRDESCOBJS) \
 	$(WIN32RES) \
 	pg_undo_dump.o \
-	rmgrdesc.o
+	rmgrdesc.o \
+	undoxacttestdesc.o
 
 all: pg_undo_dump
 
 pg_undo_dump: $(OBJS)
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+
+undoxacttestdesc.c: % : $(top_srcdir)/src/backend/access/undoxacttest/%
+	rm -f $@ && $(LN_S) $< .
 
 install: all installdirs
 	$(INSTALL_PROGRAM) pg_undo_dump$(X) '$(DESTDIR)$(bindir)/pg_undo_dump$(X)'
@@ -36,7 +40,7 @@ uninstall:
 	rm -f '$(DESTDIR)$(bindir)/pg_undo_dump$(X)'
 
 clean distclean maintainer-clean:
-	rm -f pg_undo_dump$(X) $(OBJS) $(RMGRDESCSOURCES)
+	rm -f pg_undo_dump$(X) $(OBJS) $(RMGRDESCSOURCES) undoxacttestdesc.c
 	rm -rf tmp_check
 
 check:
