@@ -103,6 +103,7 @@ undo_seg_compare(const void *s1, const void *s2)
 typedef union
 {
 	XactUndoRecordSetHeader xact;
+	char		foo[4];
 }			TypeHeader;
 
 static void
@@ -135,6 +136,10 @@ print_chunk_info(UndoRecPtr start, UndoRecordSetChunkHeader *hdr,
 			xid = XidFromFullTransactionId(hdr->fxid);
 			printf("type: transaction (xid=%u, dboid=%u)",
 				   xid, hdr->dboid);
+		}
+		else if (type == URST_FOO)
+		{
+			printf("type: foo (%s)", type_header->foo);
 		}
 		else
 		{
@@ -489,7 +494,8 @@ process_log(const char *dir_path, UndoSegFile *first, int count)
 						 */
 						if (chunk_hdr.previous_chunk == InvalidUndoRecPtr)
 						{
-							if (chunk_hdr.type == URST_TRANSACTION)
+							if (chunk_hdr.type == URST_TRANSACTION ||
+								chunk_hdr.type == URST_FOO)
 							{
 								type_hdr_size = get_urs_type_header_size(chunk_hdr.type);
 								type_hdr_bytes_left = type_hdr_size;
