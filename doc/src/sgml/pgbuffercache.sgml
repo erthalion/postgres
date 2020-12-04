@@ -65,7 +65,7 @@
        <structfield>smgrid</structfield> <type>integer</type>
         </para>
         <para>
-         Block storage manager ID.  0 for regular relation data.</entry>
+         Block storage manager ID.  0 for regular relation data.
         </para></entry>
      </row>
 

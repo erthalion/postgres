@@ -286,6 +286,7 @@
    &pgtesttiming;
    &pgupgrade;
    &pgwaldump;
+   &pgundodump;
    &postgres;
    &postmaster;
 
