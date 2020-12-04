@@ -1568,6 +1568,8 @@ vac_truncate_clog(TransactionId frozenXID,
 				  MultiXactId lastSaneMinMulti)
 {
 	TransactionId nextXID = ReadNewTransactionId();
+	FullTransactionId	oldestFullXidHavingUndo;
+	TransactionId oldestXidHavingUndo;
 	Relation	relation;
 	TableScanDesc scan;
 	HeapTuple	tuple;
@@ -1663,6 +1665,13 @@ vac_truncate_clog(TransactionId frozenXID,
 	/* chicken out if data is bogus in any other way */
 	if (bogus)
 		return;
+
+	/* We can't truncate the clog for transactions that still have undo. */
+	oldestFullXidHavingUndo.value =
+		pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo);
+	oldestXidHavingUndo = XidFromFullTransactionId(oldestFullXidHavingUndo);
+	if (TransactionIdIsValid(oldestXidHavingUndo))
+		frozenXID = Min(frozenXID, oldestXidHavingUndo);
 
 	/*
 	 * Advance the oldest value for commit timestamps before truncating, so

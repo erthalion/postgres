@@ -44,6 +44,7 @@ typedef struct UndoRecordSetChunkHeader
 	 * last_rec_applied points at the last undo record of this chunk that has
 	 * already been applied to the database (i.e. the corresponding change was
 	 * undone). It is zero until the first record of the chunk is applied.
+	 * Special value of 1 is used to mark the chunk as discarded.
 	 */
 	UndoLogOffset last_rec_applied;
 
@@ -122,4 +123,6 @@ extern bool UndoCloseAndDestroyForXactLevel(int nestingLevel);
 
 extern void AtProcExit_UndoRecordSet(void);
 
+extern TransactionId AdvanceOldestXidHavingUndo(void);
+extern void DiscardUndoRecordSetChunks(void);
 #endif

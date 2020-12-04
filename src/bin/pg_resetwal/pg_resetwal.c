@@ -446,6 +446,7 @@ main(int argc, char *argv[])
 		if (ControlFile.checkPointCopy.oldestXid < FirstNormalTransactionId)
 			ControlFile.checkPointCopy.oldestXid += FirstNormalTransactionId;
 		ControlFile.checkPointCopy.oldestXidDB = InvalidOid;
+		ControlFile.checkPointCopy.oldestFullXidHavingUndo = 0;
 	}
 
 	if (set_oldest_commit_ts_xid != 0)
@@ -697,6 +698,7 @@ GuessControlValues(void)
 	ControlFile.checkPointCopy.oldestMultiDB = InvalidOid;
 	ControlFile.checkPointCopy.time = (pg_time_t) time(NULL);
 	ControlFile.checkPointCopy.oldestActiveXid = InvalidTransactionId;
+	ControlFile.checkPointCopy.oldestFullXidHavingUndo = 0;
 
 	ControlFile.state = DB_SHUTDOWNED;
 	ControlFile.time = (pg_time_t) time(NULL);
@@ -780,6 +782,8 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.oldestCommitTsXid);
 	printf(_("Latest checkpoint's newestCommitTsXid:%u\n"),
 		   ControlFile.checkPointCopy.newestCommitTsXid);
+	printf(_("Latest checkpoint's oldestFullXidHavingUndo:" UINT64_FORMAT "\n"),
+		   ControlFile.checkPointCopy.oldestFullXidHavingUndo);
 	printf(_("Maximum data alignment:               %u\n"),
 		   ControlFile.maxAlign);
 	/* we don't print floatFormat since can't say much useful about it */
@@ -854,6 +858,8 @@ PrintNewControlValues(void)
 			   ControlFile.checkPointCopy.oldestXid);
 		printf(_("OldestXID's DB:                       %u\n"),
 			   ControlFile.checkPointCopy.oldestXidDB);
+		printf(_("OldestFullXidHavingUndo:" UINT64_FORMAT "\n"),
+			   ControlFile.checkPointCopy.oldestFullXidHavingUndo);
 	}
 
 	if (set_xid_epoch != -1)

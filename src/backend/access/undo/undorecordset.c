@@ -73,7 +73,9 @@
 #include "storage/buf.h"
 #include "storage/bufmgr.h"
 #include "storage/ipc.h"
+#include "storage/proc.h"
 #include "storage/procarray.h"
+#include "utils/fmgrprotos.h"
 
 /*
  * Per-chunk bookkeeping.
@@ -2167,6 +2169,7 @@ typedef struct URSChunkEntry
 	UndoRecPtr	chunk_start;
 	UndoRecPtr	begin;			/* where the whole URS starts. */
 	UndoRecPtr	end;			/* and where it ends */
+	UndoRecPtr	last_chunk;		/* pointer to the last chunk */
 
 	/*
 	 * The following fields are only defined for urs_type == URST_TRANSACTION.
@@ -2439,6 +2442,7 @@ GetAllUndoRecordSets(void)
 			Assert(!found);
 			entry->begin = begin;
 			entry->end = chunk_start + size;
+			entry->last_chunk = chunk_start;
 			entry->urs_type = urs_type;
 			if (entry->urs_type == URST_TRANSACTION)
 			{
@@ -2446,6 +2450,7 @@ GetAllUndoRecordSets(void)
 				entry->applied = applied;
 			}
 			entry->persistence = persistence;
+
 		}
 	}
 
@@ -2457,6 +2462,81 @@ GetAllUndoRecordSets(void)
 	}
 
 	return chunks;
+}
+
+/*
+ * Discard all chunks of the record set whose last chunk is located at
+ * last_chunk.
+ */
+static void
+DiscardUndoRecordSet(UndoRecPtr last_chunk, char persistence)
+{
+	while (last_chunk != InvalidUndoRecPtr)
+	{
+		Buffer		buffers[2];
+		int			i;
+		UndoRecordSetChunkHeader hdr;
+		UndoRecPtr	previous_chunk;
+		XLogRecPtr	lsn;
+
+		for (i = 0; i < lengthof(buffers); ++i)
+			buffers[i] = InvalidBuffer;
+
+		/*
+		 * Read the chunk header in order to retrieve location of the previous
+		 * chunk.
+		 */
+		read_undo_header((void *) &hdr,
+						 SizeOfUndoRecordSetChunkHeader,
+						 last_chunk,
+						 buffers,
+						 lengthof(buffers));
+		release_buffers(buffers, lengthof(buffers));
+		previous_chunk = hdr.previous_chunk;
+
+		/* Do not waste time marking already marked chunk. */
+		if (hdr.last_rec_applied == 1)
+		{
+			last_chunk = previous_chunk;
+			continue;
+		}
+
+		/* Find and lock the buffers to be modified. */
+		UndoPrepareToUpdateLastAppliedRecord(last_chunk, persistence,
+											 buffers);
+
+		START_CRIT_SECTION();
+
+		XLogBeginInsert();
+
+		/*
+		 * Store the special value of last_rec_applied to mark the chunk
+		 * discarded.
+		 */
+		UpdateLastAppliedRecord(1, last_chunk, buffers, 0);
+
+		/*
+		 * Attach the update of last_rec_applied to a dummy WAL record.
+		 *
+		 * TODO Either introduce a new kind of WAL record for this purpose or
+		 * rename XLOG_UNDOLOG_CLOSE_URS so it matches all the current use
+		 * cases.
+		 */
+		lsn = XLogInsert(RM_UNDOLOG_ID, XLOG_UNDOLOG_CLOSE_URS);
+
+		PageSetLSN(BufferGetPage(buffers[0]), lsn);
+		if (buffers[1] != InvalidBuffer)
+			PageSetLSN(BufferGetPage(buffers[1]), lsn);
+
+		END_CRIT_SECTION();
+
+		UnlockReleaseBuffer(buffers[0]);
+		if (buffers[1] != InvalidBuffer)
+			UnlockReleaseBuffer(buffers[1]);
+
+		/* Go for the chunk ahead of the current one. */
+		last_chunk = previous_chunk;
+	}
 }
 
 /*
@@ -2493,6 +2573,7 @@ ProcessExistingUndoRequests(void)
 
 		if (entry->urs_type != URST_TRANSACTION)
 			continue;
+
 
 		/* We can only process undo of the database we are connected to. */
 		if (entry->xact_hdr.dboid != MyDatabaseId)
@@ -2561,4 +2642,203 @@ AtProcExit_UndoRecordSet(void)
 {
 	if (!slist_is_empty(&UndoRecordSetList))
 		elog(PANIC, "undo record set not closed before backend exit");
+}
+
+/*
+ * Try to advance oldestFullXidHavingUndo and return the new value.
+ *
+ * Although oldestFullXidHavingUndo is stored as FullTransactionId, plain
+ * TransactionId should be sufficient for callers of this function.
+ */
+TransactionId
+AdvanceOldestXidHavingUndo(void)
+{
+	FullTransactionId oldestFullXidHavingUndo;
+	TransactionId oldestXmin,
+				oldestXidHavingUndo;
+	TransactionId xid_orig;
+	uint32		xid_orig_epoch;
+	chunktable_hash *sets;
+	chunktable_iterator iterator;
+	URSChunkEntry *entry;
+
+	/*
+	 * We need to keep the undo log for transactions which - although possibly
+	 * committed - may still be considered by other transactions as running.
+	 * Therefore we can compute the initial value in the same way as if we
+	 * were preparing for VACUUM (i.e. tuples deleted by a transaction must
+	 * stay available to all transactions that consider the deleting
+	 * transaction as running). The running lazy VACUUM processes do not
+	 * affect this value (see procarray.c for explanation), which is ok for us
+	 * because 1) no one should need the undo log produced by VACUUM, 2) the
+	 * VACUUM itself should not need any undo log.
+	 */
+	oldestXmin = GetOldestNonRemovableTransactionId(NULL);
+
+	/*
+	 * The permanent transactions should not have any undo.
+	 *
+	 * XXX Can oldestXmin actually be that low?
+	 */
+	if (!TransactionIdIsNormal(oldestXmin))
+	{
+		oldestFullXidHavingUndo.value =
+			pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo);
+
+		return XidFromFullTransactionId(oldestFullXidHavingUndo);
+	}
+
+	/*
+	 * Start with the optimistic assumption that no transaction preceding
+	 * oldestXmin has undo.
+	 */
+	oldestXidHavingUndo = oldestXmin;
+
+	/* Gather information on all undo record sets. */
+	sets = GetAllUndoRecordSets();
+
+	chunktable_start_iterate(sets, &iterator);
+	while ((entry = chunktable_iterate(sets, &iterator)) != NULL)
+	{
+		TransactionId xid;
+
+		if (entry->urs_type != URST_TRANSACTION)
+			continue;
+
+		xid = XidFromFullTransactionId(entry->xact_hdr.fxid);
+
+		/* Skip transactions whose undo may still be needed. */
+		if (!TransactionIdPrecedes(xid, oldestXmin))
+			continue;
+
+		if (TransactionIdDidCommit(xid))
+		{
+			/* The undo will never be needed, so mark it as discarded. */
+			DiscardUndoRecordSet(entry->last_chunk, entry->persistence);
+		}
+		else if (entry->applied)
+		{
+			/* Once applied, the undo can be discarded. */
+			DiscardUndoRecordSet(entry->last_chunk, entry->persistence);
+		}
+		else
+		{
+			/*
+			 * This URS must be preserved, so adjust the discarding horizon if
+			 * needed.
+			 */
+			if (TransactionIdPrecedes(xid, oldestXidHavingUndo))
+				oldestXidHavingUndo = xid;
+		}
+	}
+
+	/* cleanup */
+	chunktable_destroy(sets);
+
+	oldestFullXidHavingUndo.value =
+		pg_atomic_read_u64(&ProcGlobal->oldestFullXidHavingUndo);
+	xid_orig = XidFromFullTransactionId(oldestFullXidHavingUndo);
+	xid_orig_epoch = EpochFromFullTransactionId(oldestFullXidHavingUndo);
+
+	/*
+	 * Adjust the epoch if the 32-bit value has overflown. Note that it cannot
+	 * happen twice between calls of this function, because at latest when
+	 * oldestXidHavingUndo lags by 2 billions XIDs behind the newest active
+	 * XID, it will block CLOG truncation and therefore GetNewTransactionId()
+	 * will stop generating new XIDs.
+	 */
+	Assert(TransactionIdIsNormal(oldestXidHavingUndo));
+	if (oldestXidHavingUndo < xid_orig)
+		xid_orig_epoch++;
+
+	/* Update the value in the shared memory. */
+	oldestFullXidHavingUndo = FullTransactionIdFromEpochAndXid(xid_orig_epoch,
+															   oldestXidHavingUndo);
+	pg_atomic_write_u64(&ProcGlobal->oldestFullXidHavingUndo,
+						U64FromFullTransactionId(oldestFullXidHavingUndo));
+
+	return oldestXidHavingUndo;
+}
+
+/*
+ * In each log, move the discard pointer behind the last discarded undo record
+ * set chunk.
+ */
+void
+DiscardUndoRecordSetChunks(void)
+{
+	UndoLogSlot *slot = NULL;
+
+	UndoRecordSetChunkHeader chunk_hdr;
+	Buffer		buffers[2];
+	int			i;
+
+	for (i = 0; i < lengthof(buffers); ++i)
+		buffers[i] = InvalidBuffer;
+
+	while ((slot = UndoLogGetNextSlot(slot)))
+	{
+		UndoLogNumber logno;
+		UndoLogOffset discard;
+		UndoLogOffset insert;
+		UndoLogOffset cur;
+
+		LWLockAcquire(&slot->meta_lock, LW_SHARED);
+		logno = slot->logno;
+		discard = slot->meta.discard;
+		insert = slot->meta.insert;
+		LWLockRelease(&slot->meta_lock);
+
+		Assert(discard <= insert);
+
+		cur = discard;
+		while (cur < insert)
+		{
+			/*
+			 * We only discard the whole chunks, so the first chunk should
+			 * start exactly at the current discard position.
+			 */
+			read_undo_header((void *) &chunk_hdr,
+							 SizeOfUndoRecordSetChunkHeader,
+							 MakeUndoRecPtr(logno, cur),
+							 buffers,
+							 lengthof(buffers));
+			release_buffers(buffers, lengthof(buffers));
+
+			/*
+			 * Stop as soon as we see an open chunk or a chunk not marked for
+			 * discarding.
+			 */
+			if (chunk_hdr.size == 0 || chunk_hdr.last_rec_applied != 1)
+				break;
+
+			cur += chunk_hdr.size;
+		}
+		/* The insert pointer should also be at chunk boundary. */
+		Assert(cur <= insert);
+
+		/* Perform the actual discarding. */
+		if (cur > discard)
+			UndoDiscard(MakeUndoRecPtr(logno, cur));
+	}
+}
+
+/*
+ * User interface for AdvanceOldextXidHavingUndo(), primarily for debugging
+ * purposes.
+ */
+Datum
+pg_advance_oldest_xid_having_undo(PG_FUNCTION_ARGS)
+{
+	TransactionId xid = AdvanceOldestXidHavingUndo();
+
+	PG_RETURN_TRANSACTIONID(xid);
+}
+
+Datum
+pg_discard_undo_record_set_chunks(PG_FUNCTION_ARGS)
+{
+	DiscardUndoRecordSetChunks();
+
+	PG_RETURN_VOID();
 }

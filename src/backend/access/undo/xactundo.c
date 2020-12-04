@@ -361,7 +361,15 @@ PerformUndoActionsRange(UndoRecPtr begin, UndoRecPtr end,
 		if (rmgr->rm_undo &&
 			(r.node.location < last_rec_applied ||
 			 last_rec_applied == 0))
+		{
 			rmgr->rm_undo(&r.node, r.node.chunk_hdr);
+
+			/*
+			 * The progress should be updated in the chunk header by now, but
+			 * we need to maintain a local copy to check the next record.
+			 */
+			last_rec_applied = r.node.location;
+		}
 	}
 
 	UndoRSReaderClose(&r);
