@@ -466,7 +466,7 @@ XLogReadBufferExtended(SmgrId smgrid, RelFileNode rnode, ForkNumber forknum,
 	{
 		/* page exists in file */
 		buffer = ReadBufferWithoutRelcache(smgrid, rnode, forknum, blkno,
-										   mode, NULL);
+										   mode, NULL, RELPERSISTENCE_PERMANENT);
 	}
 	else
 	{
@@ -491,7 +491,8 @@ XLogReadBufferExtended(SmgrId smgrid, RelFileNode rnode, ForkNumber forknum,
 				ReleaseBuffer(buffer);
 			}
 			buffer = ReadBufferWithoutRelcache(smgrid, rnode, forknum,
-											   P_NEW, mode, NULL);
+											   P_NEW, mode, NULL,
+											   RELPERSISTENCE_PERMANENT);
 		}
 		while (BufferGetBlockNumber(buffer) < blkno);
 		/* Handle the corner case that P_NEW returns non-consecutive pages */
@@ -501,7 +502,8 @@ XLogReadBufferExtended(SmgrId smgrid, RelFileNode rnode, ForkNumber forknum,
 				LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 			ReleaseBuffer(buffer);
 			buffer = ReadBufferWithoutRelcache(smgrid, rnode, forknum, blkno,
-											   mode, NULL);
+											   mode, NULL,
+											   RELPERSISTENCE_PERMANENT);
 		}
 	}
 
