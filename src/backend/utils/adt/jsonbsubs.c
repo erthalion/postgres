@@ -29,21 +29,7 @@
 /* SubscriptingRefState.workspace for jsonb subscripting execution */
 typedef struct JsonbSubWorkspace
 {
-	/* Values determined during expression compilation */
-	Oid			refelemtype;	/* OID of the jsonb element type */
-	int16		refattrlength;	/* typlen of jsonb type */
-	int16		refelemlength;	/* typlen of the jsonb element type */
-	bool		refelembyval;	/* is the element type pass-by-value? */
-	char		refelemalign;	/* typalign of the element type */
 	Oid			refassgntype;	/* type of assignment expr */
-
-	/*
-	 * Subscript values.  Note that these arrays must be
-	 * of length MAXDIM even when dealing with fewer subscripts, because
-	 * array_get/set_slice may scribble on the extra entries.
-	 */
-	Datum		upperindex[MAXDIM];
-	Datum		lowerindex[MAXDIM];
 } JsonbSubWorkspace;
 
 /*
@@ -99,7 +85,6 @@ jsonb_subscript_transform(SubscriptingRef *sbsref,
 				subexpr = NULL;
 			}
 			lowerIndexpr = lappend(lowerIndexpr, subexpr);
-			/*indexprSlice = lappend(indexprSlice, ai);*/
 		}
 		else
 			Assert(ai->lidx == NULL && !ai->is_slice);
@@ -178,7 +163,6 @@ jsonb_subscript_check_subscripts(ExprState *state,
 								 ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref_subscript.state;
-	JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;
 
 	/* Process upper subscripts */
 	for (int i = 0; i < sbsrefstate->numupper; i++)
@@ -195,7 +179,6 @@ jsonb_subscript_check_subscripts(ExprState *state,
 				*op->resnull = true;
 				return false;
 			}
-			workspace->upperindex[i] = sbsrefstate->upperindex[i];
 		}
 	}
 
@@ -215,13 +198,12 @@ jsonb_subscript_fetch(ExprState *state,
 					  ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;
 
 	/* Should not get here if source array (or any subscript) is null */
 	Assert(!(*op->resnull));
 
 	*op->resvalue = jsonb_get_element(DatumGetJsonbP(*op->resvalue),
-									  workspace->upperindex,
+									  sbsrefstate->upperindex,
 									  sbsrefstate->numupper,
 									  op->resnull,
 									  false);
@@ -242,34 +224,10 @@ jsonb_subscript_assign(ExprState *state,
 	JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;
 	Datum		jsonbSource = *op->resvalue;
 
-	/*
-	 * For an assignment to a fixed-length array type, both the original array
-	 * and the value to be assigned into it must be non-NULL, else we punt and
-	 * return the original array.
-	 */
-	if (workspace->refattrlength > 0)
-	{
-		if (*op->resnull || sbsrefstate->replacenull)
-			return;
-	}
-
-	/*
-	 * For assignment to varlena arrays, we handle a NULL original array by
-	 * substituting an empty (zero-dimensional) array; insertion of the new
-	 * element will result in a singleton array value.  It does not matter
-	 * whether the new element is NULL.
-	 */
-	/*if (*op->resnull)*/
-	/*{*/
-		/*arraySource = PointerGetDatum(construct_empty_array(workspace->refelemtype));*/
-		/**op->resnull = false;*/
-	/*}*/
-
 	*op->resvalue = jsonb_set_element(jsonbSource,
-									  workspace->upperindex,
+									  sbsrefstate->upperindex,
 									  sbsrefstate->numupper,
 									  sbsrefstate->replacevalue,
-									  /*workspace->refelemtype,*/
 									  workspace->refassgntype,
 									  sbsrefstate->replacenull);
 	/* The result is never NULL, so no need to change *op->resnull */
@@ -289,7 +247,6 @@ jsonb_subscript_fetch_old(ExprState *state,
 						  ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;
 
 	if (*op->resnull)
 	{
@@ -299,7 +256,7 @@ jsonb_subscript_fetch_old(ExprState *state,
 	}
 	else
 		sbsrefstate->prevvalue = jsonb_get_element(DatumGetJsonbP(*op->resvalue),
-									  			   workspace->upperindex,
+									  			   sbsrefstate->upperindex,
 									  			   sbsrefstate->numupper,
 												   &sbsrefstate->prevnull,
 												   false);
@@ -338,16 +295,6 @@ jsonb_exec_setup(const SubscriptingRef *sbsref,
 	 */
 	workspace = (JsonbSubWorkspace *) palloc(sizeof(JsonbSubWorkspace));
 	sbsrefstate->workspace = workspace;
-
-	/*
-	 * Collect datatype details we'll need at execution.
-	 */
-	workspace->refelemtype = sbsref->refelemtype;
-	workspace->refattrlength = get_typlen(sbsref->refcontainertype);
-	get_typlenbyvalalign(sbsref->refcontainertype,
-						 &workspace->refelemlength,
-						 &workspace->refelembyval,
-						 &workspace->refelemalign);
 
 	workspace->refassgntype = exprType((Node *) sbsref->refassgnexpr);
 
