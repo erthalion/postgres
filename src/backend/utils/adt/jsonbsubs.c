@@ -221,14 +221,13 @@ jsonb_subscript_assign(ExprState *state,
 					   ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;
+	/*JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;*/
 	Datum		jsonbSource = *op->resvalue;
 
 	*op->resvalue = jsonb_set_element(jsonbSource,
 									  sbsrefstate->upperindex,
 									  sbsrefstate->numupper,
 									  sbsrefstate->replacevalue,
-									  workspace->refassgntype,
 									  sbsrefstate->replacenull);
 	/* The result is never NULL, so no need to change *op->resnull */
 }

@@ -1622,7 +1622,7 @@ jsonb_get_element(Jsonb *jb, Datum *path, int npath, bool *isnull, bool as_text)
 
 Datum
 jsonb_set_element(Datum jsonbdatum, Datum *path, int path_len,
-				  Datum sourceData, Oid source_type, bool is_null)
+				  Datum sourceData, bool is_null)
 {
 	Jsonb			   *jb = DatumGetJsonbP(jsonbdatum);
 	JsonbValue		   *newval,
@@ -1631,7 +1631,13 @@ jsonb_set_element(Datum jsonbdatum, Datum *path, int path_len,
 	JsonbIterator 	   *it;
 	bool			   *path_nulls = palloc0(path_len * sizeof(bool));
 
-	newval = to_jsonb_worker(sourceData, source_type, is_null);
+	if (is_null)
+	{
+		newval = (JsonbValue *) palloc(sizeof(JsonbValue));
+		newval->type = jbvNull;
+	}
+	else
+		newval = JsonbToJsonbValue(DatumGetJsonbP(sourceData));
 
 	if (newval->type == jbvArray && newval->val.array.rawScalar)
 		*newval = newval->val.array.elems[0];

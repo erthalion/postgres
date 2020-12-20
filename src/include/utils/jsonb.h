@@ -411,7 +411,7 @@ extern const char *JsonbTypeName(JsonbValue *jb);
 extern JsonbValue *to_jsonb_worker(Datum source, Oid source_type, bool is_null);
 
 extern Datum jsonb_set_element(Datum datum, Datum *path, int path_len,
-							   Datum sourceData, Oid source_type, bool is_null);
+							   Datum sourceData, bool is_null);
 extern Datum jsonb_get_element(Jsonb *jb, Datum *path, int npath,
 							   bool *isnull, bool as_text);
 #endif							/* __JSONB_H__ */
