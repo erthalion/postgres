@@ -1621,23 +1621,13 @@ jsonb_get_element(Jsonb *jb, Datum *path, int npath, bool *isnull, bool as_text)
 }
 
 Datum
-jsonb_set_element(Datum jsonbdatum, Datum *path, int path_len,
-				  Datum sourceData, bool is_null)
+jsonb_set_element(Jsonb* jb, Datum *path, int path_len,
+				  JsonbValue *newval)
 {
-	Jsonb			   *jb = DatumGetJsonbP(jsonbdatum);
-	JsonbValue		   *newval,
-					   *res;
+	JsonbValue		   *res;
 	JsonbParseState    *state = NULL;
 	JsonbIterator 	   *it;
 	bool			   *path_nulls = palloc0(path_len * sizeof(bool));
-
-	if (is_null)
-	{
-		newval = (JsonbValue *) palloc(sizeof(JsonbValue));
-		newval->type = jbvNull;
-	}
-	else
-		newval = JsonbToJsonbValue(DatumGetJsonbP(sourceData));
 
 	if (newval->type == jbvArray && newval->val.array.rawScalar)
 		*newval = newval->val.array.elems[0];

@@ -26,12 +26,6 @@
 #include "utils/lsyscache.h"
 
 
-/* SubscriptingRefState.workspace for jsonb subscripting execution */
-typedef struct JsonbSubWorkspace
-{
-	Oid			refassgntype;	/* type of assignment expr */
-} JsonbSubWorkspace;
-
 /*
  * Finish parse analysis of a SubscriptingRef expression for a jsonb.
  *
@@ -153,9 +147,6 @@ jsonb_subscript_transform(SubscriptingRef *sbsref,
  * If any subscript is NULL, we throw error in assignment cases, or in fetch
  * cases set result to NULL and return false (instructing caller to skip the
  * rest of the SubscriptingRef sequence).
- *
- * We convert all the subscripts to plain integers and save them in the
- * sbsrefstate->workspace arrays.
  */
 static bool
 jsonb_subscript_check_subscripts(ExprState *state,
@@ -189,8 +180,10 @@ jsonb_subscript_check_subscripts(ExprState *state,
  * Evaluate SubscriptingRef fetch for a jsonb element.
  *
  * Source container is in step's result variable (it's known not NULL, since
- * we set fetch_strict to true), and indexes have already been evaluated into
- * workspace array.
+ * we set fetch_strict to true),
+ *
+ * TODO: Check this?
+ * and indexes have already been evaluated into workspace array.
  */
 static void
 jsonb_subscript_fetch(ExprState *state,
@@ -198,11 +191,12 @@ jsonb_subscript_fetch(ExprState *state,
 					  ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
+	Jsonb		*jsonbSource = DatumGetJsonbP(*op->resvalue);
 
 	/* Should not get here if source array (or any subscript) is null */
 	Assert(!(*op->resnull));
 
-	*op->resvalue = jsonb_get_element(DatumGetJsonbP(*op->resvalue),
+	*op->resvalue = jsonb_get_element(jsonbSource,
 									  sbsrefstate->upperindex,
 									  sbsrefstate->numupper,
 									  op->resnull,
@@ -221,14 +215,34 @@ jsonb_subscript_assign(ExprState *state,
 					   ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	/*JsonbSubWorkspace *workspace = (JsonbSubWorkspace *) sbsrefstate->workspace;*/
-	Datum		jsonbSource = *op->resvalue;
+	Jsonb		*jsonbSource;
+	JsonbValue	*replacevalue;
+
+	if (sbsrefstate->replacenull)
+	{
+		replacevalue = (JsonbValue *) palloc(sizeof(JsonbValue));
+		replacevalue->type = jbvNull;
+	}
+	else
+		replacevalue =
+			JsonbToJsonbValue(DatumGetJsonbP(sbsrefstate->replacevalue));
+
+	if (*op->resnull)
+	{
+		JsonbValue *newSource = (JsonbValue *) palloc(sizeof(JsonbValue));
+		newSource->type = jbvObject;
+		newSource->val.object.nPairs = 0;
+
+		jsonbSource = JsonbValueToJsonb(newSource);
+		*op->resnull = false;
+	}
+	else
+		jsonbSource = DatumGetJsonbP(*op->resvalue);
 
 	*op->resvalue = jsonb_set_element(jsonbSource,
 									  sbsrefstate->upperindex,
 									  sbsrefstate->numupper,
-									  sbsrefstate->replacevalue,
-									  sbsrefstate->replacenull);
+									  replacevalue);
 	/* The result is never NULL, so no need to change *op->resnull */
 }
 
@@ -269,8 +283,6 @@ jsonb_exec_setup(const SubscriptingRef *sbsref,
 				 SubscriptingRefState *sbsrefstate,
 				 SubscriptExecSteps *methods)
 {
-	JsonbSubWorkspace *workspace;
-
 	Assert((sbsrefstate->numlower == 0));
 
 	/*
@@ -288,14 +300,6 @@ jsonb_exec_setup(const SubscriptingRef *sbsref,
 	if (sbsrefstate->numlower != 0 &&
 		sbsrefstate->numupper != sbsrefstate->numlower)
 		elog(ERROR, "upper and lower index lists are not same length");
-
-	/*
-	 * Allocate type-specific workspace.
-	 */
-	workspace = (JsonbSubWorkspace *) palloc(sizeof(JsonbSubWorkspace));
-	sbsrefstate->workspace = workspace;
-
-	workspace->refassgntype = exprType((Node *) sbsref->refassgnexpr);
 
 	/*
 	 * Pass back pointers to appropriate step execution functions.

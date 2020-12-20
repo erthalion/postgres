@@ -4928,6 +4928,27 @@ select * from test_jsonb_subscript;
   2 | {"a": [1, 2, 3], "key": "value", "another_key": null}
 (2 rows)
 
+-- NULL as jsonb source
+insert into test_jsonb_subscript values (3, NULL);
+update test_jsonb_subscript set test_json['a'] = '1' where id = 3;
+select * from test_jsonb_subscript;
+ id |                       test_json                       
+----+-------------------------------------------------------
+  1 | {"a": [1, 2, 3], "another_key": null}
+  2 | {"a": [1, 2, 3], "key": "value", "another_key": null}
+  3 | {"a": 1}
+(3 rows)
+
+update test_jsonb_subscript set test_json = NULL where id = 3;
+update test_jsonb_subscript set test_json[0] = '1';
+select * from test_jsonb_subscript;
+ id |                           test_json                           
+----+---------------------------------------------------------------
+  1 | {"0": 1, "a": [1, 2, 3], "another_key": null}
+  2 | {"0": 1, "a": [1, 2, 3], "key": "value", "another_key": null}
+  3 | {"0": 1}
+(3 rows)
+
 -- jsonb to tsvector
 select to_tsvector('{"a": "aaa bbb ddd ccc", "b": ["eee fff ggg"], "c": {"d": "hhh iii"}}'::jsonb);
                                 to_tsvector                                
