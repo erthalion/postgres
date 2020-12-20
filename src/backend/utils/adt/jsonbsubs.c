@@ -118,21 +118,6 @@ jsonb_subscript_transform(SubscriptingRef *sbsref,
 				 parser_errposition(pstate, exprLocation(
 						 ((Node *) linitial(sbsref->reflowerindexpr))))));
 
-	/* Verify subscript list lengths are within implementation limit */
-	if (list_length(upperIndexpr) > MAXDIM)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						list_length(upperIndexpr), MAXDIM)));
-	/* We need not check lowerIndexpr separately */
-
-	/*
-	 * Determine the result type of the subscripting operation.  It's the same
-	 * as the array type if we're slicing, else it's the element type.  In
-	 * either case, the typmod is the same as the array's, so we need not
-	 * change reftypmod.
-	 */
-
 	/* Determine the result type of the subscripting operation; always jsonb */
 	sbsref->refrestype = JSONBOID;
 	sbsref->reftypmod = -1;
@@ -142,7 +127,7 @@ jsonb_subscript_transform(SubscriptingRef *sbsref,
  * During execution, process the subscripts in a SubscriptingRef expression.
  *
  * The subscript expressions are already evaluated in Datum form in the
- * SubscriptingRefState's arrays.  Check and convert them as necessary.
+ * SubscriptingRefState's arrays.  Check them as necessary.
  *
  * If any subscript is NULL, we throw error in assignment cases, or in fetch
  * cases set result to NULL and return false (instructing caller to skip the
@@ -180,10 +165,7 @@ jsonb_subscript_check_subscripts(ExprState *state,
  * Evaluate SubscriptingRef fetch for a jsonb element.
  *
  * Source container is in step's result variable (it's known not NULL, since
- * we set fetch_strict to true),
- *
- * TODO: Check this?
- * and indexes have already been evaluated into workspace array.
+ * we set fetch_strict to true).
  */
 static void
 jsonb_subscript_fetch(ExprState *state,
@@ -191,11 +173,12 @@ jsonb_subscript_fetch(ExprState *state,
 					  ExprContext *econtext)
 {
 	SubscriptingRefState *sbsrefstate = op->d.sbsref.state;
-	Jsonb		*jsonbSource = DatumGetJsonbP(*op->resvalue);
+	Jsonb		*jsonbSource;
 
-	/* Should not get here if source array (or any subscript) is null */
+	/* Should not get here if source jsonb (or any subscript) is null */
 	Assert(!(*op->resnull));
 
+	jsonbSource = DatumGetJsonbP(*op->resvalue);
 	*op->resvalue = jsonb_get_element(jsonbSource,
 									  sbsrefstate->upperindex,
 									  sbsrefstate->numupper,
@@ -250,7 +233,7 @@ jsonb_subscript_assign(ExprState *state,
  * Compute old jsonb element value for a SubscriptingRef assignment
  * expression.  Will only be called if the new-value subexpression
  * contains SubscriptingRef or FieldStore.  This is the same as the
- * regular fetch case, except that we have to handle a null array,
+ * regular fetch case, except that we have to handle a null jsonb,
  * and the value should be stored into the SubscriptingRefState's
  * prevvalue/prevnull fields.
  */
@@ -263,20 +246,25 @@ jsonb_subscript_fetch_old(ExprState *state,
 
 	if (*op->resnull)
 	{
-		/* whole array is null, so any element is too */
+		/* whole jsonb is null, so any element is too */
 		sbsrefstate->prevvalue = (Datum) 0;
 		sbsrefstate->prevnull = true;
 	}
 	else
-		sbsrefstate->prevvalue = jsonb_get_element(DatumGetJsonbP(*op->resvalue),
+	{
+		Jsonb	*jsonbSource = DatumGetJsonbP(*op->resvalue);
+		sbsrefstate->prevvalue = jsonb_get_element(jsonbSource,
 									  			   sbsrefstate->upperindex,
 									  			   sbsrefstate->numupper,
 												   &sbsrefstate->prevnull,
 												   false);
+	}
 }
 
 /*
- * Set up execution state for a jsonb subscript operation.
+ * Set up execution state for a jsonb subscript operation. Opposite to the
+ * arrays subscription, there is no limit for number of subscripts as jsonb
+ * type itself doesn't have nesting limits.
  */
 static void
 jsonb_exec_setup(const SubscriptingRef *sbsref,
@@ -284,17 +272,6 @@ jsonb_exec_setup(const SubscriptingRef *sbsref,
 				 SubscriptExecSteps *methods)
 {
 	Assert((sbsrefstate->numlower == 0));
-
-	/*
-	 * Enforce the implementation limit on number of array subscripts.  This
-	 * check isn't entirely redundant with checking at parse time; conceivably
-	 * the expression was stored by a backend with a different MAXDIM value.
-	 */
-	if (sbsrefstate->numupper > MAXDIM)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
-						sbsrefstate->numupper, MAXDIM)));
 
 	/* Should be impossible if parser is sane, but check anyway: */
 	if (sbsrefstate->numlower != 0 &&
