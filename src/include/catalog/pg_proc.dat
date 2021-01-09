@@ -11314,4 +11314,21 @@
   proname => 'is_normalized', prorettype => 'bool', proargtypes => 'text text',
   prosrc => 'unicode_is_normalized' },
 
-]
+# undo
+{ oid => '8472', descr => 'list undo logs',
+  proname => 'pg_stat_get_undo_logs', procost => '1', prorows => '10', proretset => 't',
+  prorettype => 'record', proargtypes => '',
+  proallargtypes => '{oid,text,text,text,text,text,text,xid,int4}', proargmodes => '{o,o,o,o,o,o,o,o,o}',
+  proargnames => '{logno,category,tablespace,begin,discard,insert,end,xid,pid}', prosrc => 'pg_stat_get_undo_logs' },
+{ oid => '8473', descr => 'forcibly discard undo data',
+  prokind => 'f',
+  proname => 'pg_force_discard_undo_log', provolatile => 'v',
+  proparallel => 'u', prorettype => 'void', proargtypes => 'int4',
+  prosrc => 'pg_force_discard_undo_log' },
+{ oid => '8474', descr => 'simulate a full undo log, for testing',
+  prokind => 'f',
+  proname => 'pg_force_truncate_undo_log', provolatile => 'v',
+  proparallel => 'u', prorettype => 'void', proargtypes => 'int4',
+  prosrc => 'pg_force_truncate_undo_log' },
+ ]
+

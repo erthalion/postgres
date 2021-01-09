@@ -769,7 +769,7 @@ mdnblocks(SMgrRelation reln, ForkNumber forknum)
 
 	mdopenfork(reln, forknum, EXTENSION_FAIL);
 
-	/* mdopen has opened the first segment */
+	/* mdopenfork has opened the first segment */
 	Assert(reln->md_num_open_segs[forknum] > 0);
 
 	/*

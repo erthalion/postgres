@@ -16,7 +16,6 @@
 
 #include "catalog/storage_xlog.h"
 
-
 void
 smgr_desc(StringInfo buf, XLogReaderState *record)
 {

@@ -13,6 +13,7 @@
 #include "postgres.h"
 
 #include "access/parallel.h"
+#include "access/undoworker.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -128,6 +129,12 @@ static const struct
 	},
 	{
 		"ApplyWorkerMain", ApplyWorkerMain
+	},
+	{
+		"UndoLauncherMain", UndoLauncherMain
+	},
+	{
+		"UndoWorkerMain", UndoWorkerMain
 	}
 };
 

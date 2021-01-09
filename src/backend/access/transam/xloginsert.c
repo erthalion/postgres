@@ -719,8 +719,13 @@ XLogRecordAssemble(RmgrId rmid, uint8 info,
 			rdt_datas_last = regbuf->rdata_tail;
 		}
 
+		/*
+		 * For undo buffers we need to store SmgrId in order to distinguish
+		 * the buffer from the regular database buffers.
+		 */
 		if (prev_regbuf && regbuf->smgrid == prev_regbuf->smgrid &&
-			RelFileNodeEquals(regbuf->rnode, prev_regbuf->rnode))
+			RelFileNodeEquals(regbuf->rnode, prev_regbuf->rnode) &&
+			(regbuf->flags & REGBUF_UNDO) == 0)
 		{
 			samerel = true;
 			bkpb.fork_flags |= BKPBLOCK_SAME_REL;

@@ -127,6 +127,7 @@ extern int	CommitDelay;
 extern int	CommitSiblings;
 extern char *default_tablespace;
 extern char *temp_tablespaces;
+extern char *undo_tablespaces;
 extern bool ignore_checksum_failure;
 extern bool ignore_invalid_pages;
 extern bool synchronize_seqscans;
@@ -747,6 +748,8 @@ const char *const config_group_names[] =
 	gettext_noop("Statistics / Query and Index Statistics Collector"),
 	/* AUTOVACUUM */
 	gettext_noop("Autovacuum"),
+	/* UNDO_OPTIONS */
+	gettext_noop("Undo Log"),
 	/* CLIENT_CONN */
 	gettext_noop("Client Connection Defaults"),
 	/* CLIENT_CONN_STATEMENT */
@@ -3879,6 +3882,17 @@ static struct config_string ConfigureNamesString[] =
 		&temp_tablespaces,
 		"",
 		check_temp_tablespaces, assign_temp_tablespaces, NULL
+	},
+
+	{
+		{"undo_tablespaces", PGC_USERSET, UNDO_OPTIONS,
+			gettext_noop("Sets the tablespace(s) to use for undo logs."),
+			NULL,
+			GUC_LIST_INPUT | GUC_LIST_QUOTE
+		},
+		&undo_tablespaces,
+		"",
+		check_undo_tablespaces, assign_undo_tablespaces, NULL
 	},
 
 	{
