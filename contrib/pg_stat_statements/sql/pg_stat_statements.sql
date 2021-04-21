@@ -526,6 +526,7 @@ PREPARE query AS
 SELECT * FROM test_merge WHERE id IN ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 EXECUTE query (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+DEALLOCATE query;
 
 -- VALUES queries
 
@@ -574,6 +575,29 @@ SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
 SELECT pg_stat_statements_reset();
 SELECT * FROM (VALUES (1), (2), (3), (4), (5), (6)) q;
 SELECT * FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9)) q;
+SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+
+-- Const evaluation
+SELECT pg_stat_statements_reset();
+SELECT * FROM test_merge WHERE id IN ((1+1), (2+2), (3+3), (4+4), (5+5), (6+6), (7+7), (8+8), (9+9), (10+10));
+SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+
+SELECT pg_stat_statements_reset();
+SELECT * FROM test_merge WHERE id IN (abs(1), abs(2), abs(3), abs(4), abs(5), abs(6), abs(7), abs(8), abs(9), abs(10));
+SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+
+-- Param evaluation, doesn't work yet
+SELECT pg_stat_statements_reset();
+PREPARE query AS
+SELECT * FROM test_merge WHERE id IN (abs($1), abs($2), abs($3), abs($4), abs($5), abs($6), abs($7), abs($8), abs($9), abs($10));
+EXECUTE query (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
+DEALLOCATE query;
+
+-- On table, numeric type causes every constant being wrapped into functions.
+CREATE TABLE test_merge (id int, data numeric(5, 2));
+SELECT pg_stat_statements_reset();
+SELECT * FROM test_merge WHERE id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
 
 DROP EXTENSION pg_stat_statements;
