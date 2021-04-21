@@ -68,7 +68,9 @@
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "nodes/nodeFuncs.h"
 #include "optimizer/planner.h"
+#include "optimizer/optimizer.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "parser/scanner.h"
@@ -2721,6 +2723,20 @@ JumbleRowMarks(pgssJumbleState *jstate, List *rowMarks)
 }
 
 static bool
+find_const_functions_walker(Node *node, List **constants)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Const))
+	{
+		*constants = lappend(*constants, (Const *) node);
+		return true;
+	}
+	return expression_tree_walker(node, find_const_functions_walker,
+								  (void *) constants);
+}
+
+static bool
 JumbleExprList(pgssJumbleState *jstate, Node *node)
 {
 	ListCell   *temp;
@@ -2734,7 +2750,7 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 		return merged;
 
 	Assert(IsA(node, List));
-	firstExpr = (Node *) lfirst(list_head((List *) node));
+	firstExpr = eval_const_expressions(NULL, (Node *) lfirst(list_head((List *) node)));
 
 	/* Guard against stack overflow due to overly complex expressions */
 	check_stack_depth();
@@ -2762,7 +2778,7 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 
 				foreach(lc, expr)
 				{
-					Node * subExpr = (Node *) lfirst(lc);
+					Node * subExpr = eval_const_expressions(NULL, (Node *) lfirst(lc));
 
 					if (!IsA(subExpr, Const))
 					{
@@ -2802,7 +2818,11 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 					else
 						foreach(lc, expr)
 						{
-							Const *c = (Const *) lfirst(lc);
+							Const *c = (Const *) eval_const_expressions(NULL, (Node *) lfirst(lc));
+							List *constants = NIL;
+							find_const_functions_walker((Node *) lfirst(lc), &constants);
+							/* fake */
+							c->location = 10000000;
 							RecordConstLocation(jstate, c->location, true);
 						}
 
@@ -2820,7 +2840,7 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 
 			foreach(temp, (List *) node)
 			{
-				Node *expr = (Node *) lfirst(temp);
+				Node *expr = eval_const_expressions(NULL, (Node *) lfirst(temp));
 
 				if (!equal(expr, firstExpr) && IsA(expr, Const) &&
 					currentExprIdx >= pgss_merge_threshold - 1)
