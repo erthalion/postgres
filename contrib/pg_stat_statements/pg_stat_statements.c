@@ -2821,8 +2821,7 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 							Const *c = (Const *) eval_const_expressions(NULL, (Node *) lfirst(lc));
 							List *constants = NIL;
 							find_const_functions_walker((Node *) lfirst(lc), &constants);
-							/* fake */
-							c->location = 10000000;
+							c = (Const *) llast(constants);
 							RecordConstLocation(jstate, c->location, true);
 						}
 
