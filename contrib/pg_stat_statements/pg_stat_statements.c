@@ -2774,6 +2774,8 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 			foreach(temp, (List *) node)
 			{
 				List 		*expr = (List *) lfirst(temp);
+				/* TODO: does this make const checks over the list unnecessary? */
+				Node		*evalExpr = eval_const_expressions(NULL, (Node *) expr);
 				ListCell 	*lc;
 
 				foreach(lc, expr)
@@ -2787,7 +2789,7 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 					}
 				}
 
-				if (!equal(expr, firstExpr) && allConst &&
+				if (!equal(evalExpr, firstExpr) && allConst &&
 					currentExprIdx >= pgss_merge_threshold - 1)
 				{
 					merged = true;
@@ -2818,6 +2820,12 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 					else
 						foreach(lc, expr)
 						{
+							/* TODO: is it possible to use evalExpr? */
+
+							/* eval_const_expressions does not provide real
+							 * Const with valid const location, which we need
+							 * for generate_normalized_query. Extract such real
+							 * constants manually. */
 							Const *c = (Const *) eval_const_expressions(NULL, (Node *) lfirst(lc));
 							List *constants = NIL;
 							find_const_functions_walker((Node *) lfirst(lc), &constants);
@@ -2839,9 +2847,10 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 
 			foreach(temp, (List *) node)
 			{
-				Node *expr = eval_const_expressions(NULL, (Node *) lfirst(temp));
+				Node *expr = (Node *) lfirst(temp);
+				Node *evalExpr = eval_const_expressions(NULL, expr);
 
-				if (!equal(expr, firstExpr) && IsA(expr, Const) &&
+				if (!equal(evalExpr, firstExpr) && IsA(evalExpr, Const) &&
 					currentExprIdx >= pgss_merge_threshold - 1)
 				{
 					merged = true;
@@ -2865,7 +2874,15 @@ JumbleExprList(pgssJumbleState *jstate, Node *node)
 					}
 					else
 					{
-						Const *c = (Const *) expr;
+						/* eval_const_expressions does not provide real
+						 * Const with valid const location, which we need
+						 * for generate_normalized_query. Extract such real
+						 * constants manually. */
+						Const *c;
+						List *constants = NIL;
+						find_const_functions_walker(expr, &constants);
+						c = (Const *) llast(constants);
+
 						RecordConstLocation(jstate, c->location, true);
 					}
 
