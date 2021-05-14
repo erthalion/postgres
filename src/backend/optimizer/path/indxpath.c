@@ -1036,7 +1036,7 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 					   check_index_only(rel, index));
 
 	/* Check if an index skip scan is possible. */
-	can_skip = enable_indexskipscan & index->amcanskip & index_only_scan;
+	can_skip = enable_indexskipscan & index->amcanskip;
 
 	if (can_skip)
 	{
@@ -1097,6 +1097,63 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 					not_empty_qual = true;
 					break;
 				}
+			}
+		}
+
+		/*
+		 * For an index scan verify that index fully covers distinct
+		 * expressions, otherwise there is not enough information for skipping
+		 */
+		if (!index_only_scan && root->query_uniquekeys != NULL)
+		{
+			ListCell *lc;
+
+			foreach(lc, root->query_uniquekeys)
+			{
+				List *uniqExprs = (List *) lfirst(lc);
+				ListCell *lc1;
+
+				foreach(lc1, uniqExprs)
+				{
+					Expr *expr = (Expr *) lfirst(lc1);
+					bool found = false;
+
+					if (!IsA(expr, Var))
+					{
+						ListCell *lc2;
+
+						foreach(lc2, index->indexprs)
+						{
+							if(equal(lfirst(lc1), lfirst(lc2)))
+							{
+								found = true;
+								break;
+							}
+						}
+					}
+					else
+					{
+						Var *var = (Var *) expr;
+
+						for (int i = 0; i < index->ncolumns; i++)
+						{
+							if (index->indexkeys[i] == var->varattno)
+							{
+								found = true;
+								break;
+							}
+						}
+					}
+
+					if (!found)
+					{
+						can_skip = false;
+						break;
+					}
+				}
+
+				if (!can_skip)
+					break;
 			}
 		}
 	}

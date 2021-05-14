@@ -1748,6 +1748,12 @@ ExplainNode(PlanState *planstate, List *ancestors,
 	switch (nodeTag(plan))
 	{
 		case T_IndexScan:
+			if (((IndexScan *) plan)->indexskipprefixsize > 0)
+			{
+				IndexScan  *indexscan = (IndexScan *) plan;
+				ExplainPropertyBool("Skip scan", true, es);
+				ExplainIndexSkipScanKeys(indexscan->indexskipprefixsize, es);
+			}
 			show_scan_qual(((IndexScan *) plan)->indexqualorig,
 						   "Index Cond", planstate, ancestors, es);
 			if (((IndexScan *) plan)->indexqualorig)

@@ -411,6 +411,8 @@ typedef struct IndexScan
 	List	   *indexorderbyorig;	/* the same in original form */
 	List	   *indexorderbyops;	/* OIDs of sort ops for ORDER BY exprs */
 	ScanDirection indexorderdir;	/* forward or backward or don't care */
+	int			indexskipprefixsize;	/* the size of the prefix for distinct
+										 * scans */
 } IndexScan;
 
 /* ----------------
