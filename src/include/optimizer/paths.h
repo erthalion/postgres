@@ -229,6 +229,9 @@ extern List *build_join_pathkeys(PlannerInfo *root,
 extern List *make_pathkeys_for_sortclauses(PlannerInfo *root,
 										   List *sortclauses,
 										   List *tlist);
+extern List *make_pathkeys_for_uniquekeys(PlannerInfo *root,
+										  List *sortclauses,
+										  List *tlist);
 extern void initialize_mergeclause_eclasses(PlannerInfo *root,
 											RestrictInfo *restrictinfo);
 extern void update_mergeclause_eclasses(PlannerInfo *root,
@@ -254,5 +257,11 @@ extern PathKey *make_canonical_pathkey(PlannerInfo *root,
 									   int strategy, bool nulls_first);
 extern void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
 									List *live_childrels);
+
+extern bool query_has_uniquekeys_for(PlannerInfo *root,
+									 List *exprs,
+									 bool allow_multinulls);
+
+extern List *build_uniquekeys(PlannerInfo *root, List *sortclauses);
 
 #endif							/* PATHS_H */
