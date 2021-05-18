@@ -64,7 +64,7 @@
 #include "utils/rel.h"
 #include "utils/syscache.h"
 
-static bool IndexSupportsBackwardScan(Oid indexid);
+static bool IndexSupportsBackwardScan(Plan *node);
 
 
 /*
@@ -557,10 +557,8 @@ ExecSupportsBackwardScan(Plan *node)
 			return false;
 
 		case T_IndexScan:
-			return IndexSupportsBackwardScan(((IndexScan *) node)->indexid);
-
 		case T_IndexOnlyScan:
-			return IndexSupportsBackwardScan(((IndexOnlyScan *) node)->indexid);
+			return IndexSupportsBackwardScan(node);
 
 		case T_SubqueryScan:
 			return ExecSupportsBackwardScan(((SubqueryScan *) node)->subplan);
@@ -604,15 +602,37 @@ ExecSupportsBackwardScan(Plan *node)
 
 /*
  * An IndexScan or IndexOnlyScan node supports backward scan only if the
- * index's AM does.
+ * index's AM does and no skip scan is used.
  */
 static bool
-IndexSupportsBackwardScan(Oid indexid)
+IndexSupportsBackwardScan(Plan *node)
 {
 	bool		result;
+	Oid			indexid = InvalidOid;
+	int         skip_prefix_size = 0;
 	HeapTuple	ht_idxrel;
 	Form_pg_class idxrelrec;
 	IndexAmRoutine *amroutine;
+
+	Assert(IsA(node, IndexScan) || IsA(node, IndexOnlyScan));
+	switch(nodeTag(node))
+	{
+		case T_IndexScan:
+			indexid = ((IndexScan *) node)->indexid;
+			break;
+
+		case T_IndexOnlyScan:
+			indexid = ((IndexOnlyScan *) node)->indexid;
+			skip_prefix_size = ((IndexOnlyScan *) node)->indexskipprefixsize;
+			break;
+
+		default:
+			elog(DEBUG2, "unrecognized node type: %d", (int) nodeTag(node));
+			break;
+	}
+
+	if (skip_prefix_size > 0)
+		return false;
 
 	/* Fetch the pg_class tuple of the index relation */
 	ht_idxrel = SearchSysCache1(RELOID, ObjectIdGetDatum(indexid));
