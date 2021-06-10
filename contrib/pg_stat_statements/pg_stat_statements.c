@@ -273,6 +273,7 @@ static const struct config_enum_entry track_options[] =
 
 static int	pgss_max;			/* max # statements to track */
 static int	pgss_track;			/* tracking level */
+static int	pgss_merge_threshold;	/* minumum number of consts for merge */
 static bool pgss_track_utility; /* whether to track utility commands */
 static bool pgss_track_planning;	/* whether to track planning duration */
 static bool pgss_save;			/* whether to save stats across shutdown */
@@ -435,6 +436,19 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+
+	DefineCustomIntVariable("pg_stat_statements.merge_threshold",
+							"After this number of duplicate constants start to merge them.",
+							NULL,
+							&pgss_merge_threshold,
+							5,
+							1,
+							INT_MAX,
+							PGC_SUSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
 
 	EmitWarningsOnPlaceholders("pg_stat_statements");
 
@@ -2599,6 +2613,7 @@ generate_normalized_query(JumbleState *jstate, const char *query,
 				n_quer_loc = 0, /* Normalized query byte location */
 				last_off = 0,	/* Offset from start for previous tok */
 				last_tok_len = 0;	/* Length (in bytes) of that tok */
+	bool		merge = false;
 
 	/*
 	 * Get constants' lengths (core system only gives us locations).  Note
@@ -2637,12 +2652,27 @@ generate_normalized_query(JumbleState *jstate, const char *query,
 		len_to_wrt -= last_tok_len;
 
 		Assert(len_to_wrt >= 0);
-		memcpy(norm_query + n_quer_loc, query + quer_loc, len_to_wrt);
-		n_quer_loc += len_to_wrt;
 
-		/* And insert a param symbol in place of the constant token */
-		n_quer_loc += sprintf(norm_query + n_quer_loc, "$%d",
-							  i + 1 + jstate->highest_extern_param_id);
+		if (!jstate->clocations[i].merged)
+		{
+			memcpy(norm_query + n_quer_loc, query + quer_loc, len_to_wrt);
+			n_quer_loc += len_to_wrt;
+
+			/* And insert a param symbol in place of the constant token */
+			n_quer_loc += sprintf(norm_query + n_quer_loc, "$%d",
+								  i + 1 + jstate->highest_extern_param_id);
+			if (merge)
+				merge = false;
+		}
+		else if (!merge)
+		{
+			memcpy(norm_query + n_quer_loc, query + quer_loc, len_to_wrt);
+			n_quer_loc += len_to_wrt;
+
+			/* Merge until a non merged constant appear */
+			merge = true;
+			n_quer_loc += sprintf(norm_query + n_quer_loc, "...");
+		}
 
 		quer_loc = off + tok_len;
 		last_off = off;
