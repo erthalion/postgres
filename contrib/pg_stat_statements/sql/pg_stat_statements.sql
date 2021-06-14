@@ -595,9 +595,9 @@ SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
 DEALLOCATE query;
 
 -- On table, numeric type causes every constant being wrapped into functions.
-CREATE TABLE test_merge (id int, data numeric(5, 2));
+CREATE TABLE test_merge_numeric (id int, data numeric(5, 2));
 SELECT pg_stat_statements_reset();
-SELECT * FROM test_merge WHERE id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+SELECT * FROM test_merge_numeric WHERE id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 SELECT query, calls FROM pg_stat_statements ORDER BY query COLLATE "C";
 
 DROP EXTENSION pg_stat_statements;

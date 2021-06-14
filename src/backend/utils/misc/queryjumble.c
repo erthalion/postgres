@@ -347,7 +347,7 @@ JumbleRowMarks(JumbleState *jstate, List *rowMarks)
 
 /*
  * find_const_walker
- *       Locate all the Const nodes in an expression tree.
+ *	  Locate all the Const nodes in an expression tree.
  *
  * Caller must provide an empty list where constants will be collected.
  */
@@ -374,16 +374,16 @@ JumbleExprList(JumbleState *jstate, Node *node)
 	bool		merged = false;
 	bool		allConst = true;
 	int 		currentExprIdx;
-	int 		lastExprLenght = 0;
+	int 		lastExprLength = 0;
 
 	if (node == NULL)
 		return merged;
 
-	Assert(IsA(node, List));
-	firstExpr = eval_const_expressions(NULL, (Node *) lfirst(list_head((List *) node)));
-
 	/* Guard against stack overflow due to overly complex expressions */
 	check_stack_depth();
+
+	Assert(IsA(node, List));
+	firstExpr = eval_const_expressions(NULL, (Node *) lfirst(list_head((List *) node)));
 
 	/*
 	 * We always emit the node's NodeTag, then any additional fields that are
@@ -404,8 +404,6 @@ JumbleExprList(JumbleState *jstate, Node *node)
 			foreach(temp, (List *) node)
 			{
 				List 		*expr = (List *) lfirst(temp);
-				/* TODO: does this make const checks over the list unnecessary? */
-				Node		*evalExpr = eval_const_expressions(NULL, (Node *) expr);
 				ListCell 	*lc;
 
 				foreach(lc, expr)
@@ -419,8 +417,7 @@ JumbleExprList(JumbleState *jstate, Node *node)
 					}
 				}
 
-				if (!equal(evalExpr, firstExpr) && allConst &&
-					currentExprIdx >= const_merge_threshold - 1)
+				if (allConst && currentExprIdx >= const_merge_threshold - 1)
 				{
 					merged = true;
 
@@ -438,8 +435,8 @@ JumbleExprList(JumbleState *jstate, Node *node)
 						 * merged, they will be the first merged but still
 						 * present in the statement query.
 						 */
-						Assert(jstate->clocations_count > lastExprLenght - 1);
-						for (int i = 1; i < lastExprLenght + 1; i++)
+						Assert(jstate->clocations_count > lastExprLength - 1);
+						for (int i = 1; i < lastExprLength + 1; i++)
 						{
 							LocationLen *loc;
 							loc = &jstate->clocations[jstate->clocations_count - i];
@@ -469,7 +466,7 @@ JumbleExprList(JumbleState *jstate, Node *node)
 
 				JumbleExpr(jstate, (Node *) expr);
 				currentExprIdx++;
-				lastExprLenght = expr->length;
+				lastExprLength = expr->length;
 			}
 			break;
 
@@ -481,8 +478,7 @@ JumbleExprList(JumbleState *jstate, Node *node)
 				Node *expr = (Node *) lfirst(temp);
 				Node *evalExpr = eval_const_expressions(NULL, expr);
 
-				if (!equal(evalExpr, firstExpr) && IsA(evalExpr, Const) &&
-					currentExprIdx >= const_merge_threshold - 1)
+				if (IsA(evalExpr, Const) && currentExprIdx >= const_merge_threshold - 1)
 				{
 					merged = true;
 
@@ -499,8 +495,13 @@ JumbleExprList(JumbleState *jstate, Node *node)
 						 * record it. Mark it as merged, it will be the first
 						 * merged but still present in the statement query.
 						 */
-						Assert(jstate->clocations_count > 0);
-						jstate->clocations[jstate->clocations_count - 1].merged = true;
+						Assert(jstate->clocations_count > lastExprLength - 1);
+						for (int i = 1; i < lastExprLength + 1; i++)
+						{
+							LocationLen *loc;
+							loc = &jstate->clocations[jstate->clocations_count - i];
+							loc->merged = true;
+						}
 						currentExprIdx++;
 					}
 					else
@@ -527,6 +528,16 @@ JumbleExprList(JumbleState *jstate, Node *node)
 
 				JumbleExpr(jstate, expr);
 				currentExprIdx++;
+
+				if (currentExprIdx == const_merge_threshold -1)
+				{
+					// The next expression will be eligible for merging check.
+					// For it to happen correctly remember the number of
+					// constants in the previous expression.
+					List *constants = NIL;
+					find_const_walker(expr, &constants);
+					lastExprLength = constants->length;
+				}
 			}
 			break;
 
