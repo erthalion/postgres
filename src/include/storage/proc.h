@@ -357,6 +357,12 @@ typedef struct PROC_HDR
 	int			startupProcPid;
 	/* Buffer id of the buffer that Startup process waits for pin on, or -1 */
 	int			startupBufferPinWaitBufId;
+	/*
+	 * Oldest transaction id which is having undo. Transactions that only use
+	 * temporary relations do not affect this value, as their data are not
+	 * visible to any other backend.
+	 */
+	pg_atomic_uint64 oldestFullXidHavingUndo;
 } PROC_HDR;
 
 extern PGDLLIMPORT PROC_HDR *ProcGlobal;

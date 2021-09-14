@@ -79,7 +79,7 @@ GetUndoDataSize(UndoRecData * rdata)
 /*
  * Serialize the undo records.
  */
-static void
+void
 SerializeUndoData(StringInfo buf, RmgrId rmid, uint8 rec_type,
 				  UndoRecData * rdata)
 {
@@ -412,11 +412,38 @@ PerformUndoActions(int nestingLevel)
 				 start_location, end_location
 				);
 
-
 			PerformUndoActionsRange(start_location, end_location, relpersistence,
 									nestingLevel);
 		}
 
+		/*
+		 * If this is the top-level transaction, mark the URS applied, so its
+		 * chunks can be discarded.
+		 */
+		if (nestingLevel == 1)
+		{
+			UndoRecPtr	begin,
+						end;
+			uint16		off;
+
+			GetCurrentUndoRange(&begin, &end, p);
+
+			/* Compute the offset of the "applied" flag in the chunk. */
+			off = SizeOfUndoRecordSetChunkHeader +
+				offsetof(XactUndoRecordSetHeader, applied);
+
+			/*
+			 * UndoSetFlag() scans the chain of chunks backwards, so if we
+			 * pass the first chunk, the following ones will be ignored.
+			 * That's o.k. because only the first chunk contains the type
+			 * header.
+			 *
+			 * If this operation does not complete due to server crash,
+			 * ApplyPendingUndo() will do it during restart.
+			 */
+			if (UndoRecPtrIsValid(begin))
+				UndoSetFlag(begin, off, relpersistence);
+		}
 	}
 }
 

@@ -1615,6 +1615,15 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
 		 */
 		PerformUndoActionsRange(hdr->urs_begin, hdr->urs_end,
 								RELPERSISTENCE_PERMANENT, 1);
+
+		/*
+		 * Mark the URS applied. If this fails due to crash,
+		 * ApplyPendingUndo() will do it during restart.
+		 */
+		UndoSetFlag(hdr->urs_begin,
+					SizeOfUndoRecordSetChunkHeader +
+					offsetof(XactUndoRecordSetHeader, applied),
+					RELPERSISTENCE_PERMANENT);
 	}
 
 	/* Clear shared memory state */

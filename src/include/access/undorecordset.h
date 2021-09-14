@@ -40,10 +40,23 @@ typedef struct UndoRecordSetChunkHeader
 	UndoRecPtr	previous_chunk;
 
 	uint8		type;
+
+	/*
+	 * Consider the chunk discarded? If the first chunk in an undo log is
+	 * discarded, the discard pointer of the underlying undo log can advance
+	 * to the beginning of the following chunk.
+	 *
+	 * This information is stored in every chunk so that the actual discarding
+	 * can be independent from evaluation of the type header. In particular,
+	 * for the URST_TRANSACTION, the problem is that only the first chunk of
+	 * the set contains the XID. So without this flag we'd have to search for
+	 * the first chunk when trying to discard any chunk of the set.
+	 */
+	bool		discarded;
 } UndoRecordSetChunkHeader;
 
 #define SizeOfUndoRecordSetChunkHeader \
-	(offsetof(UndoRecordSetChunkHeader, type) + sizeof(uint8))
+	(offsetof(UndoRecordSetChunkHeader, discarded) + sizeof(bool))
 
 /* On-disk header for an UndoRecordSet of type URST_TRANSACTION. */
 typedef struct XactUndoRecordSetHeader
@@ -124,4 +137,6 @@ extern bool UndoCloseAndDestroyForXactLevel(int nestingLevel);
 
 extern void AtProcExit_UndoRecordSet(void);
 
+extern TransactionId AdvanceOldestXidHavingUndo(void);
+extern void DiscardUndoRecordSetChunks(void);
 #endif
