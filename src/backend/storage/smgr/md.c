@@ -629,7 +629,7 @@ mdwriteback(SMgrRelation reln, ForkNumber forknum,
 /*
  *	mdread() -- Read the specified block from a relation.
  */
-void
+bool
 mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	   char *buffer)
 {
@@ -685,6 +685,8 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							blocknum, FilePathName(v->mdfd_vfd),
 							nbytes, BLCKSZ)));
 	}
+
+	return true;
 }
 
 /*
