@@ -17,7 +17,6 @@
 #include "commands/dbcommands_xlog.h"
 #include "lib/stringinfo.h"
 
-
 void
 dbase_desc(StringInfo buf, XLogReaderState *record)
 {

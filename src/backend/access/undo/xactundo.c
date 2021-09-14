@@ -57,7 +57,7 @@
 /*
  * Compute the size we need in the undo log.
  */
-static Size
+Size
 GetUndoDataSize(UndoRecData * rdata)
 {
 	UndoRecData *rdata_tmp = rdata;

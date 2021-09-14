@@ -2618,6 +2618,14 @@ ApplyPendingUndo(void)
 		}
 	}
 
+	/*
+	 * Some undo actions may unlink files. Since the checkpointer is not
+	 * guaranteed to be up, it seems simpler to process the undo request
+	 * ourselves in the way the checkpointer would do.
+	 */
+	SyncPreCheckpoint();
+	SyncPostCheckpoint();
+
 	/* Cleanup. */
 	chunktable_destroy(sets);
 }
