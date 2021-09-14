@@ -16,7 +16,8 @@ OBJS = \
 	$(RMGRDESCOBJS) \
 	$(WIN32RES) \
 	pg_undodump.o \
-	rmgrdesc.o
+	rmgrdesc.o \
+	undoxacttestdesc.o
 
 all: pg_undodump
 

@@ -8,6 +8,7 @@
 #define FRONTEND 1
 #include "postgres.h"
 
+#include "access/undoxacttest.h"
 #include "catalog/storage_undo.h"
 #include "commands/dbcommands_undo.h"
 #include "rmgrdesc.h"

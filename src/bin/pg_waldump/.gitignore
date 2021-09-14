@@ -21,6 +21,7 @@
 /standbydesc.c
 /tblspcdesc.c
 /undologdesc.c
+/undoxacttestdesc.c
 /xactdesc.c
 /xlogdesc.c
 /xlogreader.c

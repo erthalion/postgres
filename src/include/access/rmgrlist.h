@@ -48,3 +48,4 @@ PG_RMGR(RM_REPLORIGIN_ID, "ReplicationOrigin", replorigin_redo, replorigin_desc,
 PG_RMGR(RM_GENERIC_ID, "Generic", generic_redo, generic_desc, generic_identify, NULL, NULL, generic_mask, NULL, NULL)
 PG_RMGR(RM_LOGICALMSG_ID, "LogicalMessage", logicalmsg_redo, logicalmsg_desc, logicalmsg_identify, NULL, NULL, NULL, NULL, NULL)
 PG_RMGR(RM_UNDOLOG_ID, "UndoLog", undolog_redo, undolog_desc, undolog_identify, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_UNDOXACTTEST_ID, "UndoXactTest", undoxacttest_redo, undoxacttest_desc, undoxacttest_identify, NULL, NULL, NULL, undoxacttest_undo, undoxacttest_undo_desc)
