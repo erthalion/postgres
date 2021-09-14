@@ -15,7 +15,6 @@
 #include "access/twophase.h"
 #include "access/undodefs.h"
 #include "access/xlogdefs.h"
-#include "access/xlogreader.h"
 #include "datatype/timestamp.h"
 #include "lib/stringinfo.h"
 #include "storage/buf.h"
