@@ -18,6 +18,7 @@
 #include "storage/buf.h"
 #include "storage/bufpage.h"
 #include "storage/relfilenode.h"
+#include "storage/smgr.h"
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 
@@ -176,13 +177,13 @@ extern PrefetchBufferResult PrefetchSharedBuffer(struct SMgrRelationData *smgr_r
 												 BlockNumber blockNum);
 extern PrefetchBufferResult PrefetchBuffer(Relation reln, ForkNumber forkNum,
 										   BlockNumber blockNum);
-extern bool ReadRecentBuffer(RelFileNode rnode, ForkNumber forkNum,
+extern bool ReadRecentBuffer(RelFileNode rnode, SmgrId smgrid, ForkNumber forkNum,
 							 BlockNumber blockNum, Buffer recent_buffer);
 extern Buffer ReadBuffer(Relation reln, BlockNumber blockNum);
 extern Buffer ReadBufferExtended(Relation reln, ForkNumber forkNum,
 								 BlockNumber blockNum, ReadBufferMode mode,
 								 BufferAccessStrategy strategy);
-extern Buffer ReadBufferWithoutRelcache(RelFileNode rnode,
+extern Buffer ReadBufferWithoutRelcache(SmgrId smgrid, RelFileNode rnode,
 										ForkNumber forkNum, BlockNumber blockNum,
 										ReadBufferMode mode, BufferAccessStrategy strategy);
 extern void ReleaseBuffer(Buffer buffer);
@@ -219,11 +220,10 @@ extern XLogRecPtr BufferGetLSNAtomic(Buffer buffer);
 extern void PrintPinnedBufs(void);
 #endif
 extern Size BufferShmemSize(void);
-extern void BufferGetTag(Buffer buffer, RelFileNode *rnode,
+extern void BufferGetTag(Buffer buffer, SmgrId *smgrid, RelFileNode *rnode,
 						 ForkNumber *forknum, BlockNumber *blknum);
 
 extern void MarkBufferDirtyHint(Buffer buffer, bool buffer_std);
-
 extern void UnlockBuffers(void);
 extern void LockBuffer(Buffer buffer, int mode);
 extern bool ConditionalLockBuffer(Buffer buffer);

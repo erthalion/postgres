@@ -481,7 +481,8 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr,
 							   BufferAccessStrategy strategy,
 							   bool *foundPtr);
 static void FlushBuffer(BufferDesc *buf, SMgrRelation reln);
-static void FindAndDropRelFileNodeBuffers(RelFileNode rnode,
+static void FindAndDropRelFileNodeBuffers(SmgrId smgrid,
+										  RelFileNode rnode,
 										  ForkNumber forkNum,
 										  BlockNumber nForkBlock,
 										  BlockNumber firstDelBlock);
@@ -510,7 +511,8 @@ PrefetchSharedBuffer(SMgrRelation smgr_reln,
 	Assert(BlockNumberIsValid(blockNum));
 
 	/* create a tag so we can lookup the buffer */
-	INIT_BUFFERTAG(newTag, smgr_reln->smgr_rnode.node,
+	INIT_BUFFERTAG(newTag, smgr_reln->smgr_which,
+				   smgr_reln->smgr_rnode.node,
 				   forkNum, blockNum);
 
 	/* determine its hash code and partition lock ID */
@@ -615,8 +617,8 @@ PrefetchBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum)
  * tag.  In that case, the buffer is pinned and the usage count is bumped.
  */
 bool
-ReadRecentBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
-				 Buffer recent_buffer)
+ReadRecentBuffer(RelFileNode rnode, SmgrId smgrid, ForkNumber forkNum,
+				 BlockNumber blockNum, Buffer recent_buffer)
 {
 	BufferDesc *bufHdr;
 	BufferTag	tag;
@@ -627,7 +629,7 @@ ReadRecentBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
 
 	ResourceOwnerEnlargeBuffers(CurrentResourceOwner);
 	ReservePrivateRefCountEntry();
-	INIT_BUFFERTAG(tag, rnode, forkNum, blockNum);
+	INIT_BUFFERTAG(tag, smgrid, rnode, forkNum, blockNum);
 
 	if (BufferIsLocal(recent_buffer))
 	{
@@ -777,13 +779,13 @@ ReadBufferExtended(Relation reln, ForkNumber forkNum, BlockNumber blockNum,
  * parameters.
  */
 Buffer
-ReadBufferWithoutRelcache(RelFileNode rnode, ForkNumber forkNum,
+ReadBufferWithoutRelcache(SmgrId smgrid, RelFileNode rnode, ForkNumber forkNum,
 						  BlockNumber blockNum, ReadBufferMode mode,
 						  BufferAccessStrategy strategy)
 {
 	bool		hit;
 
-	SMgrRelation smgr = smgropen(rnode, InvalidBackendId);
+	SMgrRelation smgr = smgropen(smgrid, rnode, InvalidBackendId);
 
 	Assert(InRecovery);
 
@@ -1116,7 +1118,9 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 	uint32		buf_state;
 
 	/* create a tag so we can lookup the buffer */
-	INIT_BUFFERTAG(newTag, smgr->smgr_rnode.node, forkNum, blockNum);
+	INIT_BUFFERTAG(newTag, smgr->smgr_which,
+				   smgr->smgr_rnode.node,
+				   forkNum, blockNum);
 
 	/* determine its hash code and partition lock ID */
 	newHash = BufTableHashCode(&newTag);
@@ -1991,6 +1995,7 @@ BufferSync(int flags)
 			buf_state |= BM_CHECKPOINT_NEEDED;
 
 			item = &CkptBufferIds[num_to_scan++];
+			item->smgrid = bufHdr->tag.smgrid;
 			item->buf_id = buf_id;
 			item->tsId = bufHdr->tag.rnode.spcNode;
 			item->relNode = bufHdr->tag.rnode.relNode;
@@ -2762,12 +2767,12 @@ BufferGetBlockNumber(Buffer buffer)
 
 /*
  * BufferGetTag
- *		Returns the relfilenode, fork number and block number associated with
- *		a buffer.
+ *		Returns the SMGR ID, relfilenode, fork number and block number
+ *		associated with a buffer.
  */
 void
-BufferGetTag(Buffer buffer, RelFileNode *rnode, ForkNumber *forknum,
-			 BlockNumber *blknum)
+BufferGetTag(Buffer buffer, SmgrId *smgrid, RelFileNode *rnode,
+			 ForkNumber *forknum, BlockNumber *blknum)
 {
 	BufferDesc *bufHdr;
 
@@ -2780,6 +2785,7 @@ BufferGetTag(Buffer buffer, RelFileNode *rnode, ForkNumber *forknum,
 		bufHdr = GetBufferDescriptor(buffer - 1);
 
 	/* pinned, so OK to read tag without spinlock */
+	*smgrid = bufHdr->tag.smgrid;
 	*rnode = bufHdr->tag.rnode;
 	*forknum = bufHdr->tag.forkNum;
 	*blknum = bufHdr->tag.blockNum;
@@ -2831,7 +2837,7 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
 
 	/* Find smgr relation for buffer */
 	if (reln == NULL)
-		reln = smgropen(buf->tag.rnode, InvalidBackendId);
+		reln = smgropen(buf->tag.smgrid, buf->tag.rnode, InvalidBackendId);
 
 	TRACE_POSTGRESQL_BUFFER_FLUSH_START(buf->tag.forkNum,
 										buf->tag.blockNum,
@@ -3119,7 +3125,8 @@ DropRelFileNodeBuffers(SMgrRelation smgr_reln, ForkNumber *forkNum,
 		nBlocksToInvalidate < BUF_DROP_FULL_SCAN_THRESHOLD)
 	{
 		for (j = 0; j < nforks; j++)
-			FindAndDropRelFileNodeBuffers(rnode.node, forkNum[j],
+			FindAndDropRelFileNodeBuffers(smgr_reln->smgr_which,
+										  rnode.node, forkNum[j],
 										  nForkBlock[j], firstDelBlock[j]);
 		return;
 	}
@@ -3261,7 +3268,8 @@ DropRelFileNodesAllBuffers(SMgrRelation *smgr_reln, int nnodes)
 					continue;
 
 				/* drop all the buffers for a particular relation fork */
-				FindAndDropRelFileNodeBuffers(rels[i]->smgr_rnode.node,
+				FindAndDropRelFileNodeBuffers(rels[i]->smgr_which,
+											  rels[i]->smgr_rnode.node,
 											  j, block[i][j], 0);
 			}
 		}
@@ -3344,7 +3352,8 @@ DropRelFileNodesAllBuffers(SMgrRelation *smgr_reln, int nnodes)
  * --------------------------------------------------------------------
  */
 static void
-FindAndDropRelFileNodeBuffers(RelFileNode rnode, ForkNumber forkNum,
+FindAndDropRelFileNodeBuffers(SmgrId smgrid, RelFileNode rnode,
+							  ForkNumber forkNum,
 							  BlockNumber nForkBlock,
 							  BlockNumber firstDelBlock)
 {
@@ -3360,7 +3369,7 @@ FindAndDropRelFileNodeBuffers(RelFileNode rnode, ForkNumber forkNum,
 		uint32		buf_state;
 
 		/* create a tag so we can lookup the buffer */
-		INIT_BUFFERTAG(bufTag, rnode, forkNum, curBlock);
+		INIT_BUFFERTAG(bufTag, smgrid, rnode, forkNum, curBlock);
 
 		/* determine its hash code and partition lock ID */
 		bufHash = BufTableHashCode(&bufTag);
@@ -4667,6 +4676,11 @@ buffertag_comparator(const BufferTag *ba, const BufferTag *bb)
 static inline int
 ckpt_buforder_comparator(const CkptSortItem *a, const CkptSortItem *b)
 {
+	/* compare smgr */
+	if (a->smgrid < b->smgrid)
+		return -1;
+	else if (a->smgrid > b->smgrid)
+		return 1;
 	/* compare tablespace */
 	if (a->tsId < b->tsId)
 		return -1;
@@ -4830,7 +4844,7 @@ IssuePendingWritebacks(WritebackContext *context)
 		i += ahead;
 
 		/* and finally tell the kernel to write the data to storage */
-		reln = smgropen(tag.rnode, InvalidBackendId);
+		reln = smgropen(tag.smgrid, tag.rnode, InvalidBackendId);
 		smgrwriteback(reln, tag.forkNum, tag.blockNum, nblocks);
 	}
 

@@ -53,6 +53,7 @@ typedef LockInfoData *LockInfo;
 
 typedef struct RelationData
 {
+	SmgrId		rd_smgrid;		/* relation storage manager */
 	RelFileNode rd_node;		/* relation physical identifier */
 	SMgrRelation rd_smgr;		/* cached file handle, or NULL */
 	int			rd_refcnt;		/* reference count */
@@ -544,7 +545,8 @@ static inline SMgrRelation
 RelationGetSmgr(Relation rel)
 {
 	if (unlikely(rel->rd_smgr == NULL))
-		smgrsetowner(&(rel->rd_smgr), smgropen(rel->rd_node, rel->rd_backend));
+		smgrsetowner(&(rel->rd_smgr),
+					 smgropen(rel->rd_smgrid, rel->rd_node, rel->rd_backend));
 	return rel->rd_smgr;
 }
 

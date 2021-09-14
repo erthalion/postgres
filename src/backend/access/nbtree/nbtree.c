@@ -165,8 +165,8 @@ btbuildempty(Relation index)
 	PageSetChecksumInplace(metapage, BTREE_METAPAGE);
 	smgrwrite(RelationGetSmgr(index), INIT_FORKNUM, BTREE_METAPAGE,
 			  (char *) metapage, true);
-	log_newpage(&RelationGetSmgr(index)->smgr_rnode.node, INIT_FORKNUM,
-				BTREE_METAPAGE, metapage, true);
+	log_newpage(SMGR_MD, &RelationGetSmgr(index)->smgr_rnode.node,
+				INIT_FORKNUM, BTREE_METAPAGE, metapage, true);
 
 	/*
 	 * An immediate sync is required even if we xlog'd the page, because the
