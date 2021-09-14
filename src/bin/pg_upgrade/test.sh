@@ -208,6 +208,11 @@ if "$MAKE" -C "$oldsrc" installcheck-parallel; then
 else
 	make_installcheck_status=$?
 fi
+
+# Make sure there's no live undo (the discard worker might lag).
+psql -X -A -t -d regression -c "SELECT pg_advance_oldest_xid_having_undo()"
+psql -X -A -t -d regression -c "SELECT pg_discard_undo_record_set_chunks()"
+
 "$oldbindir"/pg_ctl -m fast stop
 if [ -n "$createdb_status" ]; then
 	exit 1
@@ -226,6 +231,11 @@ fi
 PGDATA="$BASE_PGDATA"
 
 standard_initdb 'initdb'
+# make sure there's no live undo
+"$bindir"/pg_ctl start -l "$logdir/postmaster2.log" -o "$POSTMASTER_OPTS" -w
+psql -X -A -t -d postgres -c "SELECT pg_advance_oldest_xid_having_undo()"
+psql -X -A -t -d postgres -c "SELECT pg_discard_undo_record_set_chunks()"
+"$bindir"/pg_ctl -D ${PGDATA} stop
 
 pg_upgrade $PG_UPGRADE_OPTS -d "${PGDATA}.old" -D "$PGDATA" -b "$oldbindir" -p "$PGPORT" -P "$PGPORT"
 

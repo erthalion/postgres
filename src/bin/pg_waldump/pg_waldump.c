@@ -17,6 +17,9 @@
 #include <unistd.h>
 
 #include "access/transam.h"
+#include "access/undolog.h"
+#include "access/undorecordset.h"
+#include "access/undorecordset_xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogreader.h"
 #include "access/xlogrecord.h"
@@ -406,6 +409,49 @@ XLogDumpRecordLen(XLogReaderState *record, uint32 *rec_len, uint32 *fpi_len)
 	*rec_len = XLogRecGetTotalLen(record) - *fpi_len;
 }
 
+static void
+PrintUndoBufData(XLogReaderState *record, uint8 block_id)
+{
+	DecodedBkpBlock *block = &record->blocks[block_id];
+	UndoRecordSetXLogBufData bufdata;
+
+	if (!block->in_use || block->smgrid != SMGR_UNDO)
+		return;
+
+	if (!DecodeUndoRecordSetXLogBufData(&bufdata, record, block_id))
+	{
+		printf(" [error decoding undo buf data]");
+		return;
+	}
+
+	if (bufdata.flags & URS_XLOG_CREATE)
+		printf(" URS_XLOG_CREATE(urs_type = %d, type_header_size = %zu)",
+			   (int) bufdata.urs_type,
+			   bufdata.type_header_size);
+	if (bufdata.flags & URS_XLOG_ADD_CHUNK)
+		printf(" URS_XLOG_ADD_CHUNK(urs_type = %d, previous_chunk_header_location = " UndoRecPtrFormat ")",
+			   (int) bufdata.urs_type,
+			   (size_t) bufdata.previous_chunk_header_location);
+	if (bufdata.flags & URS_XLOG_ADD_PAGE)
+		printf(" URS_XLOG_ADD_PAGE(chunk_type = %d, chunk_header_location = " UndoRecPtrFormat ")",
+			   (int) bufdata.urs_type,
+			   bufdata.chunk_header_location);
+	if (bufdata.flags & URS_XLOG_INSERT)
+		printf(" URS_XLOG_INSERT(insert_page_offset = %d)",
+			   (int) bufdata.insert_page_offset);
+	if (bufdata.flags & URS_XLOG_CLOSE_CHUNK)
+		printf(" URS_XLOG_CLOSE_CHUNK(chunk_size_page_offset = %d, chunk_size = %zu)",
+			   (int) bufdata.chunk_size_page_offset,
+			   (size_t) bufdata.chunk_size);
+	if (bufdata.flags & URS_XLOG_CLOSE)
+	{
+		printf(" URS_XLOG_CLOSE(urs_type = %d, type_header_size = %zu",
+			   (int) bufdata.urs_type,
+			   bufdata.type_header_size);
+		printf(")");
+	}
+}
+
 /*
  * Store per-rmgr and per-record statistics for a given record.
  */
@@ -497,6 +543,8 @@ XLogDumpDisplayRecord(XLogDumpConfig *config, XLogReaderState *record)
 		/* print block references (short format) */
 		for (block_id = 0; block_id <= record->max_block_id; block_id++)
 		{
+			size_t		bufdata_len;
+
 			if (!XLogRecHasBlockRef(record, block_id))
 				continue;
 
@@ -522,6 +570,12 @@ XLogDumpDisplayRecord(XLogDumpConfig *config, XLogReaderState *record)
 				else
 					printf(" FPW for WAL verification");
 			}
+
+			XLogRecGetBlockData(record, block_id, &bufdata_len);
+			if (bufdata_len > 0)
+				printf(" bufdata len %zu", bufdata_len);
+
+			PrintUndoBufData(record, block_id);
 		}
 		putchar('\n');
 	}
@@ -577,6 +631,7 @@ XLogDumpDisplayRecord(XLogDumpConfig *config, XLogReaderState *record)
 						   record->blocks[block_id].hole_length);
 				}
 			}
+			PrintUndoBufData(record, block_id);
 			putchar('\n');
 		}
 	}

@@ -34,6 +34,7 @@
 #include <unistd.h>
 
 #include "access/tableam.h"
+#include "access/undolog.h"
 #include "access/xlogutils.h"
 #include "catalog/catalog.h"
 #include "catalog/storage.h"
@@ -1025,8 +1026,12 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 			}
 
 			/* check for garbage data */
-			if (!PageIsVerifiedExtended((Page) bufBlock, blockNum,
-										PIV_LOG_WARNING | PIV_REPORT_STAT))
+			/* Cannot check undo pages using PageIsVerified(), it assumes a */
+			/* standard page header. */
+			/* AFIXME: this needs to be moved into PageIsVerified() and check */
+			/* the undo header instead. */
+			if (smgr->smgr_which != SMGR_UNDO &&
+				!PageIsVerified((Page) bufBlock, blockNum))
 			{
 				if (mode == RBM_ZERO_ON_ERROR || zero_damaged_pages)
 				{
@@ -1475,7 +1480,7 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 void
 DiscardBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
 {
-	SMgrRelation smgr = smgropen(SMGR_MD, rnode, InvalidBackendId);
+	SMgrRelation smgr = smgropen(SMGR_UNDO, rnode, InvalidBackendId);
 	BufferTag	tag;			/* identity of target block */
 	uint32		hash;			/* hash value for tag */
 	LWLock	   *partitionLock;	/* buffer partition lock for it */
@@ -1484,8 +1489,8 @@ DiscardBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
 	uint32		buf_state;
 
 	/* create a tag so we can lookup the buffer */
-	INIT_BUFFERTAG(tag, smgr->smgr_which, smgr->smgr_rnode.node, forkNum,
-				   blockNum);
+	INIT_BUFFERTAG(tag, smgr->smgr_which,
+				   smgr->smgr_rnode.node, forkNum, blockNum);
 
 	/* determine its hash code and partition lock ID */
 	hash = BufTableHashCode(&tag);

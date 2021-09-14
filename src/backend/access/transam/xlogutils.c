@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "access/timeline.h"
+#include "access/undopage.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogutils.h"
@@ -370,7 +371,8 @@ XLogReadBufferForRedoExtended(XLogReaderState *record,
 	 * Make sure that if the block is marked with WILL_INIT, the caller is
 	 * going to initialize it. And vice versa.
 	 */
-	zeromode = (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK);
+	zeromode = (mode == RBM_ZERO || mode == RBM_ZERO_AND_LOCK ||
+				mode == RBM_ZERO_AND_CLEANUP_LOCK);
 	willinit = (record->blocks[block_id].flags & BKPBLOCK_WILL_INIT) != 0;
 	if (willinit && !zeromode)
 		elog(PANIC, "block with WILL_INIT flag in WAL record must be zeroed by redo routine");
@@ -536,7 +538,10 @@ XLogReadBufferExtended(SmgrId smgrid, RelFileNode rnode, ForkNumber forknum,
 		 * there should be no other backends that could modify the buffer at
 		 * the same time.
 		 */
-		if (PageIsNew(page))
+		/* AFIXME: this needs to be abstracted,. */
+		if ((smgr->smgr_which != SMGR_UNDO && PageIsNew(page)) ||
+			(smgr->smgr_which == SMGR_UNDO &&
+			 (((UndoPageHeader) page)->ud_insertion_point == 0)))
 		{
 			ReleaseBuffer(buffer);
 			log_invalid_page(rnode, forknum, blkno, true);

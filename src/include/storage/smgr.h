@@ -61,6 +61,9 @@ typedef struct SMgrRelationData
 	 */
 	int			smgr_which;		/* storage manager selector */
 
+	/* For implementations to use for extra data. */
+	void	   *private_data;
+
 	/*
 	 * for md.c; per-fork arrays of the number of open segments
 	 * (md_num_open_segs) and the segments themselves (md_seg_fds).
@@ -80,7 +83,8 @@ typedef SMgrRelationData *SMgrRelation;
 typedef enum SmgrId
 {
 	SMGR_INVALID = -1,
-	SMGR_MD = 0					/* md.c */
+	SMGR_MD = 0,				/* md.c */
+	SMGR_UNDO = 1,				/* undofile.c */
 } SmgrId;
 
 extern void smgrinit(void);

@@ -291,7 +291,7 @@ LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum,
 void
 DiscardLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
 {
-	SMgrRelation smgr = smgropen(SMGR_MD, rnode, BackendIdForTempRelations());
+	SMgrRelation smgr = smgropen(SMGR_UNDO, rnode, BackendIdForTempRelations());
 	BufferTag	tag;			/* identity of target block */
 	LocalBufferLookupEnt *hresult;
 	BufferDesc *bufHdr;

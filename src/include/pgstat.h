@@ -916,7 +916,6 @@ typedef struct PgStat_StatReplSlotEntry
 	TimestampTz stat_reset_timestamp;
 } PgStat_StatReplSlotEntry;
 
-
 /*
  * Working state needed to accumulate per-function-call timing statistics.
  */

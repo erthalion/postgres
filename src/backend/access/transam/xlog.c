@@ -31,6 +31,9 @@
 #include "access/timeline.h"
 #include "access/transam.h"
 #include "access/twophase.h"
+#include "access/undo.h"
+#include "access/undolog.h"
+#include "access/undorecordset.h"
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/xlogarchive.h"
@@ -7071,6 +7074,12 @@ StartupXLOG(void)
 		InRecovery = true;
 	}
 
+	/*
+	 * Recover undo log meta data corresponding to this checkpoint.  We must
+	 * do this after setting the correct value of InRecovery.
+	 */
+	StartupUndo(ControlFile->checkPointCopy.redo);
+
 	/* REDO */
 	if (InRecovery)
 	{
@@ -7673,6 +7682,20 @@ StartupXLOG(void)
 		ResetUnloggedRelations(UNLOGGED_RELATION_INIT);
 
 	/*
+	 * If we have reset any unlogged relations, then there must be no
+	 * remaining references pointing to unlogged undo logs, so reset those
+	 * too.
+	 */
+	if (InRecovery)
+		ResetUndoLogs(RELPERSISTENCE_UNLOGGED);
+
+	/*
+	 * We always blow away temporary undo logs, because there can be no
+	 * remaining references to them after a restart.
+	 */
+	ResetUndoLogs(RELPERSISTENCE_TEMP);
+
+	/*
 	 * We don't need the latch anymore. It's not strictly necessary to disown
 	 * it, but let's do it for the sake of tidiness.
 	 */
@@ -8070,6 +8093,19 @@ StartupXLOG(void)
 	 * commit timestamp.
 	 */
 	CompleteCommitTsInitialization();
+
+	/*
+	 * Now that WAL inserts are enabled, we can also probe all undo logs to
+	 * find out if there are any UndoRecordSet chunks that were left open by
+	 * an earlier crash, and tidy up.
+	 */
+	CloseDanglingUndoRecordSets();
+
+	/*
+	 * The undo logs are consistent now, so check all undo record sets and
+	 * apply those belonging to aborted (or not finished) transactions.
+	 */
+	ApplyPendingUndo();
 
 	/*
 	 * All done with end-of-recovery actions.
@@ -9386,6 +9422,7 @@ CheckPointGuts(XLogRecPtr checkPointRedo, int flags)
 	TRACE_POSTGRESQL_BUFFER_CHECKPOINT_START(flags);
 	CheckpointStats.ckpt_write_t = GetCurrentTimestamp();
 	CheckPointCLOG();
+	CheckPointUndo(checkPointRedo, ControlFile->checkPointCopy.redo);
 	CheckPointCommitTs();
 	CheckPointSUBTRANS();
 	CheckPointMultiXact();

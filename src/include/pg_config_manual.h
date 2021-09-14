@@ -402,3 +402,9 @@
  * Enable tracing of syncscan operations (see also the trace_syncscan GUC var).
  */
 /* #define TRACE_SYNCSCAN */
+
+/*
+ * TODO Remove this when the development is done, and also get rid of
+ * regression tests that depend on it.
+ */
+#define UNDO_DEBUG
