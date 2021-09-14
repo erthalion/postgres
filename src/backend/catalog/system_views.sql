@@ -1261,3 +1261,16 @@ GRANT SELECT (oid, subdbid, subname, subowner, subenabled, subbinary,
 CREATE VIEW pg_stat_undo_logs AS
     SELECT *
     FROM pg_stat_get_undo_logs();
+
+CREATE VIEW pg_stat_undo_chunks AS
+SELECT	c.logno, c.start, c.prev, c.size, c.discarded,
+	c.type, c.type_header
+FROM pg_stat_get_undo_logs() l,
+     pg_get_undo_log_chunks(l.discard, l.insert) c
+ORDER BY c.logno;
+
+CREATE VIEW pg_stat_undo_records AS
+SELECT	r.start, r.size, r.rmid, r.desc
+FROM pg_stat_get_undo_logs() l,
+     pg_get_undo_log_records(l.discard, l.insert) r
+ORDER BY r.start;

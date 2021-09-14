@@ -40,7 +40,7 @@ typedef struct XactUndoContext
 
 extern Size GetUndoDataSize(UndoRecData * rdata);
 extern void SerializeUndoData(StringInfo buf, RmgrId rmid,
-							  uint8 rec_type, UndoRecData *rdata);
+							  uint8 rec_type, UndoRecData * rdata);
 extern void ResetXactUndo(void);
 extern bool XactHasUndo(void);
 extern UndoRecPtr PrepareXactUndoData(XactUndoContext *ctx, char persistence,

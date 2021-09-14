@@ -64,17 +64,21 @@
 #include "access/undorecordset_xlog.h"
 #include "access/xactundo.h"	/* XXX should we avoid this? */
 #include "access/xlog.h"
+#include "access/xlog_internal.h"
 #include "access/xloginsert.h"
 #include "access/xlogreader.h"
 #include "access/xlogutils.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_control.h"
+#include "common/undo_parser.h"
+#include "funcapi.h"
 #include "miscadmin.h"
 #include "storage/buf.h"
 #include "storage/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "utils/builtins.h"
 #include "utils/fmgrprotos.h"
 
 /*
@@ -2902,4 +2906,520 @@ pg_discard_undo_record_set_chunks(PG_FUNCTION_ARGS)
 	DiscardUndoRecordSetChunks();
 
 	PG_RETURN_VOID();
+}
+
+
+/*
+ * For given persistence level, return the pointer to the beginning of the URS
+ * owned by the current top-level transaction. Return NULL if there's no
+ * active URS.
+ */
+Datum
+pg_current_urs_begin(PG_FUNCTION_ARGS)
+{
+	UndoRecPtr	begin,
+				end;
+	char		relpersist = PG_GETARG_CHAR(0);
+	UndoPersistenceLevel p;
+	char	   *res_str;
+
+	p = GetUndoPersistenceLevel(relpersist);
+
+	if (!GetCurrentUndoRange(&begin, &end, p))
+		PG_RETURN_NULL();
+
+	res_str = psprintf(UndoRecPtrFormat, begin);
+	PG_RETURN_DATUM(CStringGetTextDatum(res_str));
+}
+
+/* Like above, but return the end position. */
+Datum
+pg_current_urs_end(PG_FUNCTION_ARGS)
+{
+	UndoRecPtr	begin,
+				end;
+	char		relpersist = PG_GETARG_CHAR(0);
+	UndoPersistenceLevel p;
+	char	   *res_str;
+
+	p = GetUndoPersistenceLevel(relpersist);
+
+	if (!GetCurrentUndoRange(&begin, &end, p))
+		PG_RETURN_NULL();
+
+	res_str = psprintf(UndoRecPtrFormat, end);
+	PG_RETURN_DATUM(CStringGetTextDatum(res_str));
+}
+
+/* TODO Introduce SQL type for UndoRecPtr */
+static UndoRecPtr
+urp_from_string(char *str)
+{
+	uint32		high,
+				low;
+	UndoRecPtr	result;
+
+	if (sscanf(str, "%08X%08X", &high, &low) != 2)
+		elog(ERROR, "could not recognize UNDO pointer value \"%s\"", str);
+
+	result = (((UndoRecPtr) high) << 32) + low;
+
+	return result;
+}
+
+typedef struct UndoScanState
+{
+	/* User input. */
+	UndoRecPtr	start;
+	UndoRecPtr	end;
+
+	/* Start of the current page. */
+	UndoRecPtr	cur_page;
+	UndoLogParserState parser;
+	UndoSegFile seg;			/* The current segment. */
+
+	int			cur_item;
+
+	/* Found the first non-discarded page? */
+	bool		found_page;
+}			UndoScanState;
+
+/*
+ * Parse the next undo log page and return true, or return false if suitable
+ * page could not be found. Stop at when state->end or log end is reached.
+ *
+ * Parsing runs in the memory context passed by the caller.
+ */
+static bool
+parse_next_page(UndoScanState *state, MemoryContext context, bool records)
+{
+	Buffer		buffer = InvalidBuffer;
+	MemoryContext oldcontext;
+
+	/* Stop if the parser encountered end of data. */
+	if (state->parser.gap)
+		return false;
+
+	/* Retrieve the next page. */
+	while (state->cur_page == InvalidUndoRecPtr ||
+		   (state->cur_page < state->end && buffer == InvalidBuffer))
+	{
+		bool		page_exists;
+		UndoLogOffset page_start_off,
+					seg_start_off;
+		UndoSegFile *seg = &state->seg;
+		UndoLogNumber logno;
+
+		/* Invalid cur_page indicates that this is the first call. */
+		if (state->cur_page == InvalidUndoRecPtr)
+		{
+			state->cur_page = state->start - UndoRecPtrGetPageOffset(state->start);
+			if (state->cur_page >= state->end)
+				return false;
+		}
+
+		logno = UndoRecPtrGetLogNo(state->cur_page);
+		page_start_off = UndoRecPtrGetOffset(state->cur_page);
+		seg_start_off = page_start_off - page_start_off % UndoLogSegmentSize;
+
+		/*
+		 * Do not try to read pages beyond the insertion position - attempt to
+		 * do so can result in error because the segment might not exist.
+		 *
+		 * Try to used cached values of 'insert' so that we don't have to
+		 * access the slot each time.
+		 *
+		 * XXX Is it worth to check the discard pointer too? Not sure, the
+		 * worst case is that we'll quickly receive InvalidBuffer if the page
+		 * we need is already discarded.
+		 */
+		if (strlen(seg->path) > 0 &&
+			logno == seg->logno && seg_start_off == seg->offset &&
+			page_start_off < seg->insert)
+			page_exists = true;
+		else
+		{
+			UndoLogSlot *slot;
+
+			/*
+			 * There's usually no relationship between two consecutive logs.
+			 * If the transaction spans multiple logs, caller needs to handle
+			 * them separately.
+			 */
+			if (strlen(seg->path) > 0 && logno != seg->logno)
+				return false;
+
+			/*
+			 * We've either crossed segment/log boundary or suspect that the
+			 * cached insert pointer is outdated (or not initialized yet). The
+			 * slot needs to be checked.
+			 */
+			slot = UndoLogGetSlot(logno, true);
+			if (slot != NULL)
+			{
+				LWLockAcquire(&slot->meta_lock, LW_SHARED);
+				if (page_start_off < slot->meta.insert)
+					page_exists = true;
+				else
+				{
+					/*
+					 * If there's no such page yet, it makes no sense to check
+					 * the following ones.
+					 */
+					LWLockRelease(&slot->meta_lock);
+					return false;
+				}
+
+				/* Update segment information if needed. */
+				if (strlen(seg->path) == 0 ||
+					slot->meta.logno != seg->logno ||
+					seg_start_off != seg->offset)
+				{
+					seg->logno = slot->meta.logno;
+					seg->offset = seg_start_off;
+					seg->insert = slot->meta.insert;
+					seg->persistence = slot->meta.persistence;
+					UndoLogSegmentPath(seg->logno,
+									   seg->offset / UndoLogSegmentSize,
+									   slot->meta.tablespace,
+									   seg->path);
+				}
+				else
+					seg->insert = slot->meta.insert;
+				LWLockRelease(&slot->meta_lock);
+			}
+			else
+			{
+				/* The whole log has been discarded. */
+				page_exists = false;
+			}
+		}
+
+		/*
+		 * Try to read the page. We can still receive InvalidBuffer if the
+		 * page was discarded concurrently.
+		 */
+		if (page_exists)
+		{
+			RelFileNode rnode;
+			BlockNumber blockno;
+
+			UndoRecPtrAssignRelFileNode(rnode, state->cur_page);
+			blockno = UndoRecPtrGetOffset(state->cur_page) / BLCKSZ;
+			buffer = ReadBufferWithoutRelcache(SMGR_UNDO,
+											   rnode,
+											   MAIN_FORKNUM,
+											   blockno,
+											   RBM_NORMAL,
+											   NULL,
+											   seg->persistence);
+		}
+
+		/*
+		 * We can only skip pages if we haven't started to process them,
+		 * however gaps are not allowed in the middle of the processing.
+		 */
+		if (buffer == InvalidBuffer && state->found_page)
+			return false;
+
+		/* Found the page? */
+		if (buffer != InvalidBuffer)
+			break;
+	}
+
+	/* No more data found? */
+	if (buffer == InvalidBuffer)
+		return false;
+
+	/* Make sure discarded pages are not silently skipped anymore. */
+	state->found_page = true;
+
+	LockBuffer(buffer, BUFFER_LOCK_SHARE);
+
+	/*
+	 * Parse the page. Do so in the multi-call context so that data allocated
+	 * by the parser do survive.
+	 */
+	oldcontext = MemoryContextSwitchTo(context);
+	parse_undo_page(&state->parser, BufferGetPage(buffer),
+					(state->cur_page % UndoLogSegmentSize) / BLCKSZ,
+					&state->seg, records);
+	state->cur_page += BLCKSZ;
+	MemoryContextSwitchTo(oldcontext);
+	UnlockReleaseBuffer(buffer);
+
+	return true;
+}
+
+/*
+ * Setup the multi-call context for get_undo_log_chunks().
+ */
+static void
+setup_undo_log_items_context(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
+							 UndoRecPtr start, UndoRecPtr end)
+{
+	MemoryContext oldcontext;
+	UndoScanState *state;
+	TupleDesc	tupdesc;
+
+	oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	state = (UndoScanState *) palloc(sizeof(UndoScanState));
+	state->start = start;
+	state->end = end;
+	state->cur_page = InvalidUndoRecPtr;
+	initialize_undo_parser(&state->parser);
+	state->seg.path[0] = '\0';
+	state->cur_item = 0;
+	state->found_page = false;
+	funcctx->user_fctx = (void *) state;
+
+	funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+	MemoryContextSwitchTo(oldcontext);
+}
+
+static UndoPageItem *
+get_next_undo_log_item(PG_FUNCTION_ARGS, FuncCallContext *funcctx,
+					   bool record)
+{
+	UndoScanState *state;
+	UndoPageItem *item;
+
+	state = (UndoScanState *) funcctx->user_fctx;
+
+	/* Need the next undo page? */
+	if (state->cur_item >= state->parser.nitems)
+	{
+		bool		success;
+
+		Assert(state->cur_item == state->parser.nitems);
+
+		while ((success = parse_next_page(state,
+										  funcctx->multi_call_memory_ctx,
+										  record)))
+		{
+			/* Does any item start on the page? */
+			if (state->parser.nitems > 0)
+			{
+				UndoPageItem *first,
+						   *last;
+
+				/*
+				 * Although at least some part of the page should be in the
+				 * requested range, it's not guaranteed that at least one item
+				 * is in that range. Check if the range overlaps with the
+				 * chunk array.
+				 */
+				first = &state->parser.items[0];
+				last = &state->parser.items[state->parser.nitems - 1];
+				if (last->location >= state->start &&
+					first->location < state->end)
+					/* Use this page. */
+					break;
+			}
+		}
+
+		/* No next page available? */
+		if (!success)
+		{
+			finalize_undo_parser(&state->parser, record);
+			return NULL;
+		}
+
+		state->cur_item = 0;
+	}
+
+	/* Skip chunks ahead of the requested range. */
+	do
+	{
+		item = &state->parser.items[state->cur_item++];
+	} while (item->location < state->start &&
+			 state->cur_item < state->parser.nitems);
+
+	/*
+	 * At least the last item must be in the range, see the overlap check
+	 * above.
+	 */
+	Assert(state->cur_item <= state->parser.nitems);
+
+	/* Reached the end? */
+	if (item->location >= state->end)
+	{
+		finalize_undo_parser(&state->parser, record);
+		return NULL;
+	}
+
+	return item;
+}
+
+/*
+ * XXX Currently we might display discarded chunks if the discard pointer was
+ * in the middle of the containing page at the time we were checking it
+ * (i.e. less then the whole page was discarded), or even if nothing of the
+ * page was discarded at the time of our check but the discarding took place
+ * before we could read and lock the buffer. Not sure these race conditions
+ * are a problem, as the function is there primarily for debugging.
+ */
+static HeapTuple
+get_next_undo_log_chunk(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
+{
+	UndoPageItem *item;
+	UndoLogChunkInfo *chunk;
+	Datum		values[7];
+	bool		isnull[7];
+
+	item = get_next_undo_log_item(fcinfo, funcctx, false);
+	if (item == NULL)
+		return NULL;
+
+	chunk = &item->u.chunk;
+
+	/* Return the next tuple. */
+	memset(isnull, false, sizeof(isnull));
+	values[0] = CStringGetTextDatum(psprintf("%.6lX",
+											 UndoRecPtrGetLogNo(item->location)));
+	values[1] = CStringGetTextDatum(psprintf(UndoRecPtrFormat, item->location));
+	if (chunk->hdr.previous_chunk != InvalidUndoRecPtr)
+		values[2] = CStringGetTextDatum(psprintf(UndoRecPtrFormat,
+												 chunk->hdr.previous_chunk));
+	else
+		isnull[2] = true;
+	values[3] = UInt64GetDatum(chunk->hdr.size);
+	values[4] = BoolGetDatum(chunk->hdr.discarded);
+	if (chunk->hdr.type == URST_TRANSACTION)
+	{
+		XactUndoRecordSetHeader *hdr;
+		TransactionId xid;
+
+		hdr = &chunk->type_header.xact;
+		xid = XidFromFullTransactionId(hdr->fxid);
+		values[5] = CStringGetTextDatum("xact");
+
+		/* Print the type header (only contained in the first chunk). */
+		if (chunk->hdr.previous_chunk == InvalidUndoRecPtr)
+		{
+			char	*cstr;
+			/*
+			 * Print out t/f rather than true/false so it's consistent with
+			 * the 'discarded' bool value.
+			 */
+			cstr = psprintf("(xid=%u, applied=%s)", xid, hdr->applied ?
+							"t" : "f");
+			values[6] = CStringGetTextDatum(cstr);
+		}
+		else
+			isnull[6] = true;
+	}
+	else
+	{
+		isnull[5] = true;
+		isnull[6] = true;
+	}
+
+	return heap_form_tuple(funcctx->tuple_desc, values, isnull);
+}
+
+/*
+ * Return set of undo log chunks between 'start' and 'end' location.
+ *
+ * TODO Handle the cases where the transaction crosses log boundary.
+ */
+Datum
+pg_get_undo_log_chunks(PG_FUNCTION_ARGS)
+{
+	FuncCallContext *funcctx;
+	HeapTuple	tuple;
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		UndoRecPtr	start,
+					end;
+
+		start = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(0)));
+		end = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(1)));
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		setup_undo_log_items_context(fcinfo, funcctx, start, end);
+	}
+	funcctx = SRF_PERCALL_SETUP();
+
+	tuple = get_next_undo_log_chunk(fcinfo, funcctx);
+
+	if (tuple)
+	{
+		Datum		result = HeapTupleGetDatum(tuple);
+
+		SRF_RETURN_NEXT(funcctx, result);
+	}
+	else
+		SRF_RETURN_DONE(funcctx);
+}
+
+static HeapTuple
+get_next_undo_log_record(PG_FUNCTION_ARGS, FuncCallContext *funcctx)
+{
+	UndoPageItem *item;
+	UndoNode   *node;
+	WrittenUndoNode wnode;
+	const RmgrData *desc;
+	StringInfoData buf;
+	Datum		values[4];
+	bool		isnull[4];
+
+	item = get_next_undo_log_item(fcinfo, funcctx, true);
+	if (item == NULL)
+		return NULL;
+
+	node = &item->u.record;
+	wnode.location = item->location;
+	wnode.n = *node;
+
+	/* Return the next tuple. */
+	memset(isnull, false, sizeof(isnull));
+	values[0] = CStringGetTextDatum(psprintf(UndoRecPtrFormat, item->location));
+	values[1] = UInt64GetDatum(node->length);
+
+	desc = &RmgrTable[node->rmid];
+	values[2] = CStringGetTextDatum(desc->rm_name);
+
+	initStringInfo(&buf);
+	resetStringInfo(&buf);
+	desc->rm_undo_desc(&buf, &wnode);
+	values[3] = CStringGetTextDatum(buf.data);
+
+	return heap_form_tuple(funcctx->tuple_desc, values, isnull);
+}
+
+Datum
+pg_get_undo_log_records(PG_FUNCTION_ARGS)
+{
+	FuncCallContext *funcctx;
+	HeapTuple	tuple;
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		UndoRecPtr	start,
+					end;
+
+		start = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(0)));
+		end = urp_from_string(text_to_cstring(PG_GETARG_TEXT_PP(1)));
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		setup_undo_log_items_context(fcinfo, funcctx, start, end);
+	}
+	funcctx = SRF_PERCALL_SETUP();
+
+	tuple = get_next_undo_log_record(fcinfo, funcctx);
+
+	if (tuple)
+	{
+		Datum		result = HeapTupleGetDatum(tuple);
+
+		SRF_RETURN_NEXT(funcctx, result);
+	}
+	else
+		SRF_RETURN_DONE(funcctx);
 }
