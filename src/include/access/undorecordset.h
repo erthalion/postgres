@@ -28,6 +28,7 @@ typedef enum UndoRecordSetType
 {
 	URST_INVALID = 0,			/* Placeholder when there's no record set. */
 	URST_TRANSACTION = 'T',		/* Normal xact undo; apply on abort. */
+	URST_FOO = 'F'				/* XXX. Crude hack; replace me. */
 } UndoRecordSetType;
 
 /*
@@ -82,6 +83,8 @@ get_urs_type_header_size(UndoRecordSetType type)
 	{
 		case URST_TRANSACTION:
 			return SizeOfXactUndoRecordSetHeader;
+		case URST_FOO:
+			return 4;
 		default:
 #ifndef FRONTEND
 			elog(FATAL, "unrecognized undo record set type %d", type);

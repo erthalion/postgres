@@ -34,6 +34,7 @@ typedef struct UndoSegFile
 typedef union
 {
 	XactUndoRecordSetHeader xact;
+	char		foo[4];
 }			TypeHeader;
 
 /*

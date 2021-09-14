@@ -122,6 +122,10 @@ print_chunk_info(UndoLogChunkInfo * chunk, UndoRecPtr location)
 		printf("type: transaction (xid=%u, applied=%s)",
 			   xid, hdr->applied ? "t" : "f");
 	}
+	else if (chunk->type == URST_FOO)
+	{
+		printf("type: foo (%s)", chunk->type_header.foo);
+	}
 	else if (chunk->type == URST_INVALID)
 	{
 		/* Non-first chunk of the URS. */

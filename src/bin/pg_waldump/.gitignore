@@ -5,6 +5,7 @@
 /clogdesc.c
 /committsdesc.c
 /dbasedesc.c
+/foodesc.c
 /genericdesc.c
 /gindesc.c
 /gistdesc.c
