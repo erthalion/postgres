@@ -23,6 +23,7 @@
 #include "access/xlog_internal.h"
 #include "catalog/storage_undo.h"
 #include "catalog/storage_xlog.h"
+#include "commands/dbcommands_undo.h"
 #include "commands/dbcommands_xlog.h"
 #include "commands/sequence.h"
 #include "commands/tablespace.h"

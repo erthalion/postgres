@@ -2536,6 +2536,7 @@ ApplyPendingUndo(void)
 	{
 		TransactionId xid;
 
+
 		Assert(entry->urs_type == URST_TRANSACTION);
 
 		/* The set can be discarded but the underlying log still there. */
