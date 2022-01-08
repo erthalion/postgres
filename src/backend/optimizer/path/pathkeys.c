@@ -524,6 +524,47 @@ get_cheapest_parallel_safe_total_inner(List *paths)
  ****************************************************************************/
 
 /*
+ * Find the prefix size for a specific path key in an index. For example, an
+ * index with (a,b,c) finding path key b will return prefix 2. Optionally
+ * pathkeys_positions can be provided, to specify at which position in the
+ * original pathkey list this particular key could be found (this is helpful
+ * when we deal with redundant pathkeys).
+ *
+ * Returns 0 when not found.
+ */
+int
+find_index_prefix_for_pathkey(List *index_pathkeys,
+							  List *pathkeys_positions,
+							  PathKey *target_pathkey)
+{
+	ListCell   *lc;
+	int			i;
+
+	i = 0;
+	foreach(lc, index_pathkeys)
+	{
+		PathKey    *cpathkey = (PathKey *) lfirst(lc);
+
+		if (cpathkey == target_pathkey)
+		{
+			/*
+			 * Prefix expected to start from 1, increment positions since
+			 * they're 0 based.
+			 */
+			if (pathkeys_positions != NIL &&
+				pathkeys_positions->length > i)
+				return list_nth_int(pathkeys_positions, i) + 1;
+			else
+				return i + 1;
+		}
+
+		i++;
+	}
+
+	return 0;
+}
+
+/*
  * build_index_pathkeys
  *	  Build a pathkeys list that describes the ordering induced by an index
  *	  scan using the given index.  (Note that an unordered index doesn't
@@ -535,7 +576,9 @@ get_cheapest_parallel_safe_total_inner(List *paths)
  * We iterate only key columns of covering indexes, since non-key columns
  * don't influence index ordering.  The result is canonical, meaning that
  * redundant pathkeys are removed; it may therefore have fewer entries than
- * there are key columns in the index.
+ * there are key columns in the index. Since by removing redundant pathkeys the
+ * information about original position is lost, return it via positions
+ * argument.
  *
  * Another reason for stopping early is that we may be able to tell that
  * an index column's sort order is uninteresting for this query.  However,
@@ -546,7 +589,8 @@ get_cheapest_parallel_safe_total_inner(List *paths)
 List *
 build_index_pathkeys(PlannerInfo *root,
 					 IndexOptInfo *index,
-					 ScanDirection scandir)
+					 ScanDirection scandir,
+					 List **positions)
 {
 	List	   *retval = NIL;
 	ListCell   *lc;
@@ -554,6 +598,8 @@ build_index_pathkeys(PlannerInfo *root,
 
 	if (index->sortopfamily == NULL)
 		return NIL;				/* non-orderable index */
+
+	*positions = NIL;
 
 	i = 0;
 	foreach(lc, index->indextlist)
@@ -608,7 +654,11 @@ build_index_pathkeys(PlannerInfo *root,
 			 * for this query.  Add it to list, unless it's redundant.
 			 */
 			if (!pathkey_is_redundant(cpathkey, retval))
+			{
 				retval = lappend(retval, cpathkey);
+				*positions = lappend_int(*positions,
+										 foreach_current_index(lc));
+			}
 		}
 		else
 		{

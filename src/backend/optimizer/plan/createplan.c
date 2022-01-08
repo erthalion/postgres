@@ -191,7 +191,8 @@ static IndexOnlyScan *make_indexonlyscan(List *qptlist, List *qpqual,
 										 List *indexqual, List *recheckqual,
 										 List *indexorderby,
 										 List *indextlist,
-										 ScanDirection indexscandir);
+										 ScanDirection indexscandir,
+										 int skipprefix);
 static BitmapIndexScan *make_bitmap_indexscan(Index scanrelid, Oid indexid,
 											  List *indexqual,
 											  List *indexqualorig);
@@ -3092,7 +3093,8 @@ create_indexscan_plan(PlannerInfo *root,
 												stripped_indexquals,
 												fixed_indexorderbys,
 												indexinfo->indextlist,
-												best_path->indexscandir);
+												best_path->indexscandir,
+												best_path->indexskipprefix);
 	else
 		scan_plan = (Scan *) make_indexscan(tlist,
 											qpqual,
@@ -5466,7 +5468,8 @@ make_indexonlyscan(List *qptlist,
 				   List *recheckqual,
 				   List *indexorderby,
 				   List *indextlist,
-				   ScanDirection indexscandir)
+				   ScanDirection indexscandir,
+				   int skipPrefixSize)
 {
 	IndexOnlyScan *node = makeNode(IndexOnlyScan);
 	Plan	   *plan = &node->scan.plan;
@@ -5482,6 +5485,7 @@ make_indexonlyscan(List *qptlist,
 	node->indexorderby = indexorderby;
 	node->indextlist = indextlist;
 	node->indexorderdir = indexscandir;
+	node->indexskipprefixsize = skipPrefixSize;
 
 	return node;
 }

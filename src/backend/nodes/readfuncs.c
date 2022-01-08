@@ -1888,6 +1888,7 @@ _readIndexOnlyScan(void)
 	READ_NODE_FIELD(indexorderby);
 	READ_NODE_FIELD(indextlist);
 	READ_ENUM_FIELD(indexorderdir, ScanDirection);
+	READ_INT_FIELD(indexskipprefixsize);
 
 	READ_DONE();
 }

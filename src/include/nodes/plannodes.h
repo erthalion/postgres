@@ -453,6 +453,8 @@ typedef struct IndexOnlyScan
 	List	   *indexorderby;	/* list of index ORDER BY exprs */
 	List	   *indextlist;		/* TargetEntry list describing index's cols */
 	ScanDirection indexorderdir;	/* forward or backward or don't care */
+	int			indexskipprefixsize;	/* the size of the prefix for distinct
+										 * scans */
 } IndexOnlyScan;
 
 /* ----------------
