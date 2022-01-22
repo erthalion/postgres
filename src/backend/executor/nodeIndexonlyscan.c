@@ -147,12 +147,12 @@ IndexOnlyNext(IndexOnlyScanState *node)
 	 * Due to that we skip also when the first tuple wasn't emitted yet, but
 	 * the directions are opposite.
 	 */
-	if (node->ioss_SkipPrefixSize > 0 &&
+	if (node->ioss_ScanLooseKeys != NULL &&
 		(node->ioss_FirstTupleEmitted ||
 		 ScanDirectionsAreOpposite(direction, indexonlyscan->indexorderdir)))
 	{
 		if (!index_skip(scandesc, direction, indexonlyscan->indexorderdir,
-						!node->ioss_FirstTupleEmitted, node->ioss_SkipPrefixSize))
+						!node->ioss_FirstTupleEmitted, node->ioss_NumScanLooseKeys))
 		{
 			/*
 			 * Reached end of index. At this point currPos is invalidated, and
@@ -202,7 +202,7 @@ IndexOnlyNext(IndexOnlyScanState *node)
 				if (!index_skip(scandesc, direction,
 								indexonlyscan->indexorderdir,
 								!node->ioss_FirstTupleEmitted,
-								node->ioss_SkipPrefixSize))
+								node->ioss_NumScanLooseKeys))
 				{
 					node->ioss_FirstTupleEmitted = false;
 					return ExecClearTuple(slot);
@@ -594,7 +594,6 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 	indexstate->ss.ps.plan = (Plan *) node;
 	indexstate->ss.ps.state = estate;
 	indexstate->ss.ps.ExecProcNode = ExecIndexOnlyScan;
-	indexstate->ioss_SkipPrefixSize = node->indexskipprefixsize;
 	indexstate->ioss_FirstTupleEmitted = false;
 
 	/*
@@ -696,6 +695,13 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
 						   &indexstate->ioss_NumRuntimeKeys,
 						   NULL,	/* no ArrayKeys */
 						   NULL);
+
+	if (node->indexskipprefixsize != 0)
+	{
+		indexstate->ioss_NumScanLooseKeys = node->indexskipprefixsize;
+		indexstate->ioss_ScanLooseKeys =
+			(ScanLooseKey) palloc(node->indexskipprefixsize * sizeof(ScanLooseKeyData));
+	}
 
 	/*
 	 * If we have runtime keys, we need an ExprContext to evaluate them. The
