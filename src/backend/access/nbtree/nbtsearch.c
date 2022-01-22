@@ -1662,49 +1662,49 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		/* Reading forward means we expect to see more data on the right */
 		so->currPos.moreRight = true;
 
-		offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-
 		/* One step back to find a previous value */
-		_bt_readpage(scan, dir, offnum);
-
-		_bt_unlockbuf(indexRel, so->currPos.buf);
-		if (_bt_next(scan, dir))
+		if (!_bt_readpage(scan, dir, offnum) ||
+		 	--so->currPos.itemIndex < so->currPos.firstItem)
 		{
-			_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
-			_bt_update_skip_scankeys(scan, indexRel);
-
-			/*
-			 * And now find the last item from the sequence for the
-			 * current, value with the intention do OffsetNumberNext. As a
-			 * result we end up on a first element from the sequence.
-			 */
-			if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf))
-				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
-			else
+			_bt_unlockbuf(indexRel, so->currPos.buf);
+			if (!_bt_steppage(scan, dir))
 			{
-				if (BufferIsValid(so->currPos.buf))
-				{
-					/* Before leaving current page, deal with any killed items */
-					if (so->numKilled > 0)
-						_bt_killitems(scan);
-
-					_bt_unlockbuf(indexRel, so->currPos.buf);
-					ReleaseBuffer(so->currPos.buf);
-					so->currPos.buf = InvalidBuffer;
-				}
-
-				stack = _bt_search(scan->indexRelation, so->skipScanKey,
-								   &buf, BT_READ, scan->xs_snapshot);
-				_bt_freestack(stack);
-				so->currPos.buf = buf;
-				offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+				pfree(so->skipScanKey);
+				so->skipScanKey = NULL;
+				return false;
 			}
 		}
 		else
+			_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+
+		currItem = &so->currPos.items[so->currPos.itemIndex];
+		scan->xs_heaptid = currItem->heapTid;
+		if (scan->xs_want_itup)
+			scan->xs_itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
+
+		_bt_update_skip_scankeys(scan, indexRel);
+
+		/*
+		 * And now find the last item from the sequence for the
+		 * current, value with the intention do OffsetNumberNext. As a
+		 * result we end up on a first element from the sequence.
+		 */
+		if (_bt_scankey_within_page(scan, so->skipScanKey, so->currPos.buf))
+			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
+		else
 		{
-			pfree(so->skipScanKey);
-			so->skipScanKey = NULL;
-			return false;
+			/* Before leaving current page, deal with any killed items */
+			if (so->numKilled > 0)
+				_bt_killitems(scan);
+
+			ReleaseBuffer(so->currPos.buf);
+			so->currPos.buf = InvalidBuffer;
+
+			stack = _bt_search(scan->indexRelation, so->skipScanKey,
+							   &buf, BT_READ, scan->xs_snapshot);
+			_bt_freestack(stack);
+			so->currPos.buf = buf;
+			offnum = _bt_binsrch(scan->indexRelation, so->skipScanKey, buf);
 		}
 	}
 
@@ -1731,11 +1731,13 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		/* Reading backwards means we expect to see more data on the left */
 		so->currPos.moreLeft = true;
 
-		while (!nextFound)
+		for (;;)
 		{
 			IndexTuple itup;
 			OffsetNumber jumpOffset;
-			CHECK_FOR_INTERRUPTS();
+
+			if (nextFound)
+				break;
 
 			/*
 			 * Find a next index tuple to update scan key. It could be at
@@ -1755,8 +1757,12 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 					so->skipScanKey = NULL;
 					return false;
 				}
-				_bt_lockbuf(indexRel, so->currPos.buf, BT_READ);
 			}
+			else
+				_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
+
+			/* check for interrupts while we're not holding any buffer lock */
+			CHECK_FOR_INTERRUPTS();
 
 			currItem = &so->currPos.items[so->currPos.firstItem];
 			itup = (IndexTuple) (so->currTuples + currItem->tupleOffset);
@@ -1764,16 +1770,13 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			scan->xs_itup = itup;
 
 			_bt_update_skip_scankeys(scan, indexRel);
-			if (BufferIsValid(so->currPos.buf))
-			{
-				/* Before leaving current page, deal with any killed items */
-				if (so->numKilled > 0)
-					_bt_killitems(scan);
 
-				_bt_unlockbuf(indexRel, so->currPos.buf);
-				ReleaseBuffer(so->currPos.buf);
-				so->currPos.buf = InvalidBuffer;
-			}
+			/* Before leaving current page, deal with any killed items */
+			if (so->numKilled > 0)
+				_bt_killitems(scan);
+
+			ReleaseBuffer(so->currPos.buf);
+			so->currPos.buf = InvalidBuffer;
 
 			stack = _bt_search(scan->indexRelation, so->skipScanKey,
 							   &buf, BT_READ, scan->xs_snapshot);
@@ -1894,9 +1897,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 
 				if ((offnum > maxoff) && (so->currPos.nextPage == P_NONE))
 				{
-					_bt_unlockbuf(indexRel, so->currPos.buf);
-
-					BTScanPosUnpinIfPinned(so->currPos);
+					_bt_relbuf(indexRel, so->currPos.buf);
 					BTScanPosInvalidate(so->currPos);
 
 					pfree(so->skipScanKey);
