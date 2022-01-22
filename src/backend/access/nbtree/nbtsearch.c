@@ -1595,8 +1595,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 			/* Now read the data */
 			keyFound = _bt_readpage(scan, dir, offnum);
 
-			_bt_unlockbuf(indexRel, so->currPos.buf);
-			ReleaseBuffer(so->currPos.buf);
+			_bt_relbuf(indexRel, so->currPos.buf);
 			so->currPos.buf = InvalidBuffer;
 
 			if (keyFound)
@@ -1934,8 +1933,7 @@ _bt_skip(IndexScanDesc scan, ScanDirection dir,
 		}
 	}
 	else
-		/* Drop the lock, and maybe the pin, on the current page */
-		_bt_unlockbuf(indexRel, so->currPos.buf);
+		_bt_drop_lock_and_maybe_pin(scan, &so->currPos);
 
 	/* And set IndexTuple */
 	currItem = &so->currPos.items[so->currPos.itemIndex];
