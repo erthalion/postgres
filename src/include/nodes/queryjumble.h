@@ -15,6 +15,7 @@
 #define QUERYJUMBLE_H
 
 #include "nodes/parsenodes.h"
+#include "nodes/nodeFuncs.h"
 
 /*
  * Struct for tracking locations/lengths of constants during normalization
@@ -23,6 +24,12 @@ typedef struct LocationLen
 {
 	int			location;		/* start offset in query text */
 	int			length;			/* length in bytes, or -1 to ignore */
+
+	/*
+	 * Indicates the constant represents the beginning or the end of a merged
+	 * constants interval.
+	 */
+	bool		merged;
 } LocationLen;
 
 /*
@@ -61,7 +68,7 @@ enum ComputeQueryIdType
 
 /* GUC parameters */
 extern PGDLLIMPORT int compute_query_id;
-
+extern PGDLLIMPORT bool query_id_const_merge;
 
 extern const char *CleanQuerytext(const char *query, int *location, int *len);
 extern JumbleState *JumbleQuery(Query *query);

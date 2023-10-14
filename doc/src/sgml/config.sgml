@@ -8190,6 +8190,34 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-query-id-const-merge" xreflabel="query_id_const_merge">
+      <term><varname>query_id_const_merge</varname> (<type>bool</type>)
+      <indexterm>
+       <primary><varname>query_id_const_merge</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Specifies how an array of constants (e.g. for an "IN" clause)
+        contributes to the query identifier computation. Normally every element
+        of an array contributes to the query identifier, which means the same
+        query will get multiple different identifiers, one for each occurrence
+        with an array of different lenght.
+
+        If this parameter is on, an array of constants will contribute only the
+        first and the last elements to the query identifier. It means two
+        occurences of the same query, where the only difference is number of
+        constants in the array, are going to get the same query identifier.
+
+        The parameter could be used to reduce amount of repeating data stored
+        via <xref linkend="pgstatstatements"/> extension.  The default value is off.
+
+        The <xref linkend="pgstatstatements"/> extension will represent such
+        queries in form <literal>'(...)'</literal>.
+       </para>
+      </listitem>
+     </varlistentry>
+
      </variablelist>
 
     </sect2>
