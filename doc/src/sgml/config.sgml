@@ -8205,15 +8205,16 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
         with an array of different lenght.
 
         If this parameter is on, an array of constants will contribute only the
-        first and the last elements to the query identifier. It means two
-        occurences of the same query, where the only difference is number of
-        constants in the array, are going to get the same query identifier.
+        first element, the last element and the number of elements to the query
+        identifier. It means two occurences of the same query, where the only
+        difference is number of constants in the array, are going to get the
+        same query identifier if the arrays are of similar length.
 
         The parameter could be used to reduce amount of repeating data stored
         via <xref linkend="pgstatstatements"/> extension.  The default value is off.
 
         The <xref linkend="pgstatstatements"/> extension will represent such
-        queries in form <literal>'(...)'</literal>.
+        queries in form <literal>'(... [10-99 entries])'</literal>.
        </para>
       </listitem>
      </varlistentry>

@@ -27,9 +27,12 @@ typedef struct LocationLen
 
 	/*
 	 * Indicates the constant represents the beginning or the end of a merged
-	 * constants interval.
+	 * constants interval. The value shows how many constants were merged away
+	 * (up to a power of 10), or in other words the order of manitude for
+	 * number of merged constants (i.e. how many digits it has). Otherwise the
+	 * value is 0, indicating that no merging was performed.
 	 */
-	bool		merged;
+	int			magnitude;
 } LocationLen;
 
 /*
