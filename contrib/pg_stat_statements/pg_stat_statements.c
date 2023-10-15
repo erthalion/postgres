@@ -2714,6 +2714,8 @@ generate_normalized_query(JumbleState *jstate, const char *query,
 				last_tok_len = 0;	/* Length (in bytes) of that tok */
 	bool		skip = false; 	/* Signals that certain constants are
 								   merged together and have to be skipped */
+	int 		magnitude; 		/* Order of magnitute for number of merged
+								   constants */
 
 
 	/*
@@ -2754,7 +2756,8 @@ generate_normalized_query(JumbleState *jstate, const char *query,
 		Assert(len_to_wrt >= 0);
 
 		/* Normal path, non merged constant */
-		if (!jstate->clocations[i].merged)
+		magnitude = jstate->clocations[i].magnitude;
+		if (magnitude == 0)
 		{
 			memcpy(norm_query + n_quer_loc, query + quer_loc, len_to_wrt);
 			n_quer_loc += len_to_wrt;
@@ -2770,12 +2773,22 @@ generate_normalized_query(JumbleState *jstate, const char *query,
 		/* The firsts merged constant */
 		else if (!skip)
 		{
+			static const uint32 powers_of_ten[] = {
+				1, 10, 100,
+				1000, 10000, 100000,
+				1000000, 10000000, 100000000,
+				1000000000
+			};
+			int lower_merged = powers_of_ten[magnitude - 1];
+			int upper_merged = powers_of_ten[magnitude];
+
 			memcpy(norm_query + n_quer_loc, query + quer_loc, len_to_wrt);
 			n_quer_loc += len_to_wrt;
 
 			/* Skip the following until a non merged constant appear */
 			skip = true;
-			n_quer_loc += sprintf(norm_query + n_quer_loc, "...");
+			n_quer_loc += sprintf(norm_query + n_quer_loc, "... [%d-%d entries]",
+								  lower_merged, upper_merged - 1);
 		}
 		/* Otherwise the constant is merged away */
 
