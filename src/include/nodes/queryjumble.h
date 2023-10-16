@@ -72,6 +72,7 @@ enum ComputeQueryIdType
 /* GUC parameters */
 extern PGDLLIMPORT int compute_query_id;
 extern PGDLLIMPORT bool query_id_const_merge;
+extern PGDLLIMPORT bool query_id_const_merge_threshold;
 
 extern const char *CleanQuerytext(const char *query, int *location, int *len);
 extern JumbleState *JumbleQuery(Query *query);

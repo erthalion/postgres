@@ -47,6 +47,9 @@ int			compute_query_id = COMPUTE_QUERY_ID_AUTO;
 /* Whether to merge constants in a list when computing query_id */
 bool		query_id_const_merge = false;
 
+/* Lower threshold for the list length to merge constants when computing query_id */
+bool		query_id_const_merge_threshold = 1;
+
 /* True when compute_query_id is ON, or AUTO and a module requests them */
 bool		query_id_enabled = false;
 
@@ -227,7 +230,8 @@ RecordConstLocation(JumbleState *jstate, int location, int magnitude)
 
 /*
  * Verify if the provided list contains could be merged down, which means it
- * contains only constant expressions.
+ * contains only constant expressions and the list contains more than
+ * query_id_const_merge_threshold elements.
  *
  * Return value is the order of magnitude (i.e. how many digits it has) for
  * length of the list (to use for representation purposes later on) if merging
@@ -248,6 +252,12 @@ IsMergeableConstList(List *elements, Const **firstConst, Const **lastConst)
 	if (!query_id_const_merge)
 	{
 		/* Merging is disabled, process everything one by one */
+		return 0;
+	}
+
+	if (elements->length < query_id_const_merge_threshold)
+	{
+		/* The list is not large enough */
 		return 0;
 	}
 

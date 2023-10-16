@@ -3518,6 +3518,17 @@ struct config_int ConfigureNamesInt[] =
 		NULL, NULL, NULL
 	},
 
+	{
+		{"query_id_const_merge_threshold", PGC_SUSET, STATS_MONITORING,
+			gettext_noop("Sets lower threshold for an array length to apply"
+						 " constants merging when computing query identifier."),
+			gettext_noop("Not used if query_id_const_merge is disabled"),
+		},
+		&query_id_const_merge_threshold,
+		1, 1, INT_MAX,
+		NULL, NULL, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL

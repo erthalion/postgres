@@ -566,6 +566,12 @@ query | SELECT pg_stat_statements_reset()
 calls | 1
 </screen>
 
+   Such constants merging could be configured apply only starting from certain
+   number of constants in the array. The threshold could be specified using
+   <xref linkend="guc-query-id-const-merge"/>.
+  </para>
+
+  <para>
    But there is a small chance of hash collisions causing unrelated queries to
    be merged into one entry. (This cannot happen for queries belonging to
    different users or databases, however.)

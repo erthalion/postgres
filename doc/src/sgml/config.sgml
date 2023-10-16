@@ -8219,6 +8219,21 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-query-id-const-merge-threshold" xreflabel="query_id_const_merge_threshold">
+      <term><varname>query_id_const_merge_threshold</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>query_id_const_merge_threshold</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        If <xref linkend="guc-query-id-const-merge"/> parameter is enabled,
+        specifies the minimal number of element an array must have to apply
+        constants merge.
+       </para>
+      </listitem>
+     </varlistentry>
+
      </variablelist>
 
     </sect2>
