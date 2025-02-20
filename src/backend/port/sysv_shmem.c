@@ -30,13 +30,18 @@
 #include "miscadmin.h"
 #include "port/pg_bitutils.h"
 #include "portability/mem.h"
+#include "storage/bufmgr.h"
 #include "storage/dsm.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
+#include "storage/lwlock.h"
 #include "storage/pg_shmem.h"
+#include "storage/procsignal.h"
+#include "storage/shmem.h"
 #include "utils/guc.h"
 #include "utils/guc_hooks.h"
 #include "utils/pidfile.h"
+#include "utils/wait_event.h"
 
 
 /*
@@ -104,6 +109,13 @@ typedef struct AnonymousMapping
 } AnonymousMapping;
 
 static AnonymousMapping Mappings[ANON_MAPPINGS];
+
+/* Flag telling postmaster that resize is needed */
+volatile bool pending_pm_shmem_resize = false;
+
+/* Keeps track of the previous NBuffers value */
+static int NBuffersOld = -1;
+static int NBuffersPending = -1;
 
 /* Keeps track of used mapping segments */
 static int next_free_segment = 0;
@@ -175,6 +187,49 @@ static Size reserved_offset = 0;
  * instead, but it feels like an overkill.
  */
 static bool huge_pages_on = false;
+
+/*
+ * Flag telling that we have prepared the memory layout to be resizable. If
+ * false after all shared memory segments creation, it means we failed to setup
+ * needed layout and falled back to the regular non-resizable approach.
+ */
+static bool shmem_resizable = false;
+
+/*
+ * Currently broadcasted value of NBuffers in shared memory.
+ *
+ * Most of the time this value is going to be equal to NBuffers. But if
+ * postmaster is resizing shared memory and a new backend was created
+ * at the same time, there is a possibility for the new backend to inherit the
+ * old NBuffers value, but miss the resize signal if ProcSignal infrastructure
+ * was not initialized yet. Consider this situation:
+ *
+ *     Postmaster ------> New Backend
+ *         |                   |
+ *         |                Launch
+ *         |                   |
+ *         |             Inherit NBuffers
+ *         |                   |
+ *     Resize NBuffers         |
+ *         |                   |
+ *     Emit Barrier            |
+ *         |            Init ProcSignal
+ *         |                   |
+ *     Finish resize           |
+ *         |                   |
+ *     New NBuffers       Old NBuffers
+ *
+ * In this case the backend is not yet ready to receive a signal from
+ * EmitProcSignalBarrier, and will be ignored. The same happens if ProcSignal
+ * is initialized even later, after the resizing was finished.
+ *
+ * To address resulting inconsistency, postmaster broadcasts the current
+ * NBuffers value via shared memory. Every new backend has to verify this value
+ * before it will access the buffer pool: if it differs from its own value,
+ * this indicates a shared memory resize has happened and the backend has to
+ * first synchronize with rest of the pack.
+ */
+ShmemControl *ShmemCtrl = NULL;
 
 static void *InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size);
 static void IpcMemoryDetach(int status, Datum shmaddr);
@@ -769,6 +824,7 @@ CreateAnonymousSegment(AnonymousMapping *mapping, Pointer base)
 	{
 		Size total_reserved = (Size) MaxAvailableMemory * BLCKSZ;
 
+		shmem_resizable = true;
 		reserved_offset += total_reserved * SHMEM_RESIZE_RATIO[next_free_segment];
 	}
 
@@ -962,6 +1018,284 @@ AnonymousShmemDetach(int status, Datum arg)
 			m.shmem = NULL;
 		}
 	}
+}
+
+/*
+ * Resize all shared memory segments based on the current NBuffers value, which
+ * is is applied from NBuffersPending. The actual segment resizing is done via
+ * mremap, which will fail if is not sufficient space to expand the mapping.
+ * When finished, based on the new and old values initialize new buffer blocks
+ * if any.
+ *
+ * If reinitializing took place, as the last step this function broadcasts
+ * NSharedBuffers to it's new value, allowing any other backends to rely on
+ * this new value and skip buffers reinitialization.
+ */
+static bool
+AnonymousShmemResize(void)
+{
+	int	numSemas;
+	bool reinit = false;
+	void *ptr = MAP_FAILED;
+	NBuffers = NBuffersPending;
+
+	elog(DEBUG1, "Resize shmem from %d to %d", NBuffersOld, NBuffers);
+
+	/*
+	 * XXX: Where to reset the flag is still an open question. E.g. do we
+	 * consider a no-op when NBuffers is equal to NBuffersOld a genuine resize
+	 * and reset the flag?
+	 */
+	pending_pm_shmem_resize = false;
+
+	/*
+	 * XXX: Currently only increasing of shared_buffers is supported. For
+	 * decreasing something similar has to be done, but buffer blocks with
+	 * data have to be drained first.
+	 */
+	if(NBuffersOld > NBuffers)
+		return false;
+
+	for(int i = 0; i < next_free_segment; i++)
+	{
+		/* Note that CalculateShmemSize indirectly depends on NBuffers */
+		Size new_size = CalculateShmemSize(&numSemas, i);
+		AnonymousMapping *m = &Mappings[i];
+
+		if (m->shmem == NULL)
+			continue;
+
+		if (m->shmem_size == new_size)
+			continue;
+
+		/* Clean up some reserved space to resize into */
+		if (munmap(m->shmem + m->shmem_size, new_size - m->shmem_size) == -1)
+			ereport(FATAL,
+					(errcode(ERRCODE_SYSTEM_ERROR),
+					 errmsg("could not unmap %zu from reserved shared memory %p: %m",
+							new_size - m->shmem_size, m->shmem)));
+
+		/* Claim the unused space */
+		elog(DEBUG1, "segment[%s]: remap from %zu to %zu at address %p",
+					 MappingName(m->shmem_segment), m->shmem_size,
+					 new_size, m->shmem);
+
+		ptr = mremap(m->shmem, m->shmem_size, new_size, 0);
+		if (ptr == MAP_FAILED)
+			ereport(FATAL,
+					(errcode(ERRCODE_SYSTEM_ERROR),
+					 errmsg("could not resize shared memory segment %s [%p] to %d (%zu): %m",
+							MappingName(m->shmem_segment), m->shmem, NBuffers,
+							new_size)));
+
+		reinit = true;
+		m->shmem_size = new_size;
+	}
+
+	if (reinit)
+	{
+		if(IsUnderPostmaster &&
+			LWLockConditionalAcquire(ShmemResizeLock, LW_EXCLUSIVE))
+		{
+			/*
+			 * If the new NBuffers was already broadcasted, the buffer pool was
+			 * already initialized before.
+			 *
+			 * Since we're not on a hot path, we use lwlocks and do not need to
+			 * involve memory barrier.
+			 */
+			if(pg_atomic_read_u32(&ShmemCtrl->NSharedBuffers) != NBuffers)
+			{
+				/*
+				 * Allow the first backend that managed to get the lock to
+				 * reinitialize the new portion of buffer pool. Every other
+				 * process will wait on the shared barrier for that to finish,
+				 * since it's a part of the SHMEM_RESIZE_DONE phase.
+				 *
+				 * Note that it's enough when only one backend will do that,
+				 * even the ShmemInitStruct part. The reason is that resized
+				 * shared memory will maintain the same addresses, meaning that
+				 * all the pointers are still valid, and we only need to update
+				 * structures size in the ShmemIndex once -- any other backend
+				 * will pick up this shared structure from the index.
+				 *
+				 * XXX: This is the right place for buffer eviction as well.
+				 */
+				BufferManagerShmemInit(NBuffersOld);
+
+				/* If all fine, broadcast the new value */
+				pg_atomic_write_u32(&ShmemCtrl->NSharedBuffers, NBuffers);
+			}
+
+			LWLockRelease(ShmemResizeLock);
+		}
+	}
+
+	return true;
+}
+
+/*
+ * We are asked to resize shared memory. Do the resize and make sure to wait on
+ * the provided barrier until all simultaneously participating backends finish
+ * resizing as well, otherwise we face danger of inconsistency between
+ * backends.
+ *
+ * XXX: If a backend is blocked on ReadCommand in PostgresMain, it will not
+ * proceed with AnonymousShmemResize after receiving SIGHUP, until something
+ * will be sent.
+ */
+bool
+ProcessBarrierShmemResize(Barrier *barrier)
+{
+	elog(DEBUG1, "Handle a barrier for shmem resizing from %d to %d, %d",
+		 NBuffersOld, NBuffersPending, pending_pm_shmem_resize);
+
+	/* Wait until we have seen the new NBuffers value */
+	if (!pending_pm_shmem_resize)
+		return false;
+
+	/*
+	 * After attaching to the barrier we could be in any of states:
+	 *
+	 * - Initial SHMEM_RESIZE_REQUESTED, nothing has been done yet
+	 * - SHMEM_RESIZE_START, some of the backends have started to resize
+	 * - SHMEM_RESIZE_DONE, participating backends have finished resizing
+	 * - SHMEM_RESIZE_REQUESTED after the reset, the shared memory was already
+	 *   resized
+	 *
+	 * The first three states take place while the actual resize is in
+	 * progress, and all we need to do is join and proceed with resizing. This
+	 * way all simultaneously participating backends will remap and wait until
+	 * one of them initialize new buffers.
+	 *
+	 * The last state happens when we are too late and everything is already
+	 * done. In that case proceed as well, relying on AnonymousShmemResize not
+	 * reinitialize anything since the NSharedBuffers is already broadcasted.
+	 */
+	BarrierAttach(barrier);
+
+	/* First phase means the resize has begun, SHMEM_RESIZE_START */
+	BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_START);
+
+	/* XXX: Split mremap and buffer reinitialization into two barrier phases */
+	AnonymousShmemResize();
+
+	/* The second phase means the resize has finished, SHMEM_RESIZE_DONE */
+	BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_DONE);
+
+	/* Allow the last backend to reset the barrier */
+	if (BarrierArriveAndDetach(barrier))
+		ResetShmemBarrier();
+
+	return true;
+}
+
+/*
+ * GUC assign hook for shared_buffers. It's recommended for an assign hook to
+ * be as minimal as possible, thus we just request shared memory resize and
+ * remember the previous value.
+ */
+void
+assign_shared_buffers(int newval, void *extra, bool *pending)
+{
+	elog(DEBUG1, "Received SIGHUP for shmem resizing");
+
+	/* Request shared memory resize only when it was initialized */
+	if (next_free_segment != 0)
+	{
+		elog(DEBUG1, "Set pending signal");
+		pending_pm_shmem_resize = true;
+		*pending = true;
+		NBuffersPending = newval;
+	}
+
+	NBuffersOld = NBuffers;
+}
+
+/*
+ * Test if we have somehow missed a shmem resize signal and NBuffers value
+ * differs from NSharedBuffers. If yes, catchup and do resize.
+ */
+void
+AdjustShmemSize(void)
+{
+	uint32 NSharedBuffers = pg_atomic_read_u32(&ShmemCtrl->NSharedBuffers);
+
+	if (NSharedBuffers != NBuffers)
+	{
+		/*
+		 * If the broadcasted shared_buffers is different from the one we see,
+		 * it could be that the backend has missed a resize signal. To avoid
+		 * any inconsistency, adjust the shared mappings, before having a
+		 * chance to access the buffer pool.
+		 */
+		ereport(LOG,
+				(errmsg("shared_buffers has been changed from %d to %d, "
+						"resize shared memory",
+						NBuffers, NSharedBuffers)));
+		NBuffers = NSharedBuffers;
+		AnonymousShmemResize();
+	}
+}
+
+/*
+ * Coordinate all existing processes to make sure they all will have consistent
+ * view of shared memory size. Must be called only in postmaster.
+ */
+void
+CoordinateShmemResize(void)
+{
+	elog(DEBUG1, "Coordinating shmem resize from %d to %d",
+		 NBuffersOld, NBuffers);
+	Assert(!IsUnderPostmaster);
+
+	/*
+	 * If the value did not change, or shared memory segments are not
+	 * initialized yet, skip the resize.
+	 */
+	if (NBuffersPending == NBuffersOld || next_free_segment == 0)
+	{
+		elog(DEBUG1, "Skip resizing, new %d, old %d, free segment %d",
+			 NBuffers, NBuffersOld, next_free_segment);
+		return;
+	}
+
+	/*
+	 * Shared memory resize requires some coordination done by postmaster,
+	 * and consists of three phases:
+	 *
+	 * - Before the resize all existing backends have the same old NBuffers.
+	 * - When resize is in progress, backends are expected to have a
+	 *   mixture of old a new values. They're not allowed to touch buffer
+	 *   pool during this time frame.
+	 * - After resize has been finished, all existing backends, that can access
+	 *   the buffer pool, are expected to have the same new value of NBuffers.
+	 *   There might still be some backends, that are sleeping or for some
+	 *   other reason not doing any work yet and have old NBuffers -- but as
+	 *   soon as they will get some time slice, they will acquire the new
+	 *   value.
+	 */
+	elog(DEBUG1, "Emit a barrier for shmem resizing");
+	EmitProcSignalBarrier(PROCSIGNAL_BARRIER_SHMEM_RESIZE);
+
+	AnonymousShmemResize();
+
+	/*
+	 * Normally we would call WaitForProcSignalBarrier here to wait until every
+	 * backend has reported on the ProcSignalBarrier. But for shared memory
+	 * resize we don't need this, as every participating backend will
+	 * synchronize on the ProcSignal barrier, and there is no sequential logic
+	 * we have to perform afterwards. In fact even if we would like to wait
+	 * here, it wouldn't be possible -- we're in the postmaster, without any
+	 * waiting infrastructure available.
+	 *
+	 * If at some point it will turn out that waiting is essential, we would
+	 * need to consider some alternatives. E.g. it could be a designated
+	 * coordination process, which is not a postmaster. Another option would be
+	 * to introduce a CoordinateShmemResize lock and allow only one process to
+	 * take it (this probably would have to be something different than
+	 * LWLocks, since they block interrupts, and coordination relies on them).
+	 */
 }
 
 /*
@@ -1269,5 +1603,46 @@ PGSharedMemoryDetach(void)
 					 m.shmem, m.shmem_size);
 			m.shmem = NULL;
 		}
+	}
+}
+
+void
+WaitOnShmemBarrier(int phase)
+{
+	Barrier *barrier = &ShmemCtrl->Barrier;
+
+	if (BarrierPhase(barrier) == phase)
+	{
+		ereport(LOG,
+				(errmsg("ProcSignal barrier is in phase %d, waiting", phase)));
+		BarrierAttach(barrier);
+		BarrierArriveAndWait(barrier, 0);
+		BarrierDetach(barrier);
+	}
+}
+
+void
+ResetShmemBarrier(void)
+{
+	BarrierInit(&ShmemCtrl->Barrier, 0);
+}
+
+void
+ShmemControlInit(void)
+{
+	bool foundShmemCtrl;
+
+	ShmemCtrl = (ShmemControl *)
+	ShmemInitStruct("Shmem Control", sizeof(ShmemControl),
+									 &foundShmemCtrl);
+
+	if (!foundShmemCtrl)
+	{
+		/* Initialize with the currently known value */
+		pg_atomic_init_u32(&ShmemCtrl->NSharedBuffers, NBuffers);
+		BarrierInit(&ShmemCtrl->Barrier, 0);
+
+		/* shmem_resizable should be initialized by now */
+		ShmemCtrl->Resizable = shmem_resizable;
 	}
 }
