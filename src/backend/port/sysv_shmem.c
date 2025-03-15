@@ -1184,6 +1184,12 @@ AnonymousShmemResize(void)
 
 			LWLockRelease(ShmemResizeLock);
 		}
+
+		if (MyBackendType == B_BG_WRITER)
+		{
+			/* If we are bgwriter wipe out the previous state and start anew. */
+			BgBufferSync(NULL, true);
+		}
 	}
 
 	return true;
