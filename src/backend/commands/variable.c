@@ -1143,7 +1143,7 @@ check_cluster_name(char **newval, void **extra, GucSource source)
  * GUC assign_hook for maintenance_io_concurrency
  */
 void
-assign_maintenance_io_concurrency(int newval, void *extra)
+assign_maintenance_io_concurrency(int newval, void *extra, bool *pending)
 {
 	/*
 	 * Reconfigure recovery prefetching, because a setting it depends on
@@ -1161,12 +1161,12 @@ assign_maintenance_io_concurrency(int newval, void *extra)
  * they may be assigned in either order.
  */
 void
-assign_io_max_combine_limit(int newval, void *extra)
+assign_io_max_combine_limit(int newval, void *extra, bool *pending)
 {
 	io_combine_limit = Min(newval, io_combine_limit_guc);
 }
 void
-assign_io_combine_limit(int newval, void *extra)
+assign_io_combine_limit(int newval, void *extra, bool *pending)
 {
 	io_combine_limit = Min(io_max_combine_limit, newval);
 }
