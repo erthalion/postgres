@@ -948,12 +948,13 @@ GetBufferFromRing(BufferAccessStrategy strategy, uint32 *buf_state)
 		strategy->current = 0;
 
 	/*
-	 * If the slot hasn't been filled yet, tell the caller to allocate a new
-	 * buffer with the normal allocation strategy.  He will then fill this
-	 * slot by calling AddBufferToRing with the new buffer.
+	 * If the slot hasn't been filled yet or the buffer in the slot has been
+	 * invalidated when buffer pool was shrunk, tell the caller to allocate a new
+	 * buffer with the normal allocation strategy.  He will then fill this slot
+	 * by calling AddBufferToRing with the new buffer.
 	 */
 	bufnum = strategy->buffers[strategy->current];
-	if (bufnum == InvalidBuffer)
+	if (bufnum == InvalidBuffer || bufnum > NBuffers)
 		return NULL;
 
 	/*
