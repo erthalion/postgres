@@ -318,7 +318,7 @@ extern void EvictRelUnpinnedBuffers(Relation rel,
 
 /* in buf_init.c */
 extern void BufferManagerShmemInit(void);
-extern Size BufferManagerShmemSize(void);
+extern Size BufferManagerShmemSize(int);
 
 /* in localbuf.c */
 extern void AtProcExit_LocalBuffers(void);
