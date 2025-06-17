@@ -80,6 +80,7 @@ static void pgaio_worker_shmem_init(bool first_time);
 static bool pgaio_worker_needs_synchronous_execution(PgAioHandle *ioh);
 static int	pgaio_worker_submit(uint16 num_staged_ios, PgAioHandle **staged_ios);
 
+static void pgaio_worker_process_interrupts(void);
 
 const IoMethodOps pgaio_worker_ops = {
 	.shmem_size = pgaio_worker_shmem_size,
@@ -461,6 +462,8 @@ IoWorkerMain(const void *startup_data, size_t startup_data_len)
 		int			nwakeups = 0;
 		int			worker;
 
+		pgaio_worker_process_interrupts();
+
 		/*
 		 * Try to get a job to do.
 		 *
@@ -583,4 +586,26 @@ bool
 pgaio_workers_enabled(void)
 {
 	return io_method == IOMETHOD_WORKER;
+}
+
+/*
+ * Process any new interrupts.
+ */
+static void
+pgaio_worker_process_interrupts(void)
+{
+	/*
+	 * Reloading config can trigger further signals, complicating interrupts
+	 * processing -- so let it run first.
+	 *
+	 * XXX: Is there any need in memory barrier after ProcessConfigFile?
+	 */
+	if (ConfigReloadPending)
+	{
+		ConfigReloadPending = false;
+		ProcessConfigFile(PGC_SIGHUP);
+	}
+
+	if (ProcSignalBarrierPending)
+		ProcessProcSignalBarrier();
 }
