@@ -61,6 +61,7 @@ extern PGDLLIMPORT int shared_memory_type;
 extern PGDLLIMPORT int huge_pages;
 extern PGDLLIMPORT int huge_page_size;
 extern PGDLLIMPORT int huge_pages_status;
+extern PGDLLIMPORT int MaxAvailableMemory;
 
 /* Possible values for huge_pages and huge_pages_status */
 typedef enum
@@ -104,7 +105,9 @@ extern PGShmemHeader *PGSharedMemoryCreate(Size size,
 										   PGShmemHeader **shim);
 extern bool PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2);
 extern void PGSharedMemoryDetach(void);
-extern void GetHugePageSize(Size *hugepagesize, int *mmap_flags);
+extern void GetHugePageSize(Size *hugepagesize, int *mmap_flags,
+							int *memfd_flags);
+void PrepareHugePages(void);
 
 /* The main segment, contains everything except buffer blocks and related data. */
 #define MAIN_SHMEM_SEGMENT 0

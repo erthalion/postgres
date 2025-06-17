@@ -206,6 +206,9 @@ CreateSharedMemoryAndSemaphores(void)
 
 	Assert(!IsUnderPostmaster);
 
+	/* Decide if we use huge pages or regular size pages */
+	PrepareHugePages();
+
 	for(int segment = 0; segment < ANON_MAPPINGS; segment++)
 	{
 		/* Compute the size of the shared-memory block */
@@ -377,7 +380,7 @@ InitializeShmemGUCs(void)
 	/*
 	 * Calculate the number of huge pages required.
 	 */
-	GetHugePageSize(&hp_size, NULL);
+	GetHugePageSize(&hp_size, NULL, NULL);
 	if (hp_size != 0)
 	{
 		Size		hp_required;

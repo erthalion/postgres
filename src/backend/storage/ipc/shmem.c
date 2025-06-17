@@ -817,7 +817,7 @@ pg_get_shmem_pagesize(void)
 	Assert(huge_pages_status != HUGE_PAGES_UNKNOWN);
 
 	if (huge_pages_status == HUGE_PAGES_ON)
-		GetHugePageSize(&os_page_size, NULL);
+		GetHugePageSize(&os_page_size, NULL, NULL);
 
 	return os_page_size;
 }

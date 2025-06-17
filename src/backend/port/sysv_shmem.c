@@ -97,16 +97,61 @@ void	   *UsedShmemSegAddr = NULL;
 typedef struct AnonymousMapping
 {
 	int shmem_segment;
-	Size shmem_size; 			/* Size of the mapping */
+	Size shmem_size; 			/* Size of the actually used memory */
+	Size shmem_reserved; 		/* Size of the reserved mapping */
 	Pointer shmem; 				/* Pointer to the start of the mapped memory */
 	Pointer seg_addr; 			/* SysV shared memory for the header */
 	unsigned long seg_id; 		/* IPC key */
+	int segment_fd; 			/* fd for the backing anon file */
 } AnonymousMapping;
 
 static AnonymousMapping Mappings[ANON_MAPPINGS];
 
 /* Keeps track of used mapping segments */
 static int next_free_segment = 0;
+
+/*
+ * Anonymous mapping layout we use looks like this:
+ *
+ * 00400000-00c2a000 r-xp 			/bin/postgres
+ * ...
+ * 3f526000-3f590000 rw-p 			[heap]
+ * 7fbd827fe000-7fbd8bdde000 rw-s 	/memfd:main (deleted)
+ * 7fbd8bdde000-7fbe82800000 ---s 	/memfd:main (deleted)
+ * 7fbe82800000-7fbe90670000 r--p 	/usr/lib/locale/locale-archive
+ * 7fbe90800000-7fbe90941000 r-xp 	/usr/lib64/libstdc++.so.6.0.34
+ * ...
+ *
+ * We need to place shared memory mappings in such a way, that there will be
+ * gaps between them in the address space. Those gaps have to be large enough
+ * to resize the mapping up to certain size, without counting towards the total
+ * memory consumption.
+ *
+ * To achieve this, for each shared memory segment we first create an anonymous
+ * file of specified size using memfd_create, which will accomodate actual
+ * shared memory mapping content. It is represented by the first /memfd:main
+ * with rw permissions. Then we create a mapping for this file using mmap, with
+ * size much larger than required and flags PROT_NONE (allows to make sure the
+ * reserved space will not be used) and MAP_NORESERVE (prevents the space from
+ * being counted against memory limits). The mapping serves as an address space
+ * reservation, into which shared memory segment can be extended and is
+ * represented by the second /memfd:main with no permissions.
+ *
+ * The reserved space for each segment is calculated as a fraction of the total
+ * reserved space (MaxAvailableMemory), as specified in the SHMEM_RESIZE_RATIO
+ * array.
+ */
+static double SHMEM_RESIZE_RATIO[1] = {
+	1.0, 									/* MAIN_SHMEM_SLOT */
+};
+
+/*
+ * Flag telling that we have decided to use huge pages.
+ *
+ * XXX: It's possible to use GetConfigOption("huge_pages_status", false, false)
+ * instead, but it feels like an overkill.
+ */
+static bool huge_pages_on = false;
 
 static void *InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size);
 static void IpcMemoryDetach(int status, Datum shmaddr);
@@ -503,19 +548,20 @@ PGSharedMemoryAttach(IpcMemoryId shmId,
  * hugepage sizes, we might want to think about more invasive strategies,
  * such as increasing shared_buffers to absorb the extra space.
  *
- * Returns the (real, assumed or config provided) page size into
- * *hugepagesize, and the hugepage-related mmap flags to use into
- * *mmap_flags if requested by the caller.  If huge pages are not supported,
- * *hugepagesize and *mmap_flags are set to 0.
+ * Returns the (real, assumed or config provided) page size into *hugepagesize,
+ * the hugepage-related mmap and memfd flags to use into *mmap_flags and
+ * *memfd_flags if requested by the caller. If huge pages are not supported,
+ * *hugepagesize, *mmap_flags and *memfd_flags are set to 0.
  */
 void
-GetHugePageSize(Size *hugepagesize, int *mmap_flags)
+GetHugePageSize(Size *hugepagesize, int *mmap_flags, int *memfd_flags)
 {
 #ifdef MAP_HUGETLB
 
 	Size		default_hugepagesize = 0;
 	Size		hugepagesize_local = 0;
 	int			mmap_flags_local = 0;
+	int			memfd_flags_local = 0;
 
 	/*
 	 * System-dependent code to find out the default huge page size.
@@ -574,6 +620,7 @@ GetHugePageSize(Size *hugepagesize, int *mmap_flags)
 	}
 
 	mmap_flags_local = MAP_HUGETLB;
+	memfd_flags_local = MFD_HUGETLB;
 
 	/*
 	 * On recent enough Linux, also include the explicit page size, if
@@ -584,7 +631,16 @@ GetHugePageSize(Size *hugepagesize, int *mmap_flags)
 	{
 		int			shift = pg_ceil_log2_64(hugepagesize_local);
 
-		mmap_flags_local |= (shift & MAP_HUGE_MASK) << MAP_HUGE_SHIFT;
+		memfd_flags_local |= (shift & MAP_HUGE_MASK) << MAP_HUGE_SHIFT;
+	}
+#endif
+
+#if defined(MFD_HUGE_MASK) && defined(MFD_HUGE_SHIFT)
+	if (hugepagesize_local != default_hugepagesize)
+	{
+		int			shift = pg_ceil_log2_64(hugepagesize_local);
+
+		memfd_flags_local |= (shift & MAP_HUGE_MASK) << MAP_HUGE_SHIFT;
 	}
 #endif
 
@@ -593,6 +649,8 @@ GetHugePageSize(Size *hugepagesize, int *mmap_flags)
 		*mmap_flags = mmap_flags_local;
 	if (hugepagesize)
 		*hugepagesize = hugepagesize_local;
+	if (memfd_flags)
+		*memfd_flags = memfd_flags_local;
 
 #else
 
@@ -600,6 +658,8 @@ GetHugePageSize(Size *hugepagesize, int *mmap_flags)
 		*hugepagesize = 0;
 	if (mmap_flags)
 		*mmap_flags = 0;
+	if (memfd_flags)
+		*memfd_flags = 0;
 
 #endif							/* MAP_HUGETLB */
 }
@@ -625,72 +685,90 @@ check_huge_page_size(int *newval, void **extra, GucSource source)
  * Creates an anonymous mmap()ed shared memory segment.
  *
  * This function will modify mapping size to the actual size of the allocation,
- * if it ends up allocating a segment that is larger than requested.
+ * if it ends up allocating a segment that is larger than requested. If needed,
+ * it also rounds up the mapping reserved size to be a multiple of huge page
+ * size.
+ *
+ * Note that we do not fallback from huge pages to regular pages in this
+ * function, this decision was already made in ReserveAnonymousMemory and we
+ * stick to it.
  */
 static void
 CreateAnonymousSegment(AnonymousMapping *mapping)
 {
 	Size		allocsize = mapping->shmem_size;
 	void	   *ptr = MAP_FAILED;
-	int			mmap_errno = 0;
+	int			save_errno = 0;
+	int			mmap_flags = PG_MMAP_FLAGS, memfd_flags = 0;
+
+	elog(DEBUG1, "segment[%s]: size %zu, reserved %zu",
+		 MappingName(mapping->shmem_segment), mapping->shmem_size,
+		 mapping->shmem_reserved);
 
 #ifndef MAP_HUGETLB
-	/* PGSharedMemoryCreate should have dealt with this case */
-	Assert(huge_pages != HUGE_PAGES_ON);
+	/* PrepareHugePages should have dealt with this case */
+	Assert(huge_pages != HUGE_PAGES_ON && !huge_pages_on);
 #else
-	if (huge_pages == HUGE_PAGES_ON || huge_pages == HUGE_PAGES_TRY)
+	if (huge_pages_on)
 	{
-		/*
-		 * Round up the request size to a suitable large value.
-		 */
 		Size		hugepagesize;
-		int			mmap_flags;
 
-		GetHugePageSize(&hugepagesize, &mmap_flags);
+		/* Make sure nothing is messed up */
+		Assert(huge_pages == HUGE_PAGES_ON || huge_pages == HUGE_PAGES_TRY);
+
+		/* Round up the request size to a suitable large value */
+		GetHugePageSize(&hugepagesize, &mmap_flags, &memfd_flags);
 
 		if (allocsize % hugepagesize != 0)
 			allocsize += hugepagesize - (allocsize % hugepagesize);
 
-		ptr = mmap(NULL, allocsize, PROT_READ | PROT_WRITE,
-				   PG_MMAP_FLAGS | mmap_flags, -1, 0);
-		mmap_errno = errno;
-		if (huge_pages == HUGE_PAGES_TRY && ptr == MAP_FAILED)
-		{
-			DebugMappings();
-			elog(DEBUG1, "segment[%s]: mmap(%zu) with MAP_HUGETLB failed, huge pages disabled: %m",
-				 MappingName(mapping->shmem_segment), allocsize);
-		}
+		/*
+		 * The reserved space is multiple of BLCKSZ. We know the huge page
+		 * size, round up the reserved space to it.
+		 */
+		mapping->shmem_reserved = mapping->shmem_reserved + hugepagesize -
+			(mapping->shmem_reserved % hugepagesize);
+
+		/* Verify that the new size is withing the reserved boundaries */
+		if (mapping->shmem_reserved < mapping->shmem_size)
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+					 errmsg("not enough shared memory is reserved"),
+					 errhint("You may need to increase \"max_available_memory\".")));
+
+		mmap_flags = PG_MMAP_FLAGS | mmap_flags;
 	}
 #endif
 
 	/*
-	 * Report whether huge pages are in use.  This needs to be tracked before
-	 * the second mmap() call if attempting to use huge pages failed
-	 * previously.
+	 * Prepare an anonymous file backing the segment. Its size will be
+	 * specified later via ftruncate.
+	 *
+	 * The file behaves like a regular file, but lives in memory. Once all
+	 * references to the file are dropped,  it is automatically released.
+	 * Anonymous memory is used for all backing pages of the file, thus it has
+	 * the same semantics as anonymous memory allocations using mmap with the
+	 * MAP_ANONYMOUS flag.
 	 */
-	SetConfigOption("huge_pages_status", (ptr == MAP_FAILED) ? "off" : "on",
-					PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
+	mapping->segment_fd = memfd_create(MappingName(mapping->shmem_segment),
+									   memfd_flags);
 
-	if (ptr == MAP_FAILED && huge_pages != HUGE_PAGES_ON)
+	/*
+	 * Specify the segment file size using allocsize, which contains
+	 * potentially modified value.
+	 */
+	if(ftruncate(mapping->segment_fd, allocsize) == -1)
 	{
-		/*
-		 * Use the original size, not the rounded-up value, when falling back
-		 * to non-huge pages.
-		 */
-		allocsize = mapping->shmem_size;
-		ptr = mmap(NULL, allocsize, PROT_READ | PROT_WRITE,
-				   PG_MMAP_FLAGS, -1, 0);
-		mmap_errno = errno;
-	}
+		save_errno = errno;
 
-	if (ptr == MAP_FAILED)
-	{
-		errno = mmap_errno;
 		DebugMappings();
+		close(mapping->segment_fd);
+
+		errno = save_errno;
 		ereport(FATAL,
-				(errmsg("segment[%s]: could not map anonymous shared memory: %m",
+				(errmsg("segment[%s]: could not truncate anonymous file: %m",
 						MappingName(mapping->shmem_segment)),
-				 (mmap_errno == ENOMEM) ?
+				 (save_errno == ENOMEM) ?
 				 errhint("This error usually means that PostgreSQL's request "
 						 "for a shared memory segment exceeded available memory, "
 						 "swap space, or huge pages. To reduce the request size "
@@ -700,8 +778,110 @@ CreateAnonymousSegment(AnonymousMapping *mapping)
 						 allocsize) : 0));
 	}
 
+	elog(DEBUG1, "segment[%s]: mmap(%zu)",
+		 MappingName(mapping->shmem_segment), allocsize);
+
+	/*
+	 * Create a reservation mapping.
+	 */
+	ptr = mmap(NULL, mapping->shmem_reserved, PROT_NONE,
+			   mmap_flags | MAP_NORESERVE, mapping->segment_fd, 0);
+	save_errno = errno;
+
+	if (ptr == MAP_FAILED)
+	{
+		DebugMappings();
+
+		errno = save_errno;
+		ereport(FATAL,
+				(errmsg("segment[%s]: could not map anonymous shared memory: %m",
+						MappingName(mapping->shmem_segment))));
+	}
+
+	/* Make the memory accessible */
+	if(mprotect(ptr, allocsize, PROT_READ | PROT_WRITE) == -1)
+	{
+		save_errno = errno;
+		DebugMappings();
+
+		errno = save_errno;
+		ereport(FATAL,
+				(errmsg("segment[%s]: could not mprotect anonymous shared memory: %m",
+						MappingName(mapping->shmem_segment))));
+	}
+
 	mapping->shmem = ptr;
 	mapping->shmem_size = allocsize;
+}
+
+/*
+ * PrepareHugePages
+ *
+ * Figure out if there are enough huge pages to allocate all shared memory
+ * segments, and report that information via huge_pages_status and
+ * huge_pages_on. It needs to be called before creating shared memory segments.
+ *
+ * It is necessary to maintain the same semantic (simple on/off) for
+ * huge_pages_status, even if there are multiple shared memory segments: all
+ * segments either use huge pages or not, there is no mix of segments with
+ * different page size. The latter might be actually beneficial, in particular
+ * because only some segments may require large amount of memory, but for now
+ * we go with a simple solution.
+ */
+void
+PrepareHugePages()
+{
+	void	   *ptr = MAP_FAILED;
+
+	/* Reset to handle reinitialization */
+	next_free_segment = 0;
+
+	/* Complain if hugepages demanded but we can't possibly support them */
+#if !defined(MAP_HUGETLB)
+	if (huge_pages == HUGE_PAGES_ON)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("huge pages not supported on this platform")));
+#else
+	if (huge_pages == HUGE_PAGES_ON || huge_pages == HUGE_PAGES_TRY)
+	{
+		Size		hugepagesize, total_size = 0;
+		int			mmap_flags;
+
+		GetHugePageSize(&hugepagesize, &mmap_flags, NULL);
+
+		/*
+		 * Figure out how much memory is needed for all segments, keeping in
+		 * mind that for every segment this value will be rounding up by the
+		 * huge page size. The resulting value will be used to probe memory and
+		 * decide whether we will allocate huge pages or not.
+		 */
+		for(int segment = 0; segment < ANON_MAPPINGS; segment++)
+		{
+			int	numSemas;
+			Size segment_size = CalculateShmemSize(&numSemas, segment);
+
+			if (segment_size % hugepagesize != 0)
+				segment_size += hugepagesize - (segment_size % hugepagesize);
+
+			total_size += segment_size;
+		}
+
+		/* Map total amount of memory to test its availability. */
+		elog(DEBUG1, "reserving space: probe mmap(%zu) with MAP_HUGETLB",
+					 total_size);
+		ptr = mmap(NULL, total_size, PROT_NONE,
+				   PG_MMAP_FLAGS | MAP_ANONYMOUS | mmap_flags, -1, 0);
+	}
+#endif
+
+	/*
+	 * Report whether huge pages are in use. This needs to be tracked before
+	 * creating shared memory segments.
+	 */
+	SetConfigOption("huge_pages_status", (ptr == MAP_FAILED) ? "off" : "on",
+					PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
+	huge_pages_on = ptr != MAP_FAILED;
 }
 
 /*
@@ -746,7 +926,7 @@ PGSharedMemoryCreate(Size size,
 	void	   *memAddress;
 	PGShmemHeader *hdr;
 	struct stat statbuf;
-	Size		sysvsize;
+	Size		sysvsize, total_reserved;
 	AnonymousMapping *mapping = &Mappings[next_free_segment];
 
 	/*
@@ -760,14 +940,6 @@ PGSharedMemoryCreate(Size size,
 				 errmsg("could not stat data directory \"%s\": %m",
 						DataDir)));
 
-	/* Complain if hugepages demanded but we can't possibly support them */
-#if !defined(MAP_HUGETLB)
-	if (huge_pages == HUGE_PAGES_ON)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("huge pages not supported on this platform")));
-#endif
-
 	/* For now, we don't support huge pages in SysV memory */
 	if (huge_pages == HUGE_PAGES_ON && shared_memory_type != SHMEM_TYPE_MMAP)
 		ereport(ERROR,
@@ -776,8 +948,16 @@ PGSharedMemoryCreate(Size size,
 
 	/* Room for a header? */
 	Assert(size > MAXALIGN(sizeof(PGShmemHeader)));
+
+	/* Prepare the mapping information */
 	mapping->shmem_size = size;
 	mapping->shmem_segment = next_free_segment;
+	total_reserved = (Size) MaxAvailableMemory * BLCKSZ;
+	mapping->shmem_reserved = total_reserved * SHMEM_RESIZE_RATIO[next_free_segment];
+
+	/* Round up to be a multiple of BLCKSZ */
+	mapping->shmem_reserved = mapping->shmem_reserved + BLCKSZ -
+		(mapping->shmem_reserved % BLCKSZ);
 
 	if (shared_memory_type == SHMEM_TYPE_MMAP)
 	{
