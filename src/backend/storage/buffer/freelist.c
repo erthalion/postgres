@@ -527,6 +527,74 @@ StrategyInitialize(bool init)
 }
 
 
+/*
+ * StrategyPurgeFreeList -- remove all buffers with id higher than the number of
+ * buffers in the buffer pool.
+ *
+ * This is called before evicting buffers while shrinking shared buffers, so that
+ * the free list does not reference a buffer that will be removed.
+ *
+ * The function is called after resizing has started and thus nobody should be
+ * traversing the free list and also not touching the buffers.
+ */
+void
+StrategyPurgeFreeList(int numBuffers)
+{
+	int	firstBuffer = FREENEXT_END_OF_LIST;
+	int	nextFree = StrategyControl->firstFreeBuffer;
+	BufferDesc *prevValidBuf = NULL;
+
+	SpinLockAcquire(&StrategyControl->buffer_strategy_lock);
+
+	while (nextFree != FREENEXT_END_OF_LIST)
+	{
+		BufferDesc *buf = GetBufferDescriptor(nextFree);
+
+		/* nextFree should be id of buffer being examined. */
+		Assert(nextFree == buf->buf_id);
+		/* The buffer should not be marked as not in the list. */
+		Assert(buf->freeNext != FREENEXT_NOT_IN_LIST);
+
+		/*
+		 * If the buffer is within the new size of pool, keep it in the free list
+		 * otherwise discard it.
+		 */
+		if (buf->buf_id < numBuffers)
+		{
+			if (prevValidBuf != NULL)
+				prevValidBuf->freeNext = buf->buf_id;
+			prevValidBuf = buf;
+
+			/* Save the first free buffer in the list if not already known. */
+			if (firstBuffer == FREENEXT_NOT_IN_LIST)
+				firstBuffer = nextFree;
+		}
+		/* Examine the next buffer in the free list. */
+		nextFree = buf->freeNext;
+	}
+
+	/* Update the last valid free buffer, if there's any. */
+	if (prevValidBuf != NULL)
+	{
+		StrategyControl->lastFreeBuffer = prevValidBuf->buf_id;
+		prevValidBuf->freeNext = FREENEXT_END_OF_LIST;
+	}
+	else
+		StrategyControl->lastFreeBuffer = FREENEXT_END_OF_LIST;
+
+	/* Update first valid free buffer, if there's any. */
+	StrategyControl->firstFreeBuffer = firstBuffer;
+
+	SpinLockRelease(&StrategyControl->buffer_strategy_lock);
+
+	/*
+	 * TODO: following was suggested by AI. Check whether it is required.
+	 * If we removed all buffers from the freelist, reset the clock sweep
+	 * pointer to zero.  This is not strictly necessary, but it seems like a
+	 * good idea to avoid confusion.
+	 */
+}
+
 /* ----------------------------------------------------------------
  *				Backend-private buffer ring management
  * ----------------------------------------------------------------

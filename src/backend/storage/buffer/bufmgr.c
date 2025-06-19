@@ -57,6 +57,7 @@
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
+#include "storage/pg_shmem.h"
 #include "storage/proc.h"
 #include "storage/read_stream.h"
 #include "storage/smgr.h"
@@ -7453,3 +7454,97 @@ const PgAioHandleCallbacks aio_local_buffer_readv_cb = {
 	.complete_local = local_buffer_readv_complete,
 	.report = buffer_readv_report,
 };
+
+/*
+ * When shrinking shared buffers pool, evict the buffers which will not be part
+ * of the shrunk buffer pool.
+ */
+bool
+EvictExtraBuffers(int newBufSize, int oldBufSize)
+{
+	bool result = true;
+
+	/*
+	 * If the buffer being evicated is locked, this function will need to wait.
+	 * This function should not be called from a Postmaster since it can not wait on a lock.
+	 */
+	Assert(IsUnderPostmaster);
+
+	/*
+	 * Let only one backend perform eviction. We could split the work across all
+	 * the backends but that doesn't seem necessary.
+	 *
+	 * The first backend to acquire ShmemResizeLock, sets its own PID as the
+	 * evictor PID for other backends to know that the eviction is in progress or
+	 * has already been performed. The evictor backend releases the lock when it
+	 * finishes eviction.  While the eviction is in progress, backends other than
+	 * evictor backend won't be able to take the lock. They won't perform
+	 * eviction. A backend may acquire the lock after eviction has completed, but
+	 * it will not perform eviction since the evictor PID is already set. Evictor
+	 * PID is reset only when the buffer resizing finishes. Thus only one backend
+	 * will perform eviction in a given instance of shared buffers resizing.
+	 *
+	 * Any backend which acquires this lock will release it before the eviction
+	 * phase finishes, hence the same lock can be reused for the next phase of
+	 * resizing buffers.
+	 */
+	if (LWLockConditionalAcquire(ShmemResizeLock, LW_EXCLUSIVE))
+	{
+		if (ShmemCtrl->evictor_pid == 0)
+		{
+			ShmemCtrl->evictor_pid = MyProcPid;
+
+			StrategyPurgeFreeList(newBufSize);
+
+			/*
+			 * TODO: Before evicting any buffer, we should check whether any of the
+			 * buffers are pinned. If we find that a buffer is pinned after evicting
+			 * most of them, that will impact performance since all those evicted
+			 * buffers might need to be read again.
+			 */
+			for (Buffer buf = newBufSize + 1; buf <= oldBufSize; buf++)
+			{
+				BufferDesc *desc = GetBufferDescriptor(buf - 1);
+				uint32		buf_state;
+				bool		buffer_flushed;
+
+				buf_state = pg_atomic_read_u32(&desc->state);
+
+				/*
+				 * Nobody is expected to touch the buffers while resizing is
+				 * going one hence unlocked precheck should be safe and saves
+				 * some cycles.
+				 */
+				if (!(buf_state & BM_VALID))
+					continue;
+
+				/*
+				 * XXX: Looks like CurrentResourceOwner can be NULL here, find
+				 * another one in that case?
+				 * */
+				if (CurrentResourceOwner)
+					ResourceOwnerEnlarge(CurrentResourceOwner);
+
+				ReservePrivateRefCountEntry();
+
+				LockBufHdr(desc);
+
+				/*
+				 * Now that we have locked buffer descriptor, make sure that the
+				 * buffer without valid data has been skipped above.
+				 */
+				Assert(buf_state & BM_VALID);
+
+				if (!EvictUnpinnedBufferInternal(desc, &buffer_flushed))
+				{
+					elog(WARNING, "could not remove buffer %u, it is pinned", buf);
+					result = false;
+					break;
+				}
+			}
+		}
+		LWLockRelease(ShmemResizeLock);
+	}
+
+	return result;
+}

@@ -157,8 +157,12 @@ BufferManagerShmemInit(int FirstBufferToInit)
 	}
 #endif
 
-	/* Correct last entry of linked list */
-	GetBufferDescriptor(NBuffers - 1)->freeNext = FREENEXT_END_OF_LIST;
+	/*
+	 * Correct last entry of linked list, when initializing the buffers or when
+	 * expanding the buffers.
+	 */
+	if (FirstBufferToInit < NBuffers)
+		GetBufferDescriptor(NBuffers - 1)->freeNext = FREENEXT_END_OF_LIST;
 
 	/* Init other shared buffer-management stuff */
 	StrategyInitialize(!foundDescs);

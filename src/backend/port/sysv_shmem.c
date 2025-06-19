@@ -1011,14 +1011,6 @@ AnonymousShmemResize(void)
 	 */
 	pending_pm_shmem_resize = false;
 
-	/*
-	 * XXX: Currently only increasing of shared_buffers is supported. For
-	 * decreasing something similar has to be done, but buffer blocks with
-	 * data have to be drained first.
-	 */
-	if(NBuffersOld > NBuffers)
-		return false;
-
 #ifndef MAP_HUGETLB
 	/* PrepareHugePages should have dealt with this case */
 	Assert(huge_pages != HUGE_PAGES_ON && !huge_pages_on);
@@ -1116,11 +1108,14 @@ AnonymousShmemResize(void)
 				 * all the pointers are still valid, and we only need to update
 				 * structures size in the ShmemIndex once -- any other backend
 				 * will pick up this shared structure from the index.
-				 *
-				 * XXX: This is the right place for buffer eviction as well.
 				 */
 				BufferManagerShmemInit(NBuffersOld);
 
+				/*
+				 * Wipe out the evictor PID so that it can be used for the next
+				 * buffer resizing operation.
+				*/
+				ShmemCtrl->evictor_pid = 0;
 				/* If all fine, broadcast the new value */
 				pg_atomic_write_u32(&ShmemCtrl->NSharedBuffers, NBuffers);
 			}
@@ -1173,11 +1168,31 @@ ProcessBarrierShmemResize(Barrier *barrier)
 	 * XXX: If we need to be able to abort resizing, this has to be done later,
 	 * after the SHMEM_RESIZE_DONE.
 	 */
-	if (BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_START))
+
+	/*
+	 * Evict extra buffers when shrinking shared buffers. We need to do this
+	 * while the memory for extra buffers is still mapped i.e. before remapping
+	 * the shared memory segments to a smaller memory area.
+	 */
+	if (NBuffersOld > NBuffersPending)
 	{
-		Assert(IsUnderPostmaster);
-		SendPostmasterSignal(PMSIGNAL_SHMEM_RESIZE);
+		BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_START);
+
+		/*
+		 * TODO: If the buffer eviction fails for any reason, we should
+		 * gracefully rollback the shared buffer resizing and try again. But the
+		 * infrastructure to do so is not available right now. Hence just raise
+		 * a FATAL so that the system restarts.
+		 */
+		if (!EvictExtraBuffers(NBuffersPending, NBuffersOld))
+			elog(FATAL, "buffer eviction failed");
+
+		if (BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_EVICT))
+			SendPostmasterSignal(PMSIGNAL_SHMEM_RESIZE);
 	}
+	else
+		if (BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_START))
+			SendPostmasterSignal(PMSIGNAL_SHMEM_RESIZE);
 
 	AnonymousShmemResize();
 
@@ -1688,5 +1703,6 @@ ShmemControlInit(void)
 
 		/* shmem_resizable should be initialized by now */
 		ShmemCtrl->Resizable = shmem_resizable;
+		ShmemCtrl->evictor_pid = 0;
 	}
 }

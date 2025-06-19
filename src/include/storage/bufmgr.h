@@ -315,6 +315,7 @@ extern void EvictRelUnpinnedBuffers(Relation rel,
 									int32 *buffers_evicted,
 									int32 *buffers_flushed,
 									int32 *buffers_skipped);
+extern bool EvictExtraBuffers(int fromBuf, int toBuf);
 
 /* in buf_init.c */
 extern void BufferManagerShmemInit(int);
