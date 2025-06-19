@@ -3612,6 +3612,32 @@ BufferSync(int flags)
 }
 
 /*
+ * Information saved between BgBufferSync() calls so we can determine the
+ * strategy point's advance rate and avoid scanning already-cleaned buffers. The
+ * variables are global instead of static local so that BgBufferSyncAdjust() can
+ * adjust it when resizing shared buffers.
+ */
+static bool saved_info_valid = false;
+static int	prev_strategy_buf_id;
+static uint32 prev_strategy_passes;
+static int	next_to_clean;
+static uint32 next_passes;
+
+/* Moving averages of allocation rate and clean-buffer density */
+static float smoothed_alloc = 0;
+static float smoothed_density = 10.0;
+
+void
+BgBufferSyncAdjust(int NBuffersOld, int NBuffersNew)
+{
+				saved_info_valid = false;
+#ifdef BGW_DEBUG
+			elog(DEBUG2, "invalidated background writer status after resizing buffers from %d to %d",
+				 NBuffersOld, NBuffersNew);
+#endif
+}
+
+/*
  * BgBufferSync -- Write out some dirty buffers in the pool.
  *
  * This is called periodically by the background writer process.
@@ -3623,26 +3649,12 @@ BufferSync(int flags)
  * bgwriter_lru_maxpages to 0.)
  */
 bool
-BgBufferSync(WritebackContext *wb_context)
+BgBufferSync(WritebackContext *wb_context, bool reset)
 {
 	/* info obtained from freelist.c */
 	int			strategy_buf_id;
 	uint32		strategy_passes;
 	uint32		recent_alloc;
-
-	/*
-	 * Information saved between calls so we can determine the strategy
-	 * point's advance rate and avoid scanning already-cleaned buffers.
-	 */
-	static bool saved_info_valid = false;
-	static int	prev_strategy_buf_id;
-	static uint32 prev_strategy_passes;
-	static int	next_to_clean;
-	static uint32 next_passes;
-
-	/* Moving averages of allocation rate and clean-buffer density */
-	static float smoothed_alloc = 0;
-	static float smoothed_density = 10.0;
 
 	/* Potentially these could be tunables, but for now, not */
 	float		smoothing_samples = 16;
@@ -3665,6 +3677,22 @@ BgBufferSync(WritebackContext *wb_context)
 	/* Variables for final smoothed_density update */
 	long		new_strategy_delta;
 	uint32		new_recent_alloc;
+
+	/*
+	 * If buffer pool is being shrunk the buffer being written out may not remain
+	 * valid. If the buffer pool is being expanded, more buffers will become
+	 * available without even this function writing out any. Hence wait till
+	 * buffer resizing finishes i.e. go into hibernation mode.
+	 */
+	if (pg_atomic_read_u32(&ShmemCtrl->NSharedBuffers) != NBuffers)
+		return true;
+
+	/*
+	 * Resizing shared buffers while this function is performing an LRU scan on
+	 * them may lead to wrong results. Indicate that the resizing should wait for
+	 * the LRU scan to complete.
+	 */
+	delay_shmem_resize = true;
 
 	/*
 	 * Find out where the freelist clock sweep currently is, and how many
@@ -3842,8 +3870,17 @@ BgBufferSync(WritebackContext *wb_context)
 	num_written = 0;
 	reusable_buffers = reusable_buffers_est;
 
-	/* Execute the LRU scan */
-	while (num_to_scan > 0 && reusable_buffers < upcoming_alloc_est)
+	/*
+	 * Execute the LRU scan.
+	 *
+	 * If buffer pool is being shrunk, the buffer being written may not remain
+	 * valid. If the buffer pool is being expanded, more buffers will become
+	 * available without even this function writing any. Hence stop what we are doing. This
+	 * also unblocks other processes that are waiting for buffer resizing to
+	 * finish.
+	 */
+	while (num_to_scan > 0 && reusable_buffers < upcoming_alloc_est &&
+			pg_atomic_read_u32(&ShmemCtrl->NSharedBuffers) == NBuffers)
 	{
 		int			sync_state = SyncOneBuffer(next_to_clean, true,
 											   wb_context);
@@ -3901,6 +3938,9 @@ BgBufferSync(WritebackContext *wb_context)
 			 scans_per_alloc, smoothed_density);
 #endif
 	}
+
+	/* Let the resizing commence. */
+	delay_shmem_resize = false;
 
 	/* Return true if OK to hibernate */
 	return (bufs_to_lap == 0 && recent_alloc == 0);

@@ -65,6 +65,7 @@ typedef void (*shmem_startup_hook_type) (void);
 extern PGDLLIMPORT bool proc_exit_inprogress;
 extern PGDLLIMPORT bool shmem_exit_inprogress;
 extern PGDLLIMPORT volatile bool pending_pm_shmem_resize;
+extern PGDLLIMPORT volatile bool delay_shmem_resize;
 
 pg_noreturn extern void proc_exit(int code);
 extern void shmem_exit(int code);

@@ -98,6 +98,9 @@ static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy,
 									 uint32 *buf_state);
 static void AddBufferToRing(BufferAccessStrategy strategy,
 							BufferDesc *buf);
+#ifdef USE_ASSERT_CHECKING
+static void StrategyValidateFreeList(void);
+#endif /* USE_ASSERT_CHECKING */
 
 /*
  * ClockSweepTick - Helper routine for StrategyGetBuffer()
@@ -526,6 +529,88 @@ StrategyInitialize(bool init)
 		Assert(!init);
 }
 
+/*
+ * StrategyReInitialize -- re-initialize the buffer cache replacement
+ *		strategy.
+ *
+ * To be called when resizing buffer manager and only from the coordinator.
+ * TODO: Assess the differences between this function and StrategyInitialize().
+ */
+void
+StrategyReInitialize(int FirstBufferIdToInit)
+{
+	bool		found;
+
+	/*
+	 * Resizing memory for buffer pools should not affect the address of
+	 * StrategyControl.
+	 */
+	if (StrategyControl != (BufferStrategyControl *)
+		ShmemInitStructInSegment("Buffer Strategy Status",
+						sizeof(BufferStrategyControl),
+						&found, STRATEGY_SHMEM_SEGMENT))
+		elog(FATAL, "something went wrong while re-initializing the buffer strategy");
+
+	Assert(found);
+
+	/* TODO: Buffer lookup table adjustment: There are two options:
+	 *
+	 * 1. Resize the buffer lookup table to match the new number of buffers. But
+	 * this requires rehashing all the entries in the buffer lookup table with
+	 * the new table size.
+	 *
+	 * 2. Allocate maximum size of the buffer lookup table at the beginning and
+	 * never resize it. This leaves sparse buffer lookup table which is
+	 * inefficient from both memory and time perspective. According to David
+	 * Rowley, the sparse entries in the buffer look up table cause frequent
+	 * cacheline reload which affect performance. If the impact of that
+	 * inefficiency in a benchmark is significant, we will need to consider first
+	 * option.
+	 */
+
+	/*
+	 * When shrinking buffers, we must have adjusted the first and the last free
+	 * buffer when removing the buffers being shrunk from the free list. Nothing
+	 * to be done here.
+	 *
+	 * When expanding the shared buffers, new buffers are added at the end of the
+	 * freelist or they form the new free list if there are no free buffers.
+	 */
+	if (FirstBufferIdToInit < NBuffers)
+	{
+		if (StrategyControl->firstFreeBuffer == FREENEXT_END_OF_LIST)
+			StrategyControl->firstFreeBuffer = FirstBufferIdToInit;
+		else
+		{
+			Assert(StrategyControl->lastFreeBuffer >= 0);
+			GetBufferDescriptor(StrategyControl->lastFreeBuffer - 1)->freeNext = FirstBufferIdToInit;
+		}
+
+		StrategyControl->lastFreeBuffer = NBuffers - 1;
+	}
+
+	/* Check free list sanity after resizing. */
+#ifdef USE_ASSERT_CHECKING
+	StrategyValidateFreeList();
+#endif /* USE_ASSERT_CHECKING */
+
+	/*
+	 * The clock sweep tick pointer might have got invalidated. Reset it as if
+	 * starting a fresh server.
+	 */
+	pg_atomic_write_u32(&StrategyControl->nextVictimBuffer, 0);
+
+	/*
+	 * The old statistics is viewed in the context of the number of shared
+	 * buffers. It does not make sense now that the number of shared buffers
+	 * itself has changed.
+	 */
+	StrategyControl->completePasses = 0;
+	pg_atomic_init_u32(&StrategyControl->numBufferAllocs, 0);
+
+	/* No pending notification */
+	StrategyControl->bgwprocno = -1;
+}
 
 /*
  * StrategyPurgeFreeList -- remove all buffers with id higher than the number of
@@ -594,6 +679,54 @@ StrategyPurgeFreeList(int numBuffers)
 	 * good idea to avoid confusion.
 	 */
 }
+
+#ifdef USE_ASSERT_CHECKING
+/*
+ * StrategyValidateFreeList-- check sanity of free buffer list.
+ */
+static void
+StrategyValidateFreeList(void)
+{
+	int			nextFree = StrategyControl->firstFreeBuffer;
+	int			numFreeBuffers = 0;
+	int			lastFreeBuffer = FREENEXT_END_OF_LIST;
+
+	SpinLockAcquire(&StrategyControl->buffer_strategy_lock);
+
+	while (nextFree != FREENEXT_END_OF_LIST)
+	{
+		BufferDesc *buf = GetBufferDescriptor(nextFree);
+
+		/* nextFree should be id of buffer being examined. */
+		Assert(nextFree == buf->buf_id);
+		Assert(buf->buf_id < NBuffers);
+		/* The buffer should not be marked as not in the list. */
+		Assert(buf->freeNext != FREENEXT_NOT_IN_LIST);
+
+		/* Update our knowledge of last buffer in the free list. */
+		lastFreeBuffer = buf->buf_id;
+
+		numFreeBuffers++;
+
+		/* Avoid infinite recursion in case there are cycles in free list. */
+		if (numFreeBuffers > NBuffers)
+			break;
+
+		nextFree = buf->freeNext;
+	}
+
+	Assert(numFreeBuffers <= NBuffers);
+
+	/*
+	 * Make sure that the StrategyControl's knowledge of last free buffer
+	 * agrees with what's there in the free list.
+	 */
+	if (StrategyControl->firstFreeBuffer != FREENEXT_END_OF_LIST)
+		Assert(StrategyControl->lastFreeBuffer == lastFreeBuffer);
+
+	SpinLockRelease(&StrategyControl->buffer_strategy_lock);
+}
+#endif /* USE_ASSERT_CHECKING */
 
 /* ----------------------------------------------------------------
  *				Backend-private buffer ring management

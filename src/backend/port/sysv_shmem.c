@@ -115,6 +115,7 @@ static AnonymousMapping Mappings[ANON_MAPPINGS];
 
 /* Flag telling postmaster that resize is needed */
 volatile bool pending_pm_shmem_resize = false;
+volatile bool delay_shmem_resize = false;
 
 /* Keeps track of the previous NBuffers value */
 static int NBuffersOld = -1;
@@ -1122,6 +1123,12 @@ AnonymousShmemResize(void)
 
 			LWLockRelease(ShmemResizeLock);
 		}
+
+		/*
+		 * TODO: Shouldn't we call ResizeBufferPool() here as well? Or those
+		 * backend who can not lock the LWLock conditionally won't resize the
+		 * buffers.
+		 */
 	}
 
 	return true;
@@ -1142,11 +1149,15 @@ ProcessBarrierShmemResize(Barrier *barrier)
 {
 	Assert(IsUnderPostmaster);
 
-	elog(DEBUG1, "Handle a barrier for shmem resizing from %d to %d, %d",
-		 NBuffersOld, NBuffersPending, pending_pm_shmem_resize);
+	elog(DEBUG1, "Handle a barrier for shmem resizing from %d to %d, %d, %d",
+		 NBuffersOld, NBuffersPending, pending_pm_shmem_resize, delay_shmem_resize);
 
 	/* Wait until we have seen the new NBuffers value */
 	if (!pending_pm_shmem_resize)
+		return false;
+
+	/* Wait till this process becomes ready to resize buffers. */
+	if (delay_shmem_resize)
 		return false;
 
 	/*
@@ -1198,6 +1209,15 @@ ProcessBarrierShmemResize(Barrier *barrier)
 
 	/* The second phase means the resize has finished, SHMEM_RESIZE_DONE */
 	BarrierArriveAndWait(barrier, WAIT_EVENT_SHMEM_RESIZE_DONE);
+
+	if (MyBackendType == B_BG_WRITER)
+	{
+		/*
+		 * Before resuming regular background writer activity, adjust the
+		 * statistics collected so far.
+		 */
+		BgBufferSyncAdjust(NBuffersOld, NBuffers);
+	}
 
 	BarrierDetach(barrier);
 	return true;
